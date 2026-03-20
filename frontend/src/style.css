@@ -695,6 +695,20 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .fix-empty        { color: var(--text-dim); font-style: italic; }
 .fix-empty-note   { font-size: 12px; color: var(--text-muted); font-style: italic; margin: 0; }
 
+/* ─── Pagination ─────────────────────────────────────────────────────────────── */
+.pagination {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 10px 16px; border-top: 1px solid var(--border);
+  background: var(--bg-panel); flex-shrink: 0;
+}
+.pagination button {
+  padding: 4px 12px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-row); color: var(--text); cursor: pointer; font-size: 13px;
+}
+.pagination button:hover:not(:disabled) { background: var(--bg-hover); }
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+.page-info { font-size: 13px; color: var(--text-muted); }
+
 /* ─── Settings sidebar ───────────────────────────────────────────────────────── */
 
 .settings-sidebar {

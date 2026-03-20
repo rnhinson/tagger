@@ -30,6 +30,7 @@ const COL_DEFS: ColDef[] = [
   }},
 ]
 
+const PAGE_SIZE = 100
 const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
 const COLS_KEY = 'tagger_visible_cols'
 
@@ -102,6 +103,8 @@ interface State {
   filterQuality:     string
   // configured music dirs (for source column)
   musicDirs:         string[]
+  // pagination
+  page:              number
 }
 
 const state: State = {
@@ -132,6 +135,7 @@ const state: State = {
   filterFormat:      '',
   filterQuality:     '',
   musicDirs:         [],
+  page:              0,
 }
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
@@ -276,6 +280,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <div id="track-loading" class="track-loading" hidden>Loading…</div>
       </div>
       <div id="album-grid" class="album-grid" style="display:none"></div>
+      <div id="pagination" class="pagination" hidden></div>
     </main>
 
     <aside id="tag-editor" class="tag-editor" hidden>
@@ -812,6 +817,31 @@ function updateBulkBar() {
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
 }
 
+// ─── Pagination ───────────────────────────────────────────────────────────────
+
+const paginationEl = document.getElementById('pagination')!
+
+function renderPagination() {
+  const totalPages = Math.ceil(state.total / PAGE_SIZE)
+  if (totalPages <= 1) { paginationEl.hidden = true; return }
+  paginationEl.hidden = false
+  const start = state.page * PAGE_SIZE + 1
+  const end   = Math.min((state.page + 1) * PAGE_SIZE, state.total)
+  paginationEl.innerHTML = `
+    <button class="btn btn-ghost btn-sm" id="page-prev" ${state.page === 0 ? 'disabled' : ''}>← Prev</button>
+    <span class="page-info">${start.toLocaleString()}–${end.toLocaleString()} of ${state.total.toLocaleString()}</span>
+    <button class="btn btn-ghost btn-sm" id="page-next" ${state.page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
+  `
+  document.getElementById('page-prev')!.addEventListener('click', async () => {
+    state.page--; await loadTracks()
+    paginationEl.scrollIntoView({ block: 'nearest' })
+  })
+  document.getElementById('page-next')!.addEventListener('click', async () => {
+    state.page++; await loadTracks()
+    paginationEl.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
@@ -1168,25 +1198,27 @@ async function loadTracks() {
   trackTbody.innerHTML = ''
   trackEmpty.hidden = true
 
+  const offset = state.page * PAGE_SIZE
+
   try {
     let result
     if (state.query) {
-      result = await api.library.search(state.query)
+      result = await api.library.search(state.query, PAGE_SIZE, offset)
     } else if (state.sidebarMode === 'files') {
-      const params: Record<string, string | number> = { limit: 500 }
+      const params: Record<string, string | number> = { limit: PAGE_SIZE, offset }
       if (state.selectedDirectory !== null) params.directory = state.selectedDirectory
       result = await api.library.tracks(params)
     } else if (state.sidebarMode === 'quality') {
       if (!state.selectedIssue) {
-        state.tracks = []; state.total = 0; renderTracks(); return
+        state.tracks = []; state.total = 0; renderTracks(); renderPagination(); return
       }
       if (state.selectedIssue === 'missing_files') {
         result = await api.library.dead()
       } else {
-        result = await api.library.tracks({ issue: state.selectedIssue, limit: 500 })
+        result = await api.library.tracks({ issue: state.selectedIssue, limit: PAGE_SIZE, offset })
       }
     } else {
-      const params: Record<string, string | number> = { limit: 500 }
+      const params: Record<string, string | number> = { limit: PAGE_SIZE, offset }
       if (state.selectedArtist !== null) params.artist = state.selectedArtist
       if (state.selectedAlbum  !== null) params.album  = state.selectedAlbum
       result = await api.library.tracks(params)
@@ -1194,6 +1226,7 @@ async function loadTracks() {
     state.tracks = result.tracks
     state.total  = result.total
     renderTracks()
+    renderPagination()
     renderFormatOptions()
   } catch (e) {
     toast(`Failed to load tracks: ${e}`, 'error')
@@ -1408,6 +1441,7 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
     return
   }
   state.selectedIds.clear()
+  state.page = 0
   renderSidebarTabs()
   await loadTracks()
   renderEditor()
@@ -1427,6 +1461,7 @@ artistListEl.addEventListener('click', async (e) => {
     state.selectedAlbum   = null
     state.expandedArtists.clear()
     state.selectedIds.clear()
+    state.page = 0
     renderTagsPanel()
     await loadTracks()
     renderEditor()
@@ -1438,6 +1473,7 @@ artistListEl.addEventListener('click', async (e) => {
     state.selectedArtist = artist
     state.selectedAlbum  = album
     state.selectedIds.clear()
+    state.page = 0
     renderTagsPanel()
     await loadTracks()
     renderEditor()
@@ -1453,6 +1489,7 @@ artistListEl.addEventListener('click', async (e) => {
   state.selectedArtist = artist
   state.selectedAlbum  = null
   state.selectedIds.clear()
+  state.page = 0
   renderTagsPanel()
   await loadTracks()
   renderEditor()
@@ -1483,6 +1520,7 @@ dirTreeEl.addEventListener('click', async (e) => {
 
   state.selectedDirectory = path === '' ? null : path
   state.selectedIds.clear()
+  state.page = 0
   renderFilesPanel()
   await loadTracks()
   renderEditor()
@@ -1504,6 +1542,7 @@ async function navigateTo(artist: string, album?: string) {
   state.selectedArtist  = artist || null
   state.selectedAlbum   = album  || null
   state.selectedIds.clear()
+  state.page = 0
   if (artist) state.expandedArtists.add(artist)
   renderSidebarTabs()
   renderTagsPanel()
@@ -1650,6 +1689,7 @@ qualityListEl.addEventListener('click', async (e) => {
   state.selectedIssue = state.selectedIssue === issue ? null : issue
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
   state.selectedIds.clear()
+  state.page = 0
   await renderQualityPanel()
   await loadTracks()
   renderEditor()
@@ -1668,6 +1708,7 @@ document.getElementById('revert-btn')!.addEventListener('click', () => {
 
 const debouncedSearch = debounce(async () => {
   state.selectedIds.clear()
+  state.page = 0
   await loadTracks()
   renderEditor()
 }, 300)
