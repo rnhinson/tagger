@@ -1,0 +1,1822 @@
+import './style.css'
+import { api, Track, Artist, Album, ScanJob, LookupResult, AppSettings, IssueCount } from './api'
+import { toast } from './toast'
+
+// ─── Column definitions ───────────────────────────────────────────────────────
+
+interface ColDef {
+  key:    string
+  label:  string
+  cls:    string
+  render: (t: Track) => string
+}
+
+const COL_DEFS: ColDef[] = [
+  { key: 'quality',      label: 'Quality',      cls: 'col-quality', render: () => '' },
+  { key: 'title',        label: 'Title',        cls: 'col-title',  render: t => esc(t.title || t.filename) },
+  { key: 'artist',       label: 'Artist',       cls: 'col-artist', render: t => t.artist       ? `<span class="tag-link" data-artist="${esc(t.artist)}">${esc(t.artist)}</span>` : '' },
+  { key: 'album',        label: 'Album',        cls: 'col-album',  render: t => t.album        ? `<span class="tag-link" data-artist="${esc(t.artist||'')}" data-album="${esc(t.album)}">${esc(t.album)}</span>` : '' },
+  { key: 'album_artist', label: 'Album Artist', cls: 'col-aa',     render: t => t.album_artist ? `<span class="tag-link" data-artist="${esc(t.album_artist)}">${esc(t.album_artist)}</span>` : '' },
+  { key: 'year',         label: 'Year',         cls: 'col-year',   render: t => esc(t.year || '') },
+  { key: 'track_number', label: 'Track #',      cls: 'col-num',    render: t => esc(t.track_number || '') },
+  { key: 'disc_number',  label: 'Disc #',       cls: 'col-disc',   render: t => esc(t.disc_number || '') },
+  { key: 'genre',        label: 'Genre',        cls: 'col-genre',  render: t => esc(t.genre || '') },
+  { key: 'format',       label: 'Format',       cls: 'col-format', render: t => t.format.toUpperCase() },
+  { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
+  { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
+    const match = state.musicDirs.find(d => t.directory === d || t.directory.startsWith(d + '/'))
+    const dir = match ?? t.directory
+    return esc(dir.split('/').filter(Boolean).pop() ?? dir)
+  }},
+]
+
+const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
+const COLS_KEY = 'tagger_visible_cols'
+
+function loadColPrefs(): Set<string> {
+  try {
+    const saved = localStorage.getItem(COLS_KEY)
+    if (saved) return new Set(JSON.parse(saved))
+  } catch { /* ignore */ }
+  return new Set(DEFAULT_COLS)
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment'
+
+const TAG_FIELDS: TagField[] = [
+  'title', 'artist', 'album', 'album_artist', 'year',
+  'track_number', 'disc_number', 'genre', 'comment',
+]
+
+interface DirNode {
+  name:     string
+  path:     string
+  children: DirNode[] | null
+  loading:  boolean
+  expanded: boolean
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+interface State {
+  // sidebar
+  sidebarMode:       'tags' | 'files' | 'quality'
+  // tags panel
+  artists:           Artist[]
+  albumsByArtist:    Map<string, Album[]>
+  selectedArtist:    string | null
+  selectedAlbum:     string | null
+  expandedArtists:   Set<string>
+  // files panel
+  rootNode:          DirNode | null
+  selectedDirectory: string | null
+  // track list
+  tracks:            Track[]
+  total:             number
+  selectedIds:       Set<number>
+  query:             string
+  // scan
+  scanJob:           ScanJob | null
+  scanPollTimer:     ReturnType<typeof setInterval> | null
+  // columns
+  visibleCols:       Set<string>
+  colPickerOpen:     boolean
+  // view
+  viewMode:          'list' | 'albums'
+  // quality panel
+  qualityIssues:     IssueCount | null
+  selectedIssue:     string | null
+  // pending cover from lookup
+  pendingCoverAlbumId: string | null
+  // pending MB IDs from lookup result (written on save)
+  pendingLookupResult: LookupResult | null
+  // incremented after every cover write to bust browser cache
+  coverBust: number
+  // sorting
+  sortKey:           string | null
+  sortDir:           'asc' | 'desc'
+  // filters
+  filterFormat:      string
+  filterQuality:     string
+  // configured music dirs (for source column)
+  musicDirs:         string[]
+}
+
+const state: State = {
+  sidebarMode:       'tags',
+  artists:           [],
+  albumsByArtist:    new Map(),
+  selectedArtist:    null,
+  selectedAlbum:     null,
+  expandedArtists:   new Set(),
+  rootNode:          null,
+  selectedDirectory: null,
+  tracks:            [],
+  total:             0,
+  selectedIds:       new Set(),
+  query:             '',
+  scanJob:           null,
+  scanPollTimer:     null,
+  visibleCols:       loadColPrefs(),
+  colPickerOpen:     false,
+  viewMode:          'list',
+  qualityIssues:     null,
+  selectedIssue:     null,
+  pendingCoverAlbumId: null,
+  pendingLookupResult: null,
+  coverBust: 0,
+  sortKey:           null,
+  sortDir:           'asc',
+  filterFormat:      '',
+  filterQuality:     '',
+  musicDirs:         [],
+}
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
+
+document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+  <header class="topbar">
+    <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar">☰</button>
+    <span class="logo">Tagger</span>
+    <div class="search-wrap">
+      <input id="search" class="search-input" type="search" placeholder="Search tracks…" autocomplete="off" />
+    </div>
+    <div class="topbar-actions">
+      <span id="scan-status" class="scan-status"></span>
+      <button id="scan-btn" class="btn btn-primary">Scan Library</button>
+      <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <aside id="settings-sidebar" class="settings-sidebar">
+    <div class="settings-sidebar-header">
+      <span class="settings-sidebar-title">Settings</span>
+      <button id="settings-modal-close" class="btn btn-ghost btn-icon">✕</button>
+    </div>
+    <div class="settings-sidebar-body">
+      <div class="settings-section">
+        <div class="settings-section-title">Music Directories</div>
+        <p class="settings-hint">Directories scanned for audio files. The default from <code>TAGGER_MUSIC_DIR</code> is always included.</p>
+        <div id="music-dirs-default" class="music-dir-row music-dir-default"></div>
+        <ul id="music-dirs-list" class="music-dirs-list"></ul>
+        <div class="music-dir-add-row">
+          <input id="music-dir-input" type="text" placeholder="Absolute path, e.g. /mnt/data/Music" />
+          <button id="music-dir-add-btn" class="btn btn-ghost btn-sm">Add</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">AcoustID</div>
+        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free API key at <span class="settings-link">acoustid.org</span>, then install chromaprint: <code>sudo apt install libchromaprint-tools</code></p>
+        <label class="field-label">API Key
+          <input id="setting-acoustid-key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" />
+        </label>
+        <div id="acoustid-status" class="acoustid-status"></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Scan Tags</div>
+        <p class="settings-hint">Choose which tags are read from audio files during a library scan. Disabled tags will be left empty in the database.</p>
+        <div id="scan-tags-list" class="scan-tags-list">
+          <label class="settings-toggle"><input type="checkbox" data-tag="title" /><span>Title</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="artist" /><span>Artist</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="album" /><span>Album</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="album_artist" /><span>Album Artist</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="year" /><span>Year</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="genre" /><span>Genre</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="track_number" /><span>Track Number</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="disc_number" /><span>Disc Number</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="comment" /><span>Comment</span></label>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">File Renaming</div>
+        <label class="settings-toggle">
+          <input id="setting-rename-on-save" type="checkbox" />
+          <span>Rename files on save</span>
+        </label>
+        <p class="settings-hint">When enabled, saving a track's tags will also move the audio file to a new path built from the template below, relative to your music root directory.</p>
+        <label class="field-label" id="rename-template-wrap">Template
+          <input id="setting-rename-template" type="text" />
+          <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
+        </label>
+      </div>
+    </div>
+    <div class="settings-sidebar-footer">
+      <button id="settings-save" class="btn btn-primary">Save</button>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-tabs">
+        <button class="stab active" data-mode="tags">Tags</button>
+        <button class="stab" data-mode="files">Files</button>
+        <button class="stab" data-mode="quality">Quality</button>
+      </div>
+      <nav id="panel-tags" class="sidebar-panel">
+        <div class="nav-toolbar">
+          <button id="expand-all-btn" class="btn btn-ghost btn-sm">Expand all</button>
+          <button id="collapse-all-btn" class="btn btn-ghost btn-sm">Collapse all</button>
+        </div>
+        <ul id="artist-list" class="nav-list"></ul>
+      </nav>
+      <nav id="panel-files" class="sidebar-panel" hidden>
+        <div id="dir-tree" class="dir-tree"></div>
+      </nav>
+      <nav id="panel-quality" class="sidebar-panel" hidden>
+        <div class="nav-toolbar" id="quality-toolbar" hidden>
+          <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
+        </div>
+        <ul id="quality-list" class="nav-list"></ul>
+      </nav>
+    </aside>
+
+    <main class="track-pane">
+      <div class="track-pane-toolbar">
+        <div class="toolbar-left">
+          <span id="track-count" class="track-count"></span>
+          <div id="bulk-actions" class="bulk-actions" hidden>
+            <span id="selection-count" class="selection-count"></span>
+            <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
+            <button id="remove-tracks-btn" class="btn btn-danger btn-sm">Remove from library</button>
+            <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <div class="filter-group">
+            <span class="filter-label">Filter</span>
+            <select id="filter-quality" class="filter-select">
+              <option value="">Quality</option>
+              <option value="good">Good</option>
+              <option value="fair">Fair</option>
+              <option value="poor">Poor</option>
+            </select>
+            <select id="filter-format" class="filter-select">
+              <option value="">Format</option>
+            </select>
+          </div>
+          <div class="toolbar-divider"></div>
+          <div class="col-picker-wrap">
+            <button id="col-picker-btn" class="btn btn-ghost btn-sm">Columns ▾</button>
+            <div id="col-picker" class="col-picker" hidden></div>
+          </div>
+          <div class="view-toggle">
+            <button id="view-list-btn" class="btn btn-ghost btn-sm active" title="Track list">Tracks</button>
+            <button id="view-albums-btn" class="btn btn-ghost btn-sm" title="Album grid">Albums</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="track-table">
+          <thead><tr id="track-thead-row"></tr></thead>
+          <tbody id="track-tbody"></tbody>
+        </table>
+        <div id="track-empty" class="track-empty" hidden>No tracks found.</div>
+        <div id="track-loading" class="track-loading" hidden>Loading…</div>
+      </div>
+      <div id="album-grid" class="album-grid" style="display:none"></div>
+    </main>
+
+    <aside id="tag-editor" class="tag-editor" hidden>
+      <div class="tag-editor-header">
+        <span id="editor-title" class="editor-title"></span>
+        <div class="editor-header-actions">
+          <button id="auto-fix-btn" class="btn btn-ghost btn-sm" title="Auto-fix: look up and save the best match">Auto-fix</button>
+          <button id="lookup-btn" class="btn btn-ghost btn-sm" title="Search MusicBrainz">Lookup</button>
+          <button id="close-editor" class="btn btn-ghost btn-icon" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="lookup-panel" class="lookup-panel" hidden>
+        <div class="lookup-header">
+          <span class="lookup-title">MusicBrainz results</span>
+          <button id="lookup-close" class="btn btn-ghost btn-icon btn-sm">✕</button>
+        </div>
+        <ul id="lookup-results" class="lookup-results"></ul>
+      </div>
+      <form id="tag-form" class="tag-form" autocomplete="off">
+        <div class="cover-section">
+          <div class="cover-preview" id="cover-preview">
+            <img id="cover-img" alt="Cover art" />
+            <div id="cover-placeholder" class="cover-placeholder">♪</div>
+          </div>
+          <label class="btn btn-ghost btn-sm cover-upload-label">
+            Change Cover
+            <input id="cover-input" type="file" accept="image/jpeg,image/png,image/webp" />
+          </label>
+        </div>
+        <label class="field-label">Title<input name="title" type="text" /></label>
+        <label class="field-label">Artist<input name="artist" type="text" /></label>
+        <label class="field-label">Album<input name="album" type="text" /></label>
+        <label class="field-label">Album Artist<input name="album_artist" type="text" /></label>
+        <label class="field-label">Year<input name="year" type="text" maxlength="4" /></label>
+        <label class="field-label">Track #<input name="track_number" type="text" /></label>
+        <label class="field-label">Disc #<input name="disc_number" type="text" /></label>
+        <label class="field-label">Genre<input name="genre" type="text" /></label>
+        <label class="field-label">Comment<textarea name="comment" rows="3"></textarea></label>
+        <div class="tag-form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" id="revert-btn" class="btn btn-ghost">Revert</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+`
+
+// ─── Element refs ─────────────────────────────────────────────────────────────
+
+const appEl          = document.querySelector<HTMLDivElement>('#app')!
+const artistListEl   = document.getElementById('artist-list')!
+const dirTreeEl      = document.getElementById('dir-tree')!
+const trackTheadRow  = document.getElementById('track-thead-row')!
+const trackTbody     = document.getElementById('track-tbody')!
+const trackEmpty     = document.getElementById('track-empty')!
+const trackLoading   = document.getElementById('track-loading')!
+const trackCount     = document.getElementById('track-count')!
+const tagEditor      = document.getElementById('tag-editor')!
+const tagForm        = document.getElementById('tag-form') as HTMLFormElement
+const editorTitle    = document.getElementById('editor-title')!
+const bulkActions    = document.getElementById('bulk-actions')!
+const selectionCount = document.getElementById('selection-count')!
+const searchEl       = document.getElementById('search') as HTMLInputElement
+const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
+const scanStatusEl   = document.getElementById('scan-status')!
+const colPickerBtn   = document.getElementById('col-picker-btn')!
+const colPickerEl    = document.getElementById('col-picker')!
+const albumGridEl    = document.getElementById('album-grid')!
+const tableWrapEl    = document.querySelector<HTMLElement>('.table-wrap')!
+const viewListBtn    = document.getElementById('view-list-btn')!
+const viewAlbumsBtn  = document.getElementById('view-albums-btn')!
+const coverImg         = document.getElementById('cover-img') as HTMLImageElement
+const coverPlaceholder = document.getElementById('cover-placeholder')!
+const coverInput       = document.getElementById('cover-input') as HTMLInputElement
+const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
+const lookupPanel      = document.getElementById('lookup-panel')!
+const lookupResults    = document.getElementById('lookup-results')!
+const qualityListEl    = document.getElementById('quality-list')!
+const normalizeCaseBtn  = document.getElementById('normalize-case-btn') as HTMLButtonElement
+const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
+const filterQualityEl  = document.getElementById('filter-quality') as HTMLSelectElement
+const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectElement
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function coverUrl(trackId: number): string {
+  return `/api/covers/${trackId}${state.coverBust ? '?v=' + state.coverBust : ''}`
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function fmtDuration(sec: number | null): string {
+  if (!sec) return '—'
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function debounce(fn: () => void, ms: number): () => void {
+  let t: ReturnType<typeof setTimeout>
+  return () => { clearTimeout(t); t = setTimeout(fn, ms) }
+}
+
+function selectAll(): HTMLInputElement | null {
+  return document.getElementById('select-all') as HTMLInputElement | null
+}
+
+function trackQuality(t: Track): 'good' | 'fair' | 'poor' {
+  if (!t.title || !t.artist) return 'poor'
+  if (!t.album || !t.year || !t.track_number) return 'fair'
+  return 'good'
+}
+
+const QUALITY_TITLES = {
+  good: 'All key tags present',
+  fair: 'Missing some tags (album, year, or track #)',
+  poor: 'Missing critical tags (title or artist)',
+}
+
+// ─── Quality / case normalization ─────────────────────────────────────────────
+
+const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: boolean }[] = [
+  { key: 'missing_title',        label: 'Missing title'    },
+  { key: 'missing_artist',       label: 'Missing artist'   },
+  { key: 'missing_album',        label: 'Missing album'    },
+  { key: 'missing_year',         label: 'Missing year'     },
+  { key: 'missing_genre',        label: 'Missing genre'    },
+  { key: 'missing_track_number', label: 'Missing track #'  },
+  { key: 'duplicate_tracks',     label: 'Duplicate tracks', warn: true },
+  { key: 'missing_files',        label: 'Missing files',    warn: true },
+]
+
+const SMALL_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor',
+  'on', 'at', 'to', 'by', 'in', 'of', 'up', 'with', 'from',
+])
+
+function toTitleCase(s: string): string {
+  return s.replace(/\S+/g, (word, offset) => {
+    const lower = word.toLowerCase()
+    if (offset > 0 && SMALL_WORDS.has(lower)) return lower
+    return lower.charAt(0).toUpperCase() + lower.slice(1)
+  })
+}
+
+function needsNormalization(s: string | null | undefined): boolean {
+  if (!s || s.length < 2) return false
+  if (!/[a-zA-Z]{2}/.test(s)) return false
+  return s === s.toUpperCase() || s === s.toLowerCase()
+}
+
+const NORMALIZE_FIELDS: (keyof Track)[] = ['title', 'artist', 'album', 'album_artist', 'genre']
+
+// ─── Sidebar tabs ─────────────────────────────────────────────────────────────
+
+function renderSidebarTabs() {
+  document.querySelectorAll<HTMLButtonElement>('.stab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === state.sidebarMode)
+  })
+  document.getElementById('panel-tags')!.hidden    = state.sidebarMode !== 'tags'
+  document.getElementById('panel-files')!.hidden   = state.sidebarMode !== 'files'
+  document.getElementById('panel-quality')!.hidden = state.sidebarMode !== 'quality'
+}
+
+// ─── Tags panel ───────────────────────────────────────────────────────────────
+
+function renderTagsPanel() {
+  artistListEl.innerHTML = ''
+
+  // All tracks
+  const allLi = document.createElement('li')
+  allLi.className = 'nav-item nav-all' + (!state.selectedArtist && state.selectedArtist !== '' ? ' active' : '')
+  allLi.dataset.all = '1'
+  allLi.innerHTML = `<span class="nav-icon">♪</span><span class="nav-label">All tracks</span>`
+  artistListEl.appendChild(allLi)
+
+  for (const a of state.artists) {
+    const artistKey = a.artist
+    const isSelected = state.selectedArtist === artistKey
+    const isExpanded = state.expandedArtists.has(artistKey)
+    const artistAlbums = state.albumsByArtist.get(artistKey) ?? []
+
+    const artistLi = document.createElement('li')
+    artistLi.className = 'nav-item nav-artist' + (isSelected && !state.selectedAlbum ? ' active' : '')
+    artistLi.dataset.artist = artistKey
+    artistLi.innerHTML = `
+      <span class="nav-arrow" data-toggle="1">${isExpanded ? '▾' : '▸'}</span>
+      <span class="nav-label">${esc(a.artist || '(Unknown Artist)')}</span>
+      <span class="nav-count">${a.track_count}</span>
+    `
+    artistListEl.appendChild(artistLi)
+
+    if (isExpanded) {
+      for (const alb of artistAlbums) {
+        const albLi = document.createElement('li')
+        albLi.className = 'nav-item nav-album' + (isSelected && state.selectedAlbum === alb.album ? ' active' : '')
+        albLi.dataset.artist = artistKey
+        albLi.dataset.album  = alb.album
+        albLi.innerHTML = `
+          <span class="nav-label">${esc(alb.album || '(Unknown Album)')}</span>
+          <span class="nav-count">${alb.track_count}</span>
+        `
+        artistListEl.appendChild(albLi)
+      }
+    }
+  }
+}
+
+// ─── Files panel ─────────────────────────────────────────────────────────────
+
+function renderFilesPanel() {
+  const ul = document.createElement('ul')
+  ul.className = 'tree-list'
+
+  const allLi = document.createElement('li')
+  const allRow = document.createElement('div')
+  allRow.className = 'tree-row tree-all' + (!state.selectedDirectory ? ' active' : '')
+  allRow.dataset.path = ''
+  allRow.innerHTML = `<span class="tree-icon">♪</span><span class="tree-label">All tracks</span>`
+  allLi.appendChild(allRow)
+  ul.appendChild(allLi)
+
+  if (state.rootNode) ul.appendChild(renderDirNode(state.rootNode, 0))
+
+  dirTreeEl.innerHTML = ''
+  dirTreeEl.appendChild(ul)
+}
+
+function renderDirNode(node: DirNode, depth: number): HTMLElement {
+  const li = document.createElement('li')
+  const row = document.createElement('div')
+  row.className = 'tree-row' + (state.selectedDirectory === node.path ? ' active' : '')
+  row.dataset.path = node.path
+  row.style.paddingLeft = `${12 + depth * 14}px`
+
+  const arrow = document.createElement('span')
+  arrow.className = 'tree-arrow'
+  if (node.loading) {
+    arrow.textContent = '…'
+    arrow.className += ' tree-arrow-loading'
+  } else if (node.children === null || node.children.length > 0) {
+    arrow.textContent = node.expanded ? '▾' : '▸'
+    arrow.dataset.toggle = '1'
+  } else {
+    arrow.className += ' tree-arrow-empty'
+  }
+
+  const icon  = document.createElement('span')
+  icon.className = 'tree-icon'
+  icon.textContent = node.expanded ? '📂' : '📁'
+
+  const label = document.createElement('span')
+  label.className = 'tree-label'
+  label.textContent = node.name
+
+  row.append(arrow, icon, label)
+  li.appendChild(row)
+
+  if (node.expanded && node.children?.length) {
+    const childUl = document.createElement('ul')
+    childUl.className = 'tree-list'
+    for (const child of node.children) childUl.appendChild(renderDirNode(child, depth + 1))
+    li.appendChild(childUl)
+  }
+
+  return li
+}
+
+// ─── Quality panel ────────────────────────────────────────────────────────────
+
+async function renderQualityPanel() {
+  if (!state.qualityIssues) {
+    qualityListEl.innerHTML = '<li class="nav-item" style="color:var(--text-muted);font-size:12px;padding:10px 12px">Loading…</li>'
+    try {
+      state.qualityIssues = await api.library.issues()
+    } catch (e) {
+      toast(`Failed to load quality report: ${e}`, 'error')
+      return
+    }
+  }
+
+  qualityListEl.innerHTML = ''
+  let anyIssues = false
+
+  for (const issue of QUALITY_ISSUES) {
+    const count = state.qualityIssues[issue.key] ?? 0
+    if (count === 0) continue
+    anyIssues = true
+    const li = document.createElement('li')
+    const isActive = state.selectedIssue === issue.key
+    li.className = 'nav-item quality-issue-item' + (isActive ? ' active' : '')
+    li.dataset.issue = issue.key
+    li.innerHTML = `
+      <span class="quality-issue-dot${issue.warn ? ' quality-issue-dot-warn' : ''}"></span>
+      <span class="nav-label">${issue.label}</span>
+      <span class="nav-count">${count}</span>
+    `
+    qualityListEl.appendChild(li)
+  }
+
+  if (!anyIssues) {
+    qualityListEl.innerHTML = '<li class="nav-item quality-all-good">✓ All tags look good</li>'
+  }
+}
+
+// ─── Album grid ───────────────────────────────────────────────────────────────
+
+function getVisibleAlbums(): Album[] {
+  if (state.sidebarMode === 'tags' && state.selectedArtist) {
+    return state.albumsByArtist.get(state.selectedArtist) ?? []
+  }
+  const all: Album[] = []
+  for (const albs of state.albumsByArtist.values()) all.push(...albs)
+  return all
+}
+
+function renderAlbumGrid() {
+  albumGridEl.innerHTML = ''
+  const albums = getVisibleAlbums()
+
+  if (!albums.length) {
+    albumGridEl.innerHTML = '<div class="album-empty">No albums found.</div>'
+    return
+  }
+
+  for (const alb of albums) {
+    const card = document.createElement('div')
+    card.className = 'album-card'
+    const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
+    card.innerHTML = `
+      <div class="album-cover-wrap">
+        <img class="album-cover" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
+        <div class="album-cover-placeholder">♪</div>
+      </div>
+      <div class="album-info">
+        <div class="album-title">${esc(alb.album || '(Unknown Album)')}</div>
+        <div class="album-artist">${artistDisplay}</div>
+        <div class="album-count">${alb.track_count} track${alb.track_count !== 1 ? 's' : ''}</div>
+      </div>
+    `
+    const img = card.querySelector<HTMLImageElement>('.album-cover')!
+    const placeholder = card.querySelector<HTMLElement>('.album-cover-placeholder')!
+    img.addEventListener('error', () => { img.style.display = 'none'; placeholder.style.display = 'flex' })
+    img.addEventListener('load',  () => { img.style.display = 'block'; placeholder.style.display = 'none' })
+
+    card.addEventListener('click', () => {
+      state.viewMode = 'list'
+      renderViewMode()
+      navigateTo(alb.artist ?? '', alb.album)
+    })
+    albumGridEl.appendChild(card)
+  }
+}
+
+function renderViewMode() {
+  tableWrapEl.style.display  = state.viewMode === 'list'   ? ''     : 'none'
+  albumGridEl.style.display  = state.viewMode === 'albums' ? 'grid' : 'none'
+  viewListBtn.classList.toggle('active',   state.viewMode === 'list')
+  viewAlbumsBtn.classList.toggle('active', state.viewMode === 'albums')
+  if (state.viewMode === 'albums') renderAlbumGrid()
+}
+
+// ─── Column picker ────────────────────────────────────────────────────────────
+
+function renderColPicker() {
+  colPickerEl.innerHTML = ''
+  for (const col of COL_DEFS) {
+    const label = document.createElement('label')
+    label.className = 'col-picker-item'
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = state.visibleCols.has(col.key)
+    cb.dataset.col = col.key
+    label.appendChild(cb)
+    label.append(' ' + col.label)
+    colPickerEl.appendChild(label)
+  }
+}
+
+// ─── Sorting and filtering ─────────────────────────────────────────────────────
+
+function getSortedFilteredTracks(): Track[] {
+  let result = [...state.tracks]
+
+  if (state.filterFormat) {
+    result = result.filter(t => t.format === state.filterFormat)
+  }
+  if (state.filterQuality) {
+    result = result.filter(t => trackQuality(t) === state.filterQuality)
+  }
+
+  if (state.sortKey) {
+    const key = state.sortKey
+    const dir = state.sortDir === 'asc' ? 1 : -1
+    result.sort((a, b) => {
+      const av = (a[key as keyof Track] as string | null | undefined) ?? null
+      const bv = (b[key as keyof Track] as string | null | undefined) ?? null
+      if (av === null && bv === null) return 0
+      if (av === null) return 1
+      if (bv === null) return -1
+      return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir
+    })
+  }
+
+  return result
+}
+
+function renderFormatOptions() {
+  const formats = [...new Set(state.tracks.map(t => t.format))].sort()
+  const current = filterFormatEl.value
+  filterFormatEl.innerHTML = '<option value="">Format</option>'
+  for (const fmt of formats) {
+    const opt = document.createElement('option')
+    opt.value = fmt
+    opt.textContent = fmt.toUpperCase()
+    filterFormatEl.appendChild(opt)
+  }
+  if (formats.includes(current)) filterFormatEl.value = current
+}
+
+// ─── Keyboard navigation ──────────────────────────────────────────────────────
+
+function navigateTrack(dir: 1 | -1) {
+  const displayedTracks = getSortedFilteredTracks()
+  if (!displayedTracks.length) return
+  const lastId = [...state.selectedIds][state.selectedIds.size - 1]
+  const idx = displayedTracks.findIndex(t => t.id === lastId)
+  const nextIdx = Math.max(0, Math.min(displayedTracks.length - 1, idx + dir))
+  const nextTrack = displayedTracks[nextIdx]
+  state.selectedIds.clear()
+  state.selectedIds.add(nextTrack.id)
+  renderTracks()
+  renderEditor()
+  const tr = trackTbody.querySelector<HTMLTableRowElement>(`tr[data-id="${nextTrack.id}"]`)
+  tr?.scrollIntoView({ block: 'nearest' })
+}
+
+// ─── Track table ──────────────────────────────────────────────────────────────
+
+function renderColHeaders() {
+  const qualityTh = state.visibleCols.has('quality') ? '<th class="col-quality"></th>' : ''
+  trackTheadRow.innerHTML = `${qualityTh}<th class="col-check"><input type="checkbox" id="select-all" /></th>`
+  for (const col of COL_DEFS) {
+    if (col.key === 'quality') continue
+    if (!state.visibleCols.has(col.key)) continue
+    const th = document.createElement('th')
+    th.className = col.cls
+    th.dataset.sort = col.key
+    th.style.cursor = 'pointer'
+    let label = col.label
+    if (state.sortKey === col.key) {
+      label += state.sortDir === 'asc' ? ' ↑' : ' ↓'
+    }
+    th.textContent = label
+    th.addEventListener('click', () => {
+      if (state.sortKey === col.key) {
+        state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'
+      } else {
+        state.sortKey = col.key
+        state.sortDir = 'asc'
+      }
+      renderColHeaders()
+      renderTracks()
+    })
+    trackTheadRow.appendChild(th)
+  }
+  selectAll()?.addEventListener('change', onSelectAll)
+}
+
+function renderTracks() {
+  trackTbody.innerHTML = ''
+
+  if (!state.tracks.length) {
+    trackEmpty.hidden = false
+    trackLoading.hidden = true
+    trackCount.textContent = '0 tracks'
+    updateBulkBar()
+    return
+  }
+
+  trackEmpty.hidden = true
+  trackLoading.hidden = true
+
+  const displayedTracks = getSortedFilteredTracks()
+  const filtersActive = !!(state.filterFormat || state.filterQuality)
+  if (filtersActive) {
+    trackCount.textContent = `${displayedTracks.length.toLocaleString()} of ${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
+  } else {
+    trackCount.textContent = `${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
+  }
+
+  const visibleCols = COL_DEFS.filter(c => state.visibleCols.has(c.key))
+
+  for (const t of displayedTracks) {
+    const selected = state.selectedIds.has(t.id)
+    const tr = document.createElement('tr')
+    tr.dataset.id = String(t.id)
+    if (selected) tr.classList.add('selected')
+    const q = trackQuality(t)
+    const qualityCell = state.visibleCols.has('quality')
+      ? `<td class="col-quality"><span class="quality-dot quality-dot-${q}" title="${QUALITY_TITLES[q]}"></span></td>`
+      : ''
+    let cells = `${qualityCell}<td class="col-check"><input type="checkbox"${selected ? ' checked' : ''} /></td>`
+    for (const col of visibleCols) {
+      if (col.key === 'quality') continue
+      cells += `<td class="${col.cls}">${col.render(t)}</td>`
+    }
+    tr.innerHTML = cells
+    tr.querySelectorAll<HTMLElement>('.tag-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.stopPropagation()
+        navigateTo(link.dataset.artist ?? '', link.dataset.album)
+      })
+    })
+    trackTbody.appendChild(tr)
+  }
+
+  const sa = selectAll()
+  if (sa) {
+    const allSel = state.tracks.every(t => state.selectedIds.has(t.id))
+    const anySel = state.tracks.some(t => state.selectedIds.has(t.id))
+    sa.checked       = allSel
+    sa.indeterminate = !allSel && anySel
+  }
+
+  updateBulkBar()
+}
+
+function updateBulkBar() {
+  const n = state.selectedIds.size
+  bulkActions.hidden = n === 0
+  selectionCount.textContent = `${n} selected`
+  removeTracksBtn.style.display = n > 0 ? '' : 'none'
+}
+
+// ─── Tag editor ───────────────────────────────────────────────────────────────
+
+function renderEditor() {
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; return }
+  tagEditor.hidden = false
+  // Only show lookup for single selection; hide panel when selection changes
+  lookupBtn.hidden = state.selectedIds.size !== 1
+  autoFixBtn.hidden = state.selectedIds.size === 0
+  if (state.selectedIds.size !== 1) lookupPanel.hidden = true
+  const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
+  editorTitle.textContent = sel.length === 1 ? (sel[0].title || sel[0].filename) : `${sel.length} tracks`
+  populateForm(sel)
+  updateCoverPreview()
+}
+
+function updateCoverPreview() {
+  if (state.selectedIds.size === 0) return
+  const firstId = [...state.selectedIds][0]
+  coverPlaceholder.style.display = 'flex'
+  coverImg.style.display = 'none'
+  coverImg.src = coverUrl(firstId)
+  coverImg.onload  = () => { coverImg.style.display = 'block'; coverPlaceholder.style.display = 'none' }
+  coverImg.onerror = () => { coverImg.style.display = 'none';  coverPlaceholder.style.display = 'flex' }
+}
+
+function populateForm(tracks: Track[]) {
+  for (const field of TAG_FIELDS) {
+    const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
+    if (!el) continue
+    const vals = tracks.map(t => (t[field as keyof Track] as string | null) ?? '')
+    const allSame = vals.every(v => v === vals[0])
+    if (allSame) {
+      el.value = vals[0]; el.placeholder = ''; delete (el as HTMLElement).dataset.mixed
+    } else {
+      el.value = ''; el.placeholder = '(multiple values)'; (el as HTMLElement).dataset.mixed = '1'
+    }
+  }
+}
+
+// ─── MusicBrainz lookup ───────────────────────────────────────────────────────
+
+async function runLookup() {
+  if (state.selectedIds.size !== 1) return
+  const trackId = [...state.selectedIds][0]
+
+  lookupBtn.disabled = true
+  lookupBtn.textContent = 'Looking up…'
+  lookupPanel.hidden = false
+  lookupResults.innerHTML = '<li class="lookup-searching">Searching MusicBrainz…</li>'
+
+  try {
+    const results = await api.lookup.search(trackId)
+    lookupResults.innerHTML = ''
+
+    if (!results.length) {
+      lookupResults.innerHTML = '<li class="lookup-empty">No results found.</li>'
+      return
+    }
+
+    for (const r of results) {
+      const li = document.createElement('li')
+      li.className = 'lookup-result'
+      const pct = Math.round(r.score * 100)
+      const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
+      const sourceBadge = r.source === 'acoustid'
+        ? '<span class="lookup-source-badge source-acoustid">AcoustID</span>'
+        : '<span class="lookup-source-badge source-mb">MusicBrainz</span>'
+      const thumbHtml = r.mb_album_id
+        ? `<img class="lookup-thumb" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
+        : `<div class="lookup-thumb lookup-thumb-empty">♪</div>`
+      li.innerHTML = `
+        ${thumbHtml}
+        <span class="lookup-score ${scoreClass}">${pct}%</span>
+        <span class="lookup-info">
+          <span class="lookup-track-title">${esc(r.title || '(unknown)')} ${sourceBadge}</span>
+          <span class="lookup-meta">${esc(r.artist || '')}${r.album ? ' · ' + esc(r.album) : ''}${r.year ? ' · ' + esc(r.year) : ''}</span>
+        </span>
+      `
+      // Hide broken thumbnails gracefully
+      li.querySelector<HTMLImageElement>('.lookup-thumb')
+        ?.addEventListener('error', function() { this.style.display = 'none' })
+      li.addEventListener('click', () => applyLookupResult(r))
+      lookupResults.appendChild(li)
+    }
+  } catch (e) {
+    lookupResults.innerHTML = `<li class="lookup-empty">Error: ${esc(String(e))}</li>`
+  } finally {
+    lookupBtn.disabled = false
+    lookupBtn.textContent = 'Lookup'
+  }
+}
+
+function applyLookupResult(r: LookupResult) {
+  const fields: (keyof LookupResult)[] = ['title', 'artist', 'album', 'album_artist', 'year', 'track_number', 'disc_number']
+  for (const field of fields) {
+    const el = tagForm.elements.namedItem(field) as HTMLInputElement | null
+    if (!el) continue
+    el.value = (r[field] as string | null) ?? ''
+    delete el.dataset.mixed
+  }
+
+  // Store full lookup result so MB IDs are included on save
+  state.pendingLookupResult = r
+  state.pendingCoverAlbumId = r.mb_album_id
+  if (r.mb_album_id) {
+    coverPlaceholder.style.display = 'none'
+    coverImg.style.display = 'block'
+    coverImg.src = `https://coverartarchive.org/release/${r.mb_album_id}/front-250`
+    coverImg.onerror = () => { coverImg.style.display = 'none'; coverPlaceholder.style.display = 'flex' }
+  }
+
+  lookupPanel.hidden = true
+  const coverMsg = r.mb_album_id ? ' + cover art' : ''
+  toast(`Applied${coverMsg} — review and save to write to file`, 'info')
+}
+
+// ─── Auto-fix ─────────────────────────────────────────────────────────────────
+
+const FIX_SAVE_FIELDS: (keyof LookupResult)[] = [
+  'title', 'artist', 'album', 'album_artist', 'year', 'track_number', 'disc_number',
+  'mb_track_id', 'mb_artist_id', 'mb_album_id', 'mb_album_artist_id',
+]
+
+const FIX_DISPLAY_FIELDS: { key: keyof LookupResult; label: string }[] = [
+  { key: 'title',        label: 'Title'        },
+  { key: 'artist',       label: 'Artist'       },
+  { key: 'album',        label: 'Album'        },
+  { key: 'album_artist', label: 'Album Artist' },
+  { key: 'year',         label: 'Year'         },
+  { key: 'track_number', label: 'Track #'      },
+  { key: 'disc_number',  label: 'Disc #'       },
+]
+
+interface FixProposal {
+  track:  Track
+  score:  number
+  source: string
+  update: Record<string, string>
+}
+
+async function buildProposal(track: Track): Promise<FixProposal | null> {
+  const results = await api.lookup.search(track.id)
+  if (!results.length) return null
+  const top = results[0]
+  const update: Record<string, string> = {}
+  for (const f of FIX_SAVE_FIELDS) {
+    const v = top[f]
+    if (v != null) update[f as string] = v as string
+  }
+  if (!Object.keys(update).length) return null
+  return { track, score: top.score, source: top.source, update }
+}
+
+function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposal[]) => Promise<void>) {
+  const overlay = document.createElement('div')
+  overlay.className = 'fix-confirm-overlay'
+
+  const modal = document.createElement('div')
+  modal.className = 'fix-confirm-modal'
+
+  const header = document.createElement('div')
+  header.className = 'fix-confirm-header'
+  header.innerHTML = `
+    <span class="fix-confirm-title">Auto-fix — ${proposals.length} track${proposals.length !== 1 ? 's' : ''}</span>
+    <button class="btn btn-ghost btn-icon fix-confirm-close">✕</button>
+  `
+
+  const body = document.createElement('div')
+  body.className = 'fix-confirm-body'
+
+  for (const p of proposals) {
+    const pct = Math.round(p.score * 100)
+    const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
+    const rows = FIX_DISPLAY_FIELDS
+      .filter(f => p.update[f.key as string] != null)
+      .map(f => {
+        const proposed = p.update[f.key as string]
+        const current  = (p.track[f.key as keyof Track] as string | null) ?? ''
+        return `<tr>
+          <td class="fix-col-field">${esc(f.label)}</td>
+          <td class="fix-col-current">${current ? esc(current) : '<span class="fix-empty">empty</span>'}</td>
+          <td class="fix-col-arrow">→</td>
+          <td class="fix-col-proposed">${esc(proposed)}</td>
+        </tr>`
+      }).join('')
+
+    const section = document.createElement('div')
+    section.className = 'fix-confirm-track'
+    section.innerHTML = `
+      <div class="fix-confirm-track-header">
+        <span class="fix-confirm-track-name">${esc(p.track.title || p.track.filename)}</span>
+        <span class="lookup-score ${scoreClass}">${pct}%</span>
+        <span class="fix-confirm-source">${esc(p.source)}</span>
+      </div>
+      ${rows ? `<table class="fix-confirm-table"><tbody>${rows}</tbody></table>`
+              : '<p class="fix-empty-note">No visible tag changes — only metadata IDs will be updated.</p>'}
+    `
+    body.appendChild(section)
+  }
+
+  const footer = document.createElement('div')
+  footer.className = 'fix-confirm-footer'
+  const cancelBtn = document.createElement('button')
+  cancelBtn.className = 'btn btn-ghost'
+  cancelBtn.textContent = 'Cancel'
+  const applyBtn = document.createElement('button')
+  applyBtn.className = 'btn btn-primary'
+  applyBtn.textContent = `Apply ${proposals.length} change${proposals.length !== 1 ? 's' : ''}`
+  footer.append(cancelBtn, applyBtn)
+
+  modal.append(header, body, footer)
+  overlay.appendChild(modal)
+  document.body.appendChild(overlay)
+
+  const close = () => overlay.remove()
+  cancelBtn.addEventListener('click', close)
+  header.querySelector<HTMLElement>('.fix-confirm-close')!.addEventListener('click', close)
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+
+  applyBtn.addEventListener('click', async () => {
+    applyBtn.disabled = true
+    applyBtn.textContent = 'Applying…'
+    try { await onConfirm(proposals) } finally { close() }
+  })
+}
+
+async function applyProposals(proposals: FixProposal[]) {
+  let saved = 0
+  for (const p of proposals) {
+    try { await api.tags.update(p.track.id, p.update); saved++ } catch { /* skip */ }
+  }
+  toast(`Saved ${saved} track${saved !== 1 ? 's' : ''}`, 'success')
+  state.qualityIssues = null
+  if (state.sidebarMode === 'tags') await loadLibrary()
+  await loadTracks()
+  if (state.sidebarMode === 'quality') await renderQualityPanel()
+  const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (updated.length) populateForm(updated)
+}
+
+async function gatherProposals(tracks: Track[], setLabel: (s: string) => void): Promise<FixProposal[]> {
+  const proposals: FixProposal[] = []
+  for (let i = 0; i < tracks.length; i++) {
+    setLabel(tracks.length === 1 ? 'Looking up…' : `Looking up ${i + 1}/${tracks.length}…`)
+    try { const p = await buildProposal(tracks[i]); if (p) proposals.push(p) } catch { /* skip */ }
+  }
+  return proposals
+}
+
+const autoFixBtn = document.getElementById('auto-fix-btn') as HTMLButtonElement
+
+autoFixBtn.addEventListener('click', async () => {
+  const tracks = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (!tracks.length) return
+  autoFixBtn.disabled = true
+  const proposals = await gatherProposals(tracks, s => { autoFixBtn.textContent = s })
+  autoFixBtn.disabled = false
+  autoFixBtn.textContent = 'Auto-fix'
+  if (!proposals.length) { toast('No matches found', 'info'); return }
+  showFixConfirmation(proposals, applyProposals)
+})
+
+const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
+const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
+
+fixAllBtn.addEventListener('click', async () => {
+  const tracks = [...state.tracks]
+  if (!tracks.length) return
+  fixAllBtn.disabled = true
+  const proposals = await gatherProposals(tracks, s => { fixAllBtn.textContent = s })
+  fixAllBtn.disabled = false
+  fixAllBtn.textContent = 'Fix All'
+  if (!proposals.length) { toast('No matches found', 'info'); return }
+  showFixConfirmation(proposals, applyProposals)
+})
+
+// ─── Scan status ──────────────────────────────────────────────────────────────
+
+function renderScanStatus() {
+  const job = state.scanJob
+  if (!job || job.status === 'done' || job.status === 'error') { scanStatusEl.textContent = ''; return }
+  const pct = job.total ? Math.round((job.scanned / job.total) * 100) : 0
+  scanStatusEl.textContent = job.status === 'running'
+    ? `Scanning… ${job.scanned}/${job.total} (${pct}%)`
+    : 'Starting scan…'
+}
+
+// ─── Data loading ─────────────────────────────────────────────────────────────
+
+async function loadLibrary() {
+  try {
+    const [artists, albums] = await Promise.all([
+      api.library.artists(),
+      api.library.albums(),
+    ])
+    state.artists = artists
+    // Group albums by artist; expand all artists by default
+    state.albumsByArtist = new Map()
+    for (const alb of albums) {
+      const key = alb.artist ?? ''
+      if (!state.albumsByArtist.has(key)) {
+        state.albumsByArtist.set(key, [])
+      }
+      state.albumsByArtist.get(key)!.push(alb)
+    }
+    renderTagsPanel()
+  } catch (e) {
+    toast(`Failed to load library: ${e}`, 'error')
+  }
+}
+
+async function loadTree() {
+  try {
+    const result = await api.fs.tree()
+    const name = result.path
+      ? (result.path.split('/').filter(Boolean).pop() ?? result.path)
+      : 'Music Library'
+    state.rootNode = {
+      name,
+      path:     result.path,
+      children: result.dirs.map(d => ({ name: d.name, path: d.path, children: null, loading: false, expanded: false })),
+      loading:  false,
+      expanded: true,
+    }
+    renderFilesPanel()
+  } catch (e) {
+    toast(`Failed to load directory tree: ${e}`, 'error')
+  }
+}
+
+async function expandDirNode(node: DirNode) {
+  if (node.loading) return
+  if (node.children !== null) {
+    node.expanded = !node.expanded
+    renderFilesPanel()
+    return
+  }
+  node.loading = true
+  renderFilesPanel()
+  try {
+    const result = await api.fs.tree(node.path)
+    node.children = result.dirs.map(d => ({ name: d.name, path: d.path, children: null, loading: false, expanded: false }))
+    node.expanded  = true
+    node.loading   = false
+  } catch (e) {
+    node.loading = false
+    toast(`Failed to expand directory: ${e}`, 'error')
+  }
+  renderFilesPanel()
+}
+
+async function loadTracks() {
+  trackLoading.hidden = false
+  trackTbody.innerHTML = ''
+  trackEmpty.hidden = true
+
+  try {
+    let result
+    if (state.query) {
+      result = await api.library.search(state.query)
+    } else if (state.sidebarMode === 'files') {
+      const params: Record<string, string | number> = { limit: 500 }
+      if (state.selectedDirectory !== null) params.directory = state.selectedDirectory
+      result = await api.library.tracks(params)
+    } else if (state.sidebarMode === 'quality') {
+      if (!state.selectedIssue) {
+        state.tracks = []; state.total = 0; renderTracks(); return
+      }
+      if (state.selectedIssue === 'missing_files') {
+        result = await api.library.dead()
+      } else {
+        result = await api.library.tracks({ issue: state.selectedIssue, limit: 500 })
+      }
+    } else {
+      const params: Record<string, string | number> = { limit: 500 }
+      if (state.selectedArtist !== null) params.artist = state.selectedArtist
+      if (state.selectedAlbum  !== null) params.album  = state.selectedAlbum
+      result = await api.library.tracks(params)
+    }
+    state.tracks = result.tracks
+    state.total  = result.total
+    renderTracks()
+    renderFormatOptions()
+  } catch (e) {
+    toast(`Failed to load tracks: ${e}`, 'error')
+    trackLoading.hidden = true
+  }
+}
+
+// ─── Scan ─────────────────────────────────────────────────────────────────────
+
+async function startScan() {
+  try {
+    scanBtn.disabled = true
+    const { job_id } = await api.jobs.startScan()
+    pollScan(job_id)
+  } catch (e) {
+    toast(`Scan failed to start: ${e}`, 'error')
+    scanBtn.disabled = false
+  }
+}
+
+function pollScan(jobId: string) {
+  if (state.scanPollTimer) clearInterval(state.scanPollTimer)
+  state.scanPollTimer = setInterval(async () => {
+    try {
+      const job = await api.jobs.get(jobId)
+      state.scanJob = job
+      renderScanStatus()
+      if (job.status === 'done' || job.status === 'error') {
+        clearInterval(state.scanPollTimer!)
+        state.scanPollTimer = null
+        scanBtn.disabled = false
+        if (job.status === 'done') {
+          toast(`Scan complete — ${job.scanned} tracks indexed`, 'success')
+          state.qualityIssues = null
+          await loadLibrary()
+          await loadTree()
+          await loadTracks()
+          if (state.sidebarMode === 'quality') await renderQualityPanel()
+        } else {
+          toast(`Scan error: ${job.error}`, 'error')
+        }
+        renderScanStatus()
+      }
+    } catch (e) {
+      clearInterval(state.scanPollTimer!)
+      state.scanPollTimer = null
+      scanBtn.disabled = false
+      toast(`Scan polling failed: ${e}`, 'error')
+    }
+  }, 1000)
+}
+
+// ─── Tag saving ───────────────────────────────────────────────────────────────
+
+async function saveTags(e: Event) {
+  e.preventDefault()
+  const update: Record<string, string> = {}
+  for (const field of TAG_FIELDS) {
+    const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
+    if (!el) continue
+    if ((el as HTMLElement).dataset.mixed === '1' && el.value === '') continue
+    update[field] = el.value
+  }
+  // Attach MB IDs from pending lookup result
+  if (state.pendingLookupResult) {
+    const r = state.pendingLookupResult
+    if (r.mb_track_id)        update.mb_track_id        = r.mb_track_id
+    if (r.mb_artist_id)       update.mb_artist_id       = r.mb_artist_id
+    if (r.mb_album_id)        update.mb_album_id        = r.mb_album_id
+    if (r.mb_album_artist_id) update.mb_album_artist_id = r.mb_album_artist_id
+  }
+
+  if (Object.keys(update).length === 0) { toast('No changes to save', 'info'); return }
+
+  const ids = [...state.selectedIds]
+  try {
+    if (ids.length === 1) {
+      await api.tags.update(ids[0], update)
+    } else {
+      await api.tags.bulk(ids, update)
+    }
+
+    // Write cover art from Cover Art Archive if one was selected via lookup
+    if (state.pendingCoverAlbumId) {
+      const albumId = state.pendingCoverAlbumId
+      try {
+        await Promise.all(ids.map(id => api.lookup.applyCover(id, albumId)))
+        state.pendingCoverAlbumId = null
+        state.pendingLookupResult = null
+        state.coverBust++
+        updateCoverPreview()
+        if (state.viewMode === 'albums') renderAlbumGrid()
+        toast('Tags and cover art saved', 'success')
+      } catch {
+        toast('Tags saved — cover art write failed', 'error')
+      }
+    } else {
+      state.pendingLookupResult = null
+      toast('Tags saved', 'success')
+    }
+
+    state.qualityIssues = null
+    if (state.sidebarMode === 'tags') await loadLibrary()
+    await loadTracks()
+    const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
+    if (updated.length) populateForm(updated)
+  } catch (e) {
+    toast(`Save failed: ${e}`, 'error')
+  }
+}
+
+// ─── Normalize case ───────────────────────────────────────────────────────────
+
+async function normalizeCaseBulk() {
+  const selected = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (!selected.length) return
+
+  const tasks: Array<Promise<unknown>> = []
+  let changeCount = 0
+
+  for (const track of selected) {
+    const upd: Record<string, string> = {}
+    for (const field of NORMALIZE_FIELDS) {
+      const val = track[field] as string | null
+      if (needsNormalization(val)) upd[field as string] = toTitleCase(val!)
+    }
+    if (Object.keys(upd).length) {
+      changeCount++
+      tasks.push(api.tags.update(track.id, upd))
+    }
+  }
+
+  if (!tasks.length) { toast('No tags needed normalization', 'info'); return }
+
+  normalizeCaseBtn.disabled = true
+  try {
+    await Promise.all(tasks)
+    toast(`Normalized case on ${changeCount} track${changeCount !== 1 ? 's' : ''}`, 'success')
+    state.qualityIssues = null
+    if (state.sidebarMode === 'tags') await loadLibrary()
+    await loadTracks()
+    if (state.sidebarMode === 'quality') await renderQualityPanel()
+    const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
+    if (updated.length) populateForm(updated)
+  } catch (e) {
+    toast(`Normalize failed: ${e}`, 'error')
+  } finally {
+    normalizeCaseBtn.disabled = false
+  }
+}
+
+// ─── Remove dead tracks ───────────────────────────────────────────────────────
+
+async function removeFromLibrary() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  removeTracksBtn.disabled = true
+  try {
+    const { removed } = await api.library.removeTracks(ids)
+    toast(`Removed ${removed} track${removed !== 1 ? 's' : ''} from library`, 'success')
+    state.selectedIds.clear()
+    state.qualityIssues = null
+    await loadTracks()
+    renderEditor()
+    await renderQualityPanel()
+  } catch (e) {
+    toast(`Failed to remove tracks: ${e}`, 'error')
+  } finally {
+    removeTracksBtn.disabled = false
+  }
+}
+
+// ─── Event handlers ───────────────────────────────────────────────────────────
+
+function onSelectAll() {
+  const sa = selectAll()
+  if (!sa) return
+  state.tracks.forEach(t => sa.checked ? state.selectedIds.add(t.id) : state.selectedIds.delete(t.id))
+  renderTracks()
+  renderEditor()
+}
+
+// ─── Event wiring ─────────────────────────────────────────────────────────────
+
+document.getElementById('sidebar-toggle')!.addEventListener('click', () => {
+  appEl.classList.toggle('sidebar-collapsed')
+})
+
+// Sidebar tabs
+document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.stab')
+  if (!btn?.dataset.mode) return
+  const mode = btn.dataset.mode as 'tags' | 'files' | 'quality'
+  if (mode === state.sidebarMode) return
+  state.sidebarMode = mode
+  if (mode === 'tags') {
+    state.selectedDirectory = null
+    if (!state.artists.length) await loadLibrary()
+  } else if (mode === 'files') {
+    state.selectedArtist = null
+    state.selectedAlbum  = null
+    if (!state.rootNode) await loadTree()
+  } else {
+    state.selectedIssue = null
+    qualityToolbar.hidden = true
+    renderSidebarTabs()
+    await renderQualityPanel()
+    state.selectedIds.clear()
+    state.tracks = []; state.total = 0
+    renderTracks()
+    renderEditor()
+    return
+  }
+  state.selectedIds.clear()
+  renderSidebarTabs()
+  await loadTracks()
+  renderEditor()
+})
+
+// Tags panel: artist/album clicks
+artistListEl.addEventListener('click', async (e) => {
+  const li = (e.target as HTMLElement).closest<HTMLElement>('.nav-item')
+  if (!li) return
+
+  const artist = li.dataset.artist ?? null
+  const album  = li.dataset.album  ?? null
+
+  // "All tracks"
+  if (li.dataset.all === '1') {
+    state.selectedArtist  = null
+    state.selectedAlbum   = null
+    state.expandedArtists.clear()
+    state.selectedIds.clear()
+    renderTagsPanel()
+    await loadTracks()
+    renderEditor()
+    return
+  }
+
+  // Album click (has both artist and album dataset attrs)
+  if (album !== null) {
+    state.selectedArtist = artist
+    state.selectedAlbum  = album
+    state.selectedIds.clear()
+    renderTagsPanel()
+    await loadTracks()
+    renderEditor()
+    return
+  }
+
+  // Artist row click — select artist and toggle expand/collapse
+  if (state.expandedArtists.has(artist!)) {
+    state.expandedArtists.delete(artist!)
+  } else {
+    state.expandedArtists.add(artist!)
+  }
+  state.selectedArtist = artist
+  state.selectedAlbum  = null
+  state.selectedIds.clear()
+  renderTagsPanel()
+  await loadTracks()
+  renderEditor()
+})
+
+// Tags panel: expand/collapse all
+document.getElementById('expand-all-btn')!.addEventListener('click', () => {
+  for (const a of state.artists) state.expandedArtists.add(a.artist)
+  renderTagsPanel()
+})
+
+document.getElementById('collapse-all-btn')!.addEventListener('click', () => {
+  state.expandedArtists.clear()
+  renderTagsPanel()
+})
+
+// Files panel: directory tree clicks
+dirTreeEl.addEventListener('click', async (e) => {
+  const target = e.target as HTMLElement
+  const row = target.closest<HTMLElement>('.tree-row')
+  if (!row) return
+  const path = row.dataset.path ?? null
+
+  if (target.dataset.toggle === '1') {
+    const node = findDirNode(path)
+    if (node) { await expandDirNode(node); return }
+  }
+
+  state.selectedDirectory = path === '' ? null : path
+  state.selectedIds.clear()
+  renderFilesPanel()
+  await loadTracks()
+  renderEditor()
+})
+
+function findDirNode(path: string | null): DirNode | null {
+  if (!state.rootNode || path === null) return null
+  function search(node: DirNode): DirNode | null {
+    if (node.path === path) return node
+    if (node.children) for (const c of node.children) { const r = search(c); if (r) return r }
+    return null
+  }
+  return search(state.rootNode)
+}
+
+// Tag-link navigation
+async function navigateTo(artist: string, album?: string) {
+  state.sidebarMode     = 'tags'
+  state.selectedArtist  = artist || null
+  state.selectedAlbum   = album  || null
+  state.selectedIds.clear()
+  if (artist) state.expandedArtists.add(artist)
+  renderSidebarTabs()
+  renderTagsPanel()
+  await loadTracks()
+  renderEditor()
+}
+
+// Track table clicks
+trackTbody.addEventListener('click', (e) => {
+  const tr = (e.target as HTMLElement).closest<HTMLTableRowElement>('tr')
+  if (!tr) return
+  const id = parseInt(tr.dataset.id!, 10)
+  const isCheckbox = (e.target as HTMLElement).matches('input[type=checkbox]')
+  const cb = tr.querySelector<HTMLInputElement>('input[type=checkbox]')!
+
+  if (e.shiftKey && state.selectedIds.size > 0) {
+    const rows  = [...trackTbody.querySelectorAll<HTMLTableRowElement>('tr')]
+    const ids   = rows.map(r => parseInt(r.dataset.id!, 10))
+    const idArr = [...state.selectedIds]
+    const last  = idArr[idArr.length - 1]
+    const from = ids.indexOf(last), to = ids.indexOf(id)
+    const [lo, hi] = from < to ? [from, to] : [to, from]
+    ids.slice(lo, hi + 1).forEach(i => state.selectedIds.add(i))
+  } else if (isCheckbox) {
+    cb.checked ? state.selectedIds.add(id) : state.selectedIds.delete(id)
+  } else {
+    if (state.selectedIds.has(id) && state.selectedIds.size === 1) {
+      state.selectedIds.clear()
+    } else {
+      state.selectedIds.clear()
+      state.selectedIds.add(id)
+    }
+  }
+  renderTracks()
+  renderEditor()
+})
+
+// MusicBrainz lookup
+lookupBtn.addEventListener('click', runLookup)
+document.getElementById('lookup-close')!.addEventListener('click', () => { lookupPanel.hidden = true })
+
+// View toggle
+viewListBtn.addEventListener('click', () => {
+  if (state.viewMode === 'list') return
+  state.viewMode = 'list'
+  renderViewMode()
+})
+
+viewAlbumsBtn.addEventListener('click', () => {
+  if (state.viewMode === 'albums') return
+  state.viewMode = 'albums'
+  renderViewMode()
+})
+
+// Cover art upload
+coverInput.addEventListener('change', async () => {
+  const file = coverInput.files?.[0]
+  if (!file) return
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  try {
+    await Promise.all(ids.map(id => api.covers.update(id, file)))
+    state.coverBust++
+    updateCoverPreview()
+    if (state.viewMode === 'albums') renderAlbumGrid()
+    toast(`Cover art updated`, 'success')
+  } catch (err) {
+    toast(`Failed to update cover: ${err}`, 'error')
+  }
+  coverInput.value = ''
+})
+
+// Column picker
+colPickerBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  state.colPickerOpen = !state.colPickerOpen
+  colPickerEl.hidden  = !state.colPickerOpen
+  if (state.colPickerOpen) renderColPicker()
+})
+
+colPickerEl.addEventListener('change', (e) => {
+  const cb = e.target as HTMLInputElement
+  if (!cb.dataset.col) return
+  if (cb.checked) state.visibleCols.add(cb.dataset.col)
+  else            state.visibleCols.delete(cb.dataset.col)
+  localStorage.setItem(COLS_KEY, JSON.stringify([...state.visibleCols]))
+  renderColHeaders()
+  renderTracks()
+})
+
+document.addEventListener('click', (e) => {
+  if (state.colPickerOpen && !colPickerEl.contains(e.target as Node) && e.target !== colPickerBtn) {
+    state.colPickerOpen = false
+    colPickerEl.hidden  = true
+  }
+})
+
+document.getElementById('clear-selection')!.addEventListener('click', () => {
+  state.selectedIds.clear(); renderTracks(); renderEditor()
+})
+
+normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
+removeTracksBtn.addEventListener('click', removeFromLibrary)
+
+// Filter selects
+filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; renderTracks() })
+filterFormatEl.addEventListener('change',  () => { state.filterFormat  = filterFormatEl.value;  renderTracks() })
+
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  const target = e.target as HTMLElement
+  if (target.matches('input, textarea, select') || target.isContentEditable) return
+
+  if (e.key === 'Escape') {
+    if (!tagEditor.hidden) {
+      state.selectedIds.clear()
+      renderTracks()
+      renderEditor()
+    }
+  } else if (e.key === 'ArrowUp') {
+    if (state.selectedIds.size > 0) {
+      e.preventDefault()
+      navigateTrack(-1)
+    }
+  } else if (e.key === 'ArrowDown') {
+    if (state.selectedIds.size > 0) {
+      e.preventDefault()
+      navigateTrack(1)
+    }
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    if (!tagEditor.hidden) {
+      e.preventDefault()
+      tagForm.requestSubmit()
+    }
+  }
+})
+
+// Quality panel: issue item clicks
+qualityListEl.addEventListener('click', async (e) => {
+  const li = (e.target as HTMLElement).closest<HTMLElement>('.quality-issue-item')
+  if (!li?.dataset.issue) return
+  const issue = li.dataset.issue
+  state.selectedIssue = state.selectedIssue === issue ? null : issue
+  qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
+  state.selectedIds.clear()
+  await renderQualityPanel()
+  await loadTracks()
+  renderEditor()
+})
+
+document.getElementById('close-editor')!.addEventListener('click', () => {
+  state.selectedIds.clear(); renderTracks(); renderEditor()
+})
+
+tagForm.addEventListener('submit', saveTags)
+tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed })
+
+document.getElementById('revert-btn')!.addEventListener('click', () => {
+  populateForm(state.tracks.filter(t => state.selectedIds.has(t.id)))
+})
+
+const debouncedSearch = debounce(async () => {
+  state.selectedIds.clear()
+  await loadTracks()
+  renderEditor()
+}, 300)
+
+searchEl.addEventListener('input', () => {
+  state.query = searchEl.value.trim()
+  debouncedSearch()
+})
+
+scanBtn.addEventListener('click', startScan)
+
+// ─── Settings modal ───────────────────────────────────────────────────────────
+
+const settingsModal     = document.getElementById('settings-sidebar')!
+const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
+const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
+const renameTemplateInput = document.getElementById('setting-rename-template') as HTMLInputElement
+const musicDirsDefaultEl  = document.getElementById('music-dirs-default')!
+const musicDirsListEl     = document.getElementById('music-dirs-list')!
+const musicDirInput       = document.getElementById('music-dir-input') as HTMLInputElement
+
+let localMusicDirs: string[] = []
+
+function renderMusicDirsList() {
+  musicDirsListEl.innerHTML = ''
+  for (const dir of localMusicDirs) {
+    const li = document.createElement('li')
+    li.className = 'music-dir-row'
+    li.innerHTML = `<span class="music-dir-path">${esc(dir)}</span><button class="btn btn-ghost btn-sm btn-icon music-dir-remove" data-dir="${esc(dir)}" title="Remove">✕</button>`
+    musicDirsListEl.appendChild(li)
+  }
+}
+const renameTemplateWrap  = document.getElementById('rename-template-wrap')!
+const acoustidStatusEl  = document.getElementById('acoustid-status')!
+
+function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
+  return document.querySelectorAll<HTMLInputElement>('#scan-tags-list input[data-tag]')
+}
+
+async function openSettings() {
+  try {
+    const [s, status] = await Promise.all([api.settings.get(), api.lookup.status()])
+    acoustidKeyInput.value    = s.acoustid_api_key
+    renameOnSaveInput.checked = s.rename_on_save
+    renameTemplateInput.value = s.rename_template
+    renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
+    getScanTagCheckboxes().forEach(cb => {
+      cb.checked = s.scan_tags.includes(cb.dataset.tag!)
+    })
+    musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
+    localMusicDirs = [...(s.music_dirs ?? [])]
+    renderMusicDirsList()
+    renderAcoustidStatus(status)
+  } catch (e) {
+    toast(`Failed to load settings: ${e}`, 'error')
+  }
+  settingsModal.classList.add('open')
+}
+
+function renderAcoustidStatus(status: { acoustid_configured: boolean; fpcalc_available: boolean; method: string }) {
+  if (!status.acoustid_configured) {
+    acoustidStatusEl.innerHTML = ''
+    return
+  }
+  if (status.fpcalc_available) {
+    acoustidStatusEl.innerHTML = '<span class="status-ok">✓ AcoustID active — fingerprint lookup enabled</span>'
+  } else {
+    acoustidStatusEl.innerHTML = '<span class="status-warn">⚠ API key set but fpcalc not found — install libchromaprint-tools</span>'
+  }
+}
+
+function closeSettings() {
+  settingsModal.classList.remove('open')
+}
+
+document.getElementById('settings-btn')!.addEventListener('click', () => {
+  settingsModal.classList.contains('open') ? closeSettings() : openSettings()
+})
+document.getElementById('settings-modal-close')!.addEventListener('click', closeSettings)
+
+renameOnSaveInput.addEventListener('change', () => {
+  renameTemplateWrap.style.display = renameOnSaveInput.checked ? '' : 'none'
+})
+
+document.getElementById('music-dir-add-btn')!.addEventListener('click', () => {
+  const val = musicDirInput.value.trim()
+  if (!val) return
+  if (!localMusicDirs.includes(val)) {
+    localMusicDirs.push(val)
+    renderMusicDirsList()
+  }
+  musicDirInput.value = ''
+})
+
+musicDirInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('music-dir-add-btn')!.click()
+})
+
+musicDirsListEl.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.music-dir-remove')
+  if (!btn) return
+  const dir = btn.dataset.dir!
+  localMusicDirs = localMusicDirs.filter(d => d !== dir)
+  renderMusicDirsList()
+})
+
+document.getElementById('settings-save')!.addEventListener('click', async () => {
+  const scanTags: string[] = []
+  getScanTagCheckboxes().forEach(cb => { if (cb.checked) scanTags.push(cb.dataset.tag!) })
+  const update: Partial<AppSettings> = {
+    acoustid_api_key:  acoustidKeyInput.value.trim(),
+    rename_on_save:    renameOnSaveInput.checked,
+    rename_template:   renameTemplateInput.value.trim(),
+    scan_tags:         scanTags,
+    music_dirs:        localMusicDirs,
+  }
+  try {
+    const saved = await api.settings.update(update)
+    state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
+    // Refresh lookup status after saving
+    const status = await api.lookup.status()
+    lookupBtn.title = status.method === 'acoustid'
+      ? 'Identify via AcoustID fingerprint'
+      : 'Search MusicBrainz by title/artist/album'
+    toast('Settings saved', 'success')
+    closeSettings()
+  } catch (e) {
+    toast(`Failed to save settings: ${e}`, 'error')
+  }
+})
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+async function init() {
+  renderColHeaders()
+  renderViewMode()
+  api.lookup.status().then(s => {
+    lookupBtn.title = s.method === 'acoustid'
+      ? 'Identify via AcoustID fingerprint'
+      : 'Search MusicBrainz by title/artist/album'
+    if (s.acoustid_configured && !s.fpcalc_available) {
+      lookupBtn.title += ' (AcoustID key set but fpcalc not found — install libchromaprint-tools)'
+    }
+  }).catch(() => {})
+  api.settings.get().then(s => {
+    state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
+  }).catch(() => {})
+  await loadLibrary()
+  await loadTracks()
+}
+
+init()

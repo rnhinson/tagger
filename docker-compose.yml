@@ -1,0 +1,18 @@
+services:
+  tagger:
+    build: .
+    container_name: tagger
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount your music library — change the left side to your actual path
+      - /path/to/your/music:/music
+      # Persists library.db and settings.json between restarts
+      - tagger-config:/config
+    environment:
+      - TAGGER_MUSIC_DIR=/music
+      - TAGGER_CONFIG_DIR=/config
+
+volumes:
+  tagger-config:
