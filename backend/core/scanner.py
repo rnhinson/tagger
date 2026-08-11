@@ -16,7 +16,7 @@ from typing import Callable
 
 from core.config import settings
 from core.database import get_conn
-from core.tagger import read_tags, is_audio_file
+from core.tagger import read_tags, is_audio_file, TAG_FIELDS
 
 _BATCH_SIZE = 200
 
@@ -64,7 +64,7 @@ def scan_library(
                 if existing.get(fpath) != mtime:
                     tags = read_tags(fpath)
                     if scan_tags is not None:
-                        for tag in ("title", "artist", "album", "album_artist", "year", "genre", "track_number", "disc_number", "comment"):
+                        for tag in TAG_FIELDS:
                             if tag not in scan_tags:
                                 tags.pop(tag, None)
                     p = Path(fpath)

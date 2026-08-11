@@ -7,10 +7,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from core.config import settings
+from core.tagger import TAG_FIELDS
 
 router = APIRouter()
 
-ALL_SCAN_TAGS = ["title", "artist", "album", "album_artist", "year", "genre", "track_number", "disc_number", "comment"]
+ALL_SCAN_TAGS = TAG_FIELDS
 
 
 class AppSettings(BaseModel):

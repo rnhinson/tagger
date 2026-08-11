@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import shutil
 import urllib.error
 import urllib.request
 
@@ -27,13 +28,7 @@ _mb = MusicBrainzProvider()
 def lookup_status():
     """Report which lookup methods are available."""
     acoustid_key = _acoustid_key()
-    fpcalc_available = False
-    if acoustid_key:
-        try:
-            import shutil
-            fpcalc_available = shutil.which("fpcalc") is not None
-        except Exception:
-            pass
+    fpcalc_available = bool(acoustid_key) and shutil.which("fpcalc") is not None
     return {
         "acoustid_configured": bool(acoustid_key),
         "fpcalc_available": fpcalc_available,
@@ -43,8 +38,6 @@ def lookup_status():
 
 @router.post("/search/{track_id}")
 async def search_track(track_id: int):
-    import shutil
-
     with db() as conn:
         row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
     if not row:
