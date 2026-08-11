@@ -1,142 +1,13 @@
 import './style.css'
-import { api, Track, Artist, Album, ScanJob, LookupResult, AppSettings, IssueCount } from './api'
+import { api, Track, Artist, Album, LookupResult, AppSettings } from './api'
 import { toast } from './toast'
-
-// ─── Column definitions ───────────────────────────────────────────────────────
-
-interface ColDef {
-  key:    string
-  label:  string
-  cls:    string
-  render: (t: Track) => string
-}
-
-const COL_DEFS: ColDef[] = [
-  { key: 'quality',      label: 'Quality',      cls: 'col-quality', render: () => '' },
-  { key: 'title',        label: 'Title',        cls: 'col-title',  render: t => esc(t.title || t.filename) },
-  { key: 'artist',       label: 'Artist',       cls: 'col-artist', render: t => t.artist       ? `<span class="tag-link" data-artist="${esc(t.artist)}">${esc(t.artist)}</span>` : '' },
-  { key: 'album',        label: 'Album',        cls: 'col-album',  render: t => t.album        ? `<span class="tag-link" data-artist="${esc(t.artist||'')}" data-album="${esc(t.album)}">${esc(t.album)}</span>` : '' },
-  { key: 'album_artist', label: 'Album Artist', cls: 'col-aa',     render: t => t.album_artist ? `<span class="tag-link" data-artist="${esc(t.album_artist)}">${esc(t.album_artist)}</span>` : '' },
-  { key: 'year',         label: 'Year',         cls: 'col-year',   render: t => esc(t.year || '') },
-  { key: 'track_number', label: 'Track #',      cls: 'col-num',    render: t => esc(t.track_number || '') },
-  { key: 'disc_number',  label: 'Disc #',       cls: 'col-disc',   render: t => esc(t.disc_number || '') },
-  { key: 'genre',        label: 'Genre',        cls: 'col-genre',  render: t => esc(t.genre || '') },
-  { key: 'format',       label: 'Format',       cls: 'col-format', render: t => t.format.toUpperCase() },
-  { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
-  { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
-    const match = state.musicDirs.find(d => t.directory === d || t.directory.startsWith(d + '/'))
-    const dir = match ?? t.directory
-    return esc(dir.split('/').filter(Boolean).pop() ?? dir)
-  }},
-]
-
-const PAGE_SIZE = 100
-const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
-const COLS_KEY = 'tagger_visible_cols'
-
-function loadColPrefs(): Set<string> {
-  try {
-    const saved = localStorage.getItem(COLS_KEY)
-    if (saved) return new Set(JSON.parse(saved))
-  } catch { /* ignore */ }
-  return new Set(DEFAULT_COLS)
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment'
-
-const TAG_FIELDS: TagField[] = [
-  'title', 'artist', 'album', 'album_artist', 'year',
-  'track_number', 'disc_number', 'genre', 'comment',
-]
-
-interface DirNode {
-  name:     string
-  path:     string
-  children: DirNode[] | null
-  loading:  boolean
-  expanded: boolean
-}
-
-// ─── State ────────────────────────────────────────────────────────────────────
-
-interface State {
-  // sidebar
-  sidebarMode:       'tags' | 'files' | 'quality'
-  // tags panel
-  artists:           Artist[]
-  albumsByArtist:    Map<string, Album[]>
-  selectedArtist:    string | null
-  selectedAlbum:     string | null
-  expandedArtists:   Set<string>
-  // files panel
-  rootNode:          DirNode | null
-  selectedDirectory: string | null
-  // track list
-  tracks:            Track[]
-  total:             number
-  selectedIds:       Set<number>
-  query:             string
-  // scan
-  scanJob:           ScanJob | null
-  scanPollTimer:     ReturnType<typeof setInterval> | null
-  // columns
-  visibleCols:       Set<string>
-  colPickerOpen:     boolean
-  // view
-  viewMode:          'list' | 'albums'
-  // quality panel
-  qualityIssues:     IssueCount | null
-  selectedIssue:     string | null
-  // pending cover from lookup
-  pendingCoverAlbumId: string | null
-  // pending MB IDs from lookup result (written on save)
-  pendingLookupResult: LookupResult | null
-  // incremented after every cover write to bust browser cache
-  coverBust: number
-  // sorting
-  sortKey:           string | null
-  sortDir:           'asc' | 'desc'
-  // filters
-  filterFormat:      string
-  filterQuality:     string
-  // configured music dirs (for source column)
-  musicDirs:         string[]
-  // pagination
-  page:              number
-}
-
-const state: State = {
-  sidebarMode:       'tags',
-  artists:           [],
-  albumsByArtist:    new Map(),
-  selectedArtist:    null,
-  selectedAlbum:     null,
-  expandedArtists:   new Set(),
-  rootNode:          null,
-  selectedDirectory: null,
-  tracks:            [],
-  total:             0,
-  selectedIds:       new Set(),
-  query:             '',
-  scanJob:           null,
-  scanPollTimer:     null,
-  visibleCols:       loadColPrefs(),
-  colPickerOpen:     false,
-  viewMode:          'list',
-  qualityIssues:     null,
-  selectedIssue:     null,
-  pendingCoverAlbumId: null,
-  pendingLookupResult: null,
-  coverBust: 0,
-  sortKey:           null,
-  sortDir:           'asc',
-  filterFormat:      '',
-  filterQuality:     '',
-  musicDirs:         [],
-  page:              0,
-}
+import { esc, fmtDuration, debounce } from './util'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs } from './state'
+import { COL_DEFS } from './columns'
+import {
+  trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
+  toTitleCase, needsNormalization, NORMALIZE_FIELDS,
+} from './quality'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -394,70 +265,9 @@ function coverUrl(trackId: number): string {
   return `/api/covers/${trackId}${state.coverBust ? '?v=' + state.coverBust : ''}`
 }
 
-function esc(s: string): string {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-}
-
-function fmtDuration(sec: number | null): string {
-  if (!sec) return '—'
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-function debounce(fn: () => void, ms: number): () => void {
-  let t: ReturnType<typeof setTimeout>
-  return () => { clearTimeout(t); t = setTimeout(fn, ms) }
-}
-
 function selectAll(): HTMLInputElement | null {
   return document.getElementById('select-all') as HTMLInputElement | null
 }
-
-function trackQuality(t: Track): 'good' | 'fair' | 'poor' {
-  if (!t.title || !t.artist) return 'poor'
-  if (!t.album || !t.year || !t.track_number) return 'fair'
-  return 'good'
-}
-
-const QUALITY_TITLES = {
-  good: 'All key tags present',
-  fair: 'Missing some tags (album, year, or track #)',
-  poor: 'Missing critical tags (title or artist)',
-}
-
-// ─── Quality / case normalization ─────────────────────────────────────────────
-
-const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: boolean }[] = [
-  { key: 'missing_title',        label: 'Missing title'    },
-  { key: 'missing_artist',       label: 'Missing artist'   },
-  { key: 'missing_album',        label: 'Missing album'    },
-  { key: 'missing_year',         label: 'Missing year'     },
-  { key: 'missing_genre',        label: 'Missing genre'    },
-  { key: 'missing_track_number', label: 'Missing track #'  },
-  { key: 'duplicate_tracks',     label: 'Duplicate tracks', warn: true },
-  { key: 'missing_files',        label: 'Missing files',    warn: true },
-]
-
-const SMALL_WORDS = new Set([
-  'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor',
-  'on', 'at', 'to', 'by', 'in', 'of', 'up', 'with', 'from',
-])
-
-function toTitleCase(s: string): string {
-  return s.replace(/\S+/g, (word, offset) => {
-    const lower = word.toLowerCase()
-    if (offset > 0 && SMALL_WORDS.has(lower)) return lower
-    return lower.charAt(0).toUpperCase() + lower.slice(1)
-  })
-}
-
-function needsNormalization(s: string | null | undefined): boolean {
-  if (!s || s.length < 2) return false
-  if (!/[a-zA-Z]{2}/.test(s)) return false
-  return s === s.toUpperCase() || s === s.toLowerCase()
-}
-
-const NORMALIZE_FIELDS: (keyof Track)[] = ['title', 'artist', 'album', 'album_artist', 'genre']
 
 // ─── Sidebar tabs ─────────────────────────────────────────────────────────────
 
@@ -1772,7 +1582,7 @@ colPickerEl.addEventListener('change', (e) => {
   if (!cb.dataset.col) return
   if (cb.checked) state.visibleCols.add(cb.dataset.col)
   else            state.visibleCols.delete(cb.dataset.col)
-  localStorage.setItem(COLS_KEY, JSON.stringify([...state.visibleCols]))
+  saveColPrefs(state.visibleCols)
   renderColHeaders()
   renderTracks()
 })
