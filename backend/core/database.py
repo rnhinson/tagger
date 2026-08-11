@@ -102,4 +102,13 @@ def init_db() -> None:
                 scanned     INTEGER DEFAULT 0,
                 error       TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS change_log (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts      REAL NOT NULL,
+                kind    TEXT NOT NULL,      -- 'tag_edit' | 'remove'
+                summary TEXT NOT NULL,      -- human-readable description
+                data    TEXT NOT NULL,      -- JSON snapshot for undo
+                undone  INTEGER NOT NULL DEFAULT 0
+            );
         """)

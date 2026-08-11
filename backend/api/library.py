@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from core.database import db
+from core.history import log_change, snapshot, list_changes, undo_change
 
 router = APIRouter()
 
@@ -34,6 +36,39 @@ _ISSUE_CLAUSES: dict[str, str] = {
 
 def _row(row) -> dict:
     return dict(row)
+
+
+def _track_filters(
+    directory: Optional[str],
+    artist: Optional[str],
+    album: Optional[str],
+    issue: Optional[str],
+) -> tuple[str, list, str]:
+    """Build the shared WHERE clause + ORDER BY used by listing and export."""
+    clauses, params = [], []
+    if directory:
+        clauses.append("(directory = ? OR substr(directory, 1, ?) = ?)")
+        params.extend([directory, len(directory) + 1, directory + "/"])
+    if artist is not None:
+        if artist == "":
+            clauses.append("(artist IS NULL OR artist = '')")
+        else:
+            clauses.append("artist = ?")
+            params.append(artist)
+    if album:
+        clauses.append("album = ?")
+        params.append(album)
+    if issue and issue in _ISSUE_CLAUSES:
+        clauses.append(_ISSUE_CLAUSES[issue])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    # Group duplicates together so they're visually adjacent
+    if issue == "duplicate_tracks":
+        order = "ORDER BY LOWER(COALESCE(title,'')), LOWER(COALESCE(artist,'')), path"
+    else:
+        order = "ORDER BY directory, disc_number, track_number, title"
+
+    return where, params, order
 
 
 @router.get("/issues")
@@ -66,8 +101,28 @@ def remove_tracks(track_ids: list[int]):
         raise HTTPException(400, "No track IDs provided")
     with db() as conn:
         placeholders = ",".join("?" * len(track_ids))
+        rows = conn.execute(
+            f"SELECT * FROM tracks WHERE id IN ({placeholders})", track_ids
+        ).fetchall()
+        snaps = [snapshot(r) for r in rows]
         conn.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", track_ids)
-    return {"removed": len(track_ids)}
+        log_change(conn, "remove", f"Removed {len(snaps)} tracks from library", snaps)
+    return {"removed": len(rows)}
+
+
+@router.get("/history")
+def get_history(limit: int = Query(50, le=200)):
+    with db() as conn:
+        return list_changes(conn, limit)
+
+
+@router.post("/history/{change_id}/undo")
+def undo(change_id: int):
+    with db() as conn:
+        try:
+            return undo_change(conn, change_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
 
 
 @router.get("/tracks")
@@ -79,28 +134,7 @@ def list_tracks(
     limit: int = Query(100, le=500),
     offset: int = 0,
 ):
-    clauses, params = [], []
-    if directory:
-        clauses.append("(directory = ? OR substr(directory, 1, ?) = ?)")
-        params.extend([directory, len(directory) + 1, directory + "/"])
-    if artist is not None:
-        if artist == "":
-            clauses.append("(artist IS NULL OR artist = '')")
-        else:
-            clauses.append("artist = ?")
-            params.append(artist)
-    if album:
-        clauses.append("album = ?")
-        params.append(album)
-    if issue and issue in _ISSUE_CLAUSES:
-        clauses.append(_ISSUE_CLAUSES[issue])
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    # Group duplicates together so they're visually adjacent
-    if issue == "duplicate_tracks":
-        order = "ORDER BY LOWER(COALESCE(title,'')), LOWER(COALESCE(artist,'')), path"
-    else:
-        order = "ORDER BY directory, disc_number, track_number, title"
+    where, params, order = _track_filters(directory, artist, album, issue)
 
     with db() as conn:
         rows = conn.execute(
@@ -112,6 +146,54 @@ def list_tracks(
         ).fetchone()[0]
 
     return {"total": total, "tracks": [_row(r) for r in rows]}
+
+
+def _m3u(tracks: list[dict]) -> str:
+    """Render tracks as an EXTM3U playlist with absolute file paths."""
+    lines = ["#EXTM3U"]
+    for t in tracks:
+        secs = int(t["duration"]) if t.get("duration") else -1
+        artist = t.get("artist") or ""
+        title = t.get("title") or t.get("filename") or ""
+        label = f"{artist} - {title}" if artist else title
+        lines.append(f"#EXTINF:{secs},{label}")
+        lines.append(t["path"])
+    return "\n".join(lines) + "\n"
+
+
+@router.get("/export.m3u", response_class=PlainTextResponse)
+def export_m3u(
+    directory: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    issue: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = Query(10000, le=100000),
+):
+    """Export the current view (same filters as /tracks, or a search) as .m3u."""
+    with db() as conn:
+        if q:
+            rows = conn.execute(
+                """
+                SELECT t.* FROM tracks t
+                JOIN tracks_fts f ON f.rowid = t.id
+                WHERE tracks_fts MATCH ?
+                ORDER BY rank LIMIT ?
+                """,
+                (_fts_query(q), limit),
+            ).fetchall()
+        else:
+            where, params, order = _track_filters(directory, artist, album, issue)
+            rows = conn.execute(
+                f"SELECT * FROM tracks {where} {order} LIMIT ?", [*params, limit]
+            ).fetchall()
+
+    body = _m3u([_row(r) for r in rows])
+    return PlainTextResponse(
+        body,
+        media_type="audio/x-mpegurl",
+        headers={"Content-Disposition": 'attachment; filename="tagger-export.m3u"'},
+    )
 
 
 def _fts_query(q: str) -> str:

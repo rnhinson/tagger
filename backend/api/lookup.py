@@ -10,9 +10,10 @@ from fastapi import APIRouter, HTTPException
 
 from core.config import settings
 from core.database import db
+from core.inference import infer_tags_from_path
 from core.providers.musicbrainz import MusicBrainzProvider
 from core.tagger import write_cover
-from api.config import _load as load_app_settings
+from api.config import _load as load_app_settings, get_music_dirs
 
 
 def _acoustid_key() -> str:
@@ -67,10 +68,50 @@ async def search_track(track_id: int):
         album=row["album"],
         duration=row["duration"],
     )
+
+    # Supplement with Discogs when a token is configured
+    discogs_token = load_app_settings().discogs_token
+    if discogs_token:
+        try:
+            from core.providers.discogs import DiscogsProvider
+            results += await DiscogsProvider(discogs_token).search(
+                title=row["title"], artist=row["artist"], album=row["album"]
+            )
+        except Exception:
+            pass  # Discogs is best-effort; never fail the whole lookup
+
+    results.sort(key=lambda r: r.score, reverse=True)
     return [
         {k: v for k, v in dataclasses.asdict(r).items() if k != "raw"}
         for r in results
     ]
+
+
+@router.post("/infer/{track_id}")
+def infer_from_path(track_id: int):
+    """Propose tags parsed from the file's path/name (source='filename')."""
+    with db() as conn:
+        row = conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Track not found")
+    inferred = infer_tags_from_path(row["path"], get_music_dirs())
+    if not inferred:
+        return None
+    return {
+        "title":        inferred.get("title"),
+        "artist":       inferred.get("artist"),
+        "album":        inferred.get("album"),
+        "album_artist": inferred.get("album_artist"),
+        "year":         inferred.get("year"),
+        "track_number": inferred.get("track_number"),
+        "disc_number":  inferred.get("disc_number"),
+        "mb_track_id":  None,
+        "mb_artist_id": None,
+        "mb_album_id":  None,
+        "mb_album_artist_id": None,
+        "score":        0.5,
+        "source":       "filename",
+    }
 
 
 def _fetch_caa(mb_album_id: str) -> tuple[str, bytes]:
