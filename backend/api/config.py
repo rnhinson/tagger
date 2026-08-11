@@ -7,16 +7,18 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from core.config import settings
+from core.tagger import TAG_FIELDS
 
 router = APIRouter()
 
-ALL_SCAN_TAGS = ["title", "artist", "album", "album_artist", "year", "genre", "track_number", "disc_number", "comment"]
+ALL_SCAN_TAGS = TAG_FIELDS
 
 
 class AppSettings(BaseModel):
     rename_on_save: bool = False
     rename_template: str = "{album_artist}/{album}/{track_number:02d} {title}"
     acoustid_api_key: str = ""
+    discogs_token: str = ""
     scan_tags: list[str] = ALL_SCAN_TAGS
     music_dirs: list[str] = []
 
@@ -60,3 +62,31 @@ def update_settings(update: AppSettings):
     merged = _load().model_copy(update=update.model_dump(exclude_none=True))
     _save(merged)
     return merged
+
+
+_SAMPLE_TRACK = {
+    "title": "So What",
+    "artist": "Miles Davis",
+    "album": "Kind of Blue",
+    "album_artist": "Miles Davis",
+    "year": "1959",
+    "genre": "Jazz",
+    "track_number": "1",
+    "disc_number": "1",
+}
+
+
+class RenamePreviewRequest(BaseModel):
+    template: str
+
+
+@router.post("/rename-preview")
+def rename_preview(req: RenamePreviewRequest):
+    """Render a rename template against a sample track for live UI feedback."""
+    from api.tags import render_template  # local import avoids a router import cycle
+
+    try:
+        rel = render_template(req.template, _SAMPLE_TRACK, ".flac")
+    except (KeyError, ValueError, IndexError) as exc:
+        return {"ok": False, "error": f"Invalid template: {exc}"}
+    return {"ok": True, "preview": rel}

@@ -1,142 +1,13 @@
 import './style.css'
-import { api, Track, Artist, Album, ScanJob, LookupResult, AppSettings, IssueCount } from './api'
+import { api, Track, Artist, Album, LookupResult, AppSettings } from './api'
 import { toast } from './toast'
-
-// ─── Column definitions ───────────────────────────────────────────────────────
-
-interface ColDef {
-  key:    string
-  label:  string
-  cls:    string
-  render: (t: Track) => string
-}
-
-const COL_DEFS: ColDef[] = [
-  { key: 'quality',      label: 'Quality',      cls: 'col-quality', render: () => '' },
-  { key: 'title',        label: 'Title',        cls: 'col-title',  render: t => esc(t.title || t.filename) },
-  { key: 'artist',       label: 'Artist',       cls: 'col-artist', render: t => t.artist       ? `<span class="tag-link" data-artist="${esc(t.artist)}">${esc(t.artist)}</span>` : '' },
-  { key: 'album',        label: 'Album',        cls: 'col-album',  render: t => t.album        ? `<span class="tag-link" data-artist="${esc(t.artist||'')}" data-album="${esc(t.album)}">${esc(t.album)}</span>` : '' },
-  { key: 'album_artist', label: 'Album Artist', cls: 'col-aa',     render: t => t.album_artist ? `<span class="tag-link" data-artist="${esc(t.album_artist)}">${esc(t.album_artist)}</span>` : '' },
-  { key: 'year',         label: 'Year',         cls: 'col-year',   render: t => esc(t.year || '') },
-  { key: 'track_number', label: 'Track #',      cls: 'col-num',    render: t => esc(t.track_number || '') },
-  { key: 'disc_number',  label: 'Disc #',       cls: 'col-disc',   render: t => esc(t.disc_number || '') },
-  { key: 'genre',        label: 'Genre',        cls: 'col-genre',  render: t => esc(t.genre || '') },
-  { key: 'format',       label: 'Format',       cls: 'col-format', render: t => t.format.toUpperCase() },
-  { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
-  { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
-    const match = state.musicDirs.find(d => t.directory === d || t.directory.startsWith(d + '/'))
-    const dir = match ?? t.directory
-    return esc(dir.split('/').filter(Boolean).pop() ?? dir)
-  }},
-]
-
-const PAGE_SIZE = 100
-const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
-const COLS_KEY = 'tagger_visible_cols'
-
-function loadColPrefs(): Set<string> {
-  try {
-    const saved = localStorage.getItem(COLS_KEY)
-    if (saved) return new Set(JSON.parse(saved))
-  } catch { /* ignore */ }
-  return new Set(DEFAULT_COLS)
-}
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment'
-
-const TAG_FIELDS: TagField[] = [
-  'title', 'artist', 'album', 'album_artist', 'year',
-  'track_number', 'disc_number', 'genre', 'comment',
-]
-
-interface DirNode {
-  name:     string
-  path:     string
-  children: DirNode[] | null
-  loading:  boolean
-  expanded: boolean
-}
-
-// ─── State ────────────────────────────────────────────────────────────────────
-
-interface State {
-  // sidebar
-  sidebarMode:       'tags' | 'files' | 'quality'
-  // tags panel
-  artists:           Artist[]
-  albumsByArtist:    Map<string, Album[]>
-  selectedArtist:    string | null
-  selectedAlbum:     string | null
-  expandedArtists:   Set<string>
-  // files panel
-  rootNode:          DirNode | null
-  selectedDirectory: string | null
-  // track list
-  tracks:            Track[]
-  total:             number
-  selectedIds:       Set<number>
-  query:             string
-  // scan
-  scanJob:           ScanJob | null
-  scanPollTimer:     ReturnType<typeof setInterval> | null
-  // columns
-  visibleCols:       Set<string>
-  colPickerOpen:     boolean
-  // view
-  viewMode:          'list' | 'albums'
-  // quality panel
-  qualityIssues:     IssueCount | null
-  selectedIssue:     string | null
-  // pending cover from lookup
-  pendingCoverAlbumId: string | null
-  // pending MB IDs from lookup result (written on save)
-  pendingLookupResult: LookupResult | null
-  // incremented after every cover write to bust browser cache
-  coverBust: number
-  // sorting
-  sortKey:           string | null
-  sortDir:           'asc' | 'desc'
-  // filters
-  filterFormat:      string
-  filterQuality:     string
-  // configured music dirs (for source column)
-  musicDirs:         string[]
-  // pagination
-  page:              number
-}
-
-const state: State = {
-  sidebarMode:       'tags',
-  artists:           [],
-  albumsByArtist:    new Map(),
-  selectedArtist:    null,
-  selectedAlbum:     null,
-  expandedArtists:   new Set(),
-  rootNode:          null,
-  selectedDirectory: null,
-  tracks:            [],
-  total:             0,
-  selectedIds:       new Set(),
-  query:             '',
-  scanJob:           null,
-  scanPollTimer:     null,
-  visibleCols:       loadColPrefs(),
-  colPickerOpen:     false,
-  viewMode:          'list',
-  qualityIssues:     null,
-  selectedIssue:     null,
-  pendingCoverAlbumId: null,
-  pendingLookupResult: null,
-  coverBust: 0,
-  sortKey:           null,
-  sortDir:           'asc',
-  filterFormat:      '',
-  filterQuality:     '',
-  musicDirs:         [],
-  page:              0,
-}
+import { esc, fmtDuration, debounce } from './util'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs } from './state'
+import { COL_DEFS } from './columns'
+import {
+  trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
+  toTitleCase, needsNormalization, NORMALIZE_FIELDS,
+} from './quality'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +20,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     </div>
     <div class="topbar-actions">
       <span id="scan-status" class="scan-status"></span>
+      <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" hidden>↶</button>
       <button id="scan-btn" class="btn btn-primary">Scan Library</button>
       <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings">⚙</button>
     </div>
@@ -179,6 +51,18 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <div id="acoustid-status" class="acoustid-status"></div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Discogs</div>
+        <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
+        <label class="field-label">Token
+          <input id="setting-discogs-token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" />
+        </label>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">ReplayGain</div>
+        <p class="settings-hint">Scan volume levels and write ReplayGain tags. Requires <code>rsgain</code> or <code>loudgain</code> installed on the server. Run it from the selection toolbar.</p>
+        <div id="replaygain-status" class="acoustid-status"></div>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Scan Tags</div>
         <p class="settings-hint">Choose which tags are read from audio files during a library scan. Disabled tags will be left empty in the database.</p>
         <div id="scan-tags-list" class="scan-tags-list">
@@ -203,6 +87,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <label class="field-label" id="rename-template-wrap">Template
           <input id="setting-rename-template" type="text" />
           <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
+          <div id="rename-preview" class="rename-preview"></div>
         </label>
       </div>
     </div>
@@ -243,6 +128,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <div id="bulk-actions" class="bulk-actions" hidden>
             <span id="selection-count" class="selection-count"></span>
             <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
+            <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
             <button id="remove-tracks-btn" class="btn btn-danger btn-sm">Remove from library</button>
             <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
           </div>
@@ -261,6 +147,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             </select>
           </div>
           <div class="toolbar-divider"></div>
+          <button id="export-m3u-btn" class="btn btn-ghost btn-sm" title="Export the current view as an .m3u playlist">Export M3U</button>
           <div class="col-picker-wrap">
             <button id="col-picker-btn" class="btn btn-ghost btn-sm">Columns ▾</button>
             <div id="col-picker" class="col-picker" hidden></div>
@@ -288,6 +175,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span id="editor-title" class="editor-title"></span>
         <div class="editor-header-actions">
           <button id="auto-fix-btn" class="btn btn-ghost btn-sm" title="Auto-fix: look up and save the best match">Auto-fix</button>
+          <button id="infer-btn" class="btn btn-ghost btn-sm" title="Guess tags from the file name and folders">From filename</button>
           <button id="lookup-btn" class="btn btn-ghost btn-sm" title="Search MusicBrainz">Lookup</button>
           <button id="close-editor" class="btn btn-ghost btn-icon" title="Close">✕</button>
         </div>
@@ -361,8 +249,15 @@ const lookupResults    = document.getElementById('lookup-results')!
 const qualityListEl    = document.getElementById('quality-list')!
 const normalizeCaseBtn  = document.getElementById('normalize-case-btn') as HTMLButtonElement
 const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
+const replaygainBtn     = document.getElementById('replaygain-btn') as HTMLButtonElement
 const filterQualityEl  = document.getElementById('filter-quality') as HTMLSelectElement
 const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectElement
+const inferBtn         = document.getElementById('infer-btn') as HTMLButtonElement
+const exportM3uBtn     = document.getElementById('export-m3u-btn') as HTMLButtonElement
+const undoBtn          = document.getElementById('undo-btn') as HTMLButtonElement
+
+// Whether the server has a ReplayGain tool available (set at init)
+let replaygainAvailable = false
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -370,70 +265,9 @@ function coverUrl(trackId: number): string {
   return `/api/covers/${trackId}${state.coverBust ? '?v=' + state.coverBust : ''}`
 }
 
-function esc(s: string): string {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-}
-
-function fmtDuration(sec: number | null): string {
-  if (!sec) return '—'
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-function debounce(fn: () => void, ms: number): () => void {
-  let t: ReturnType<typeof setTimeout>
-  return () => { clearTimeout(t); t = setTimeout(fn, ms) }
-}
-
 function selectAll(): HTMLInputElement | null {
   return document.getElementById('select-all') as HTMLInputElement | null
 }
-
-function trackQuality(t: Track): 'good' | 'fair' | 'poor' {
-  if (!t.title || !t.artist) return 'poor'
-  if (!t.album || !t.year || !t.track_number) return 'fair'
-  return 'good'
-}
-
-const QUALITY_TITLES = {
-  good: 'All key tags present',
-  fair: 'Missing some tags (album, year, or track #)',
-  poor: 'Missing critical tags (title or artist)',
-}
-
-// ─── Quality / case normalization ─────────────────────────────────────────────
-
-const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: boolean }[] = [
-  { key: 'missing_title',        label: 'Missing title'    },
-  { key: 'missing_artist',       label: 'Missing artist'   },
-  { key: 'missing_album',        label: 'Missing album'    },
-  { key: 'missing_year',         label: 'Missing year'     },
-  { key: 'missing_genre',        label: 'Missing genre'    },
-  { key: 'missing_track_number', label: 'Missing track #'  },
-  { key: 'duplicate_tracks',     label: 'Duplicate tracks', warn: true },
-  { key: 'missing_files',        label: 'Missing files',    warn: true },
-]
-
-const SMALL_WORDS = new Set([
-  'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor',
-  'on', 'at', 'to', 'by', 'in', 'of', 'up', 'with', 'from',
-])
-
-function toTitleCase(s: string): string {
-  return s.replace(/\S+/g, (word, offset) => {
-    const lower = word.toLowerCase()
-    if (offset > 0 && SMALL_WORDS.has(lower)) return lower
-    return lower.charAt(0).toUpperCase() + lower.slice(1)
-  })
-}
-
-function needsNormalization(s: string | null | undefined): boolean {
-  if (!s || s.length < 2) return false
-  if (!/[a-zA-Z]{2}/.test(s)) return false
-  return s === s.toUpperCase() || s === s.toLowerCase()
-}
-
-const NORMALIZE_FIELDS: (keyof Track)[] = ['title', 'artist', 'album', 'album_artist', 'genre']
 
 // ─── Sidebar tabs ─────────────────────────────────────────────────────────────
 
@@ -815,6 +649,7 @@ function updateBulkBar() {
   bulkActions.hidden = n === 0
   selectionCount.textContent = `${n} selected`
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
+  replaygainBtn.hidden = !(n > 0 && replaygainAvailable)
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
@@ -847,8 +682,9 @@ function renderPagination() {
 function renderEditor() {
   if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; return }
   tagEditor.hidden = false
-  // Only show lookup for single selection; hide panel when selection changes
+  // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
+  inferBtn.hidden = state.selectedIds.size !== 1
   autoFixBtn.hidden = state.selectedIds.size === 0
   if (state.selectedIds.size !== 1) lookupPanel.hidden = true
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
@@ -883,6 +719,18 @@ function populateForm(tracks: Track[]) {
 
 // ─── MusicBrainz lookup ───────────────────────────────────────────────────────
 
+const SOURCE_BADGES: Record<string, { cls: string; label: string }> = {
+  acoustid: { cls: 'source-acoustid', label: 'AcoustID' },
+  discogs:  { cls: 'source-discogs',  label: 'Discogs' },
+  filename: { cls: 'source-filename', label: 'Filename' },
+  musicbrainz: { cls: 'source-mb', label: 'MusicBrainz' },
+}
+
+function renderSourceBadge(source: string): string {
+  const b = SOURCE_BADGES[source] ?? SOURCE_BADGES.musicbrainz
+  return `<span class="lookup-source-badge ${b.cls}">${b.label}</span>`
+}
+
 async function runLookup() {
   if (state.selectedIds.size !== 1) return
   const trackId = [...state.selectedIds][0]
@@ -906,9 +754,7 @@ async function runLookup() {
       li.className = 'lookup-result'
       const pct = Math.round(r.score * 100)
       const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
-      const sourceBadge = r.source === 'acoustid'
-        ? '<span class="lookup-source-badge source-acoustid">AcoustID</span>'
-        : '<span class="lookup-source-badge source-mb">MusicBrainz</span>'
+      const sourceBadge = renderSourceBadge(r.source)
       const thumbHtml = r.mb_album_id
         ? `<img class="lookup-thumb" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
         : `<div class="lookup-thumb lookup-thumb-empty">♪</div>`
@@ -1080,6 +926,7 @@ async function applyProposals(proposals: FixProposal[]) {
   if (state.sidebarMode === 'quality') await renderQualityPanel()
   const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
   if (updated.length) populateForm(updated)
+  await refreshUndoButton()
 }
 
 async function gatherProposals(tracks: Track[], setLabel: (s: string) => void): Promise<FixProposal[]> {
@@ -1333,6 +1180,7 @@ async function saveTags(e: Event) {
     await loadTracks()
     const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
     if (updated.length) populateForm(updated)
+    await refreshUndoButton()
   } catch (e) {
     toast(`Save failed: ${e}`, 'error')
   }
@@ -1371,6 +1219,7 @@ async function normalizeCaseBulk() {
     if (state.sidebarMode === 'quality') await renderQualityPanel()
     const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
     if (updated.length) populateForm(updated)
+    await refreshUndoButton()
   } catch (e) {
     toast(`Normalize failed: ${e}`, 'error')
   } finally {
@@ -1392,10 +1241,115 @@ async function removeFromLibrary() {
     await loadTracks()
     renderEditor()
     await renderQualityPanel()
+    await refreshUndoButton()
   } catch (e) {
     toast(`Failed to remove tracks: ${e}`, 'error')
   } finally {
     removeTracksBtn.disabled = false
+  }
+}
+
+// ─── Infer tags from filename ───────────────────────────────────────────────────
+
+async function inferFromFilename() {
+  if (state.selectedIds.size !== 1) return
+  const trackId = [...state.selectedIds][0]
+  inferBtn.disabled = true
+  inferBtn.textContent = 'Reading…'
+  try {
+    const result = await api.lookup.infer(trackId)
+    if (!result) { toast('Could not infer anything from the file name', 'info'); return }
+    applyLookupResult(result)
+  } catch (e) {
+    toast(`Inference failed: ${e}`, 'error')
+  } finally {
+    inferBtn.disabled = false
+    inferBtn.textContent = 'From filename'
+  }
+}
+
+// ─── Export current view as M3U ─────────────────────────────────────────────────
+
+function currentViewParams(): Record<string, string | number> {
+  if (state.query) return { q: state.query }
+  if (state.sidebarMode === 'files') {
+    return state.selectedDirectory !== null ? { directory: state.selectedDirectory } : {}
+  }
+  if (state.sidebarMode === 'quality') {
+    return state.selectedIssue && state.selectedIssue !== 'missing_files'
+      ? { issue: state.selectedIssue }
+      : {}
+  }
+  const params: Record<string, string | number> = {}
+  if (state.selectedArtist !== null) params.artist = state.selectedArtist
+  if (state.selectedAlbum !== null) params.album = state.selectedAlbum
+  return params
+}
+
+function exportM3u() {
+  if (!state.total) { toast('Nothing to export', 'info'); return }
+  const url = api.library.exportM3uUrl(currentViewParams())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'tagger-export.m3u'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+// ─── ReplayGain scan ────────────────────────────────────────────────────────────
+
+async function scanReplayGain() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  replaygainBtn.disabled = true
+  replaygainBtn.textContent = 'Scanning…'
+  try {
+    const res = await api.tags.replaygain(ids, ids.length > 1)
+    if (res.ok) {
+      toast(`ReplayGain written to ${res.processed} track${res.processed !== 1 ? 's' : ''} (${res.tool})`, 'success')
+    } else {
+      toast(`ReplayGain failed: ${res.error ?? 'unknown error'}`, 'error')
+    }
+  } catch (e) {
+    toast(`ReplayGain failed: ${e}`, 'error')
+  } finally {
+    replaygainBtn.disabled = false
+    replaygainBtn.textContent = 'ReplayGain'
+  }
+}
+
+// ─── Undo / history ─────────────────────────────────────────────────────────────
+
+async function refreshUndoButton() {
+  try {
+    const history = await api.library.history(10)
+    const undoable = history.find(h => !h.undone)
+    undoBtn.hidden = !undoable
+    undoBtn.title = undoable ? `Undo: ${undoable.summary}` : 'Nothing to undo'
+    undoBtn.dataset.changeId = undoable ? String(undoable.id) : ''
+  } catch {
+    undoBtn.hidden = true
+  }
+}
+
+async function undoLast() {
+  const id = undoBtn.dataset.changeId
+  if (!id) return
+  undoBtn.disabled = true
+  try {
+    const res = await api.library.undo(Number(id))
+    toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
+    state.qualityIssues = null
+    if (state.sidebarMode === 'tags') await loadLibrary()
+    await loadTracks()
+    if (state.sidebarMode === 'quality') await renderQualityPanel()
+    renderEditor()
+  } catch (e) {
+    toast(`Undo failed: ${e}`, 'error')
+  } finally {
+    undoBtn.disabled = false
+    await refreshUndoButton()
   }
 }
 
@@ -1628,7 +1582,7 @@ colPickerEl.addEventListener('change', (e) => {
   if (!cb.dataset.col) return
   if (cb.checked) state.visibleCols.add(cb.dataset.col)
   else            state.visibleCols.delete(cb.dataset.col)
-  localStorage.setItem(COLS_KEY, JSON.stringify([...state.visibleCols]))
+  saveColPrefs(state.visibleCols)
   renderColHeaders()
   renderTracks()
 })
@@ -1646,6 +1600,10 @@ document.getElementById('clear-selection')!.addEventListener('click', () => {
 
 normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
+replaygainBtn.addEventListener('click', scanReplayGain)
+inferBtn.addEventListener('click', inferFromFilename)
+exportM3uBtn.addEventListener('click', exportM3u)
+undoBtn.addEventListener('click', undoLast)
 
 // Filter selects
 filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; renderTracks() })
@@ -1724,8 +1682,11 @@ scanBtn.addEventListener('click', startScan)
 
 const settingsModal     = document.getElementById('settings-sidebar')!
 const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
+const discogsTokenInput = document.getElementById('setting-discogs-token') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
 const renameTemplateInput = document.getElementById('setting-rename-template') as HTMLInputElement
+const renamePreviewEl   = document.getElementById('rename-preview')!
+const replaygainStatusEl = document.getElementById('replaygain-status')!
 const musicDirsDefaultEl  = document.getElementById('music-dirs-default')!
 const musicDirsListEl     = document.getElementById('music-dirs-list')!
 const musicDirInput       = document.getElementById('music-dir-input') as HTMLInputElement
@@ -1750,11 +1711,15 @@ function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
 
 async function openSettings() {
   try {
-    const [s, status] = await Promise.all([api.settings.get(), api.lookup.status()])
+    const [s, status, rgStatus] = await Promise.all([
+      api.settings.get(), api.lookup.status(), api.tags.replaygainStatus(),
+    ])
     acoustidKeyInput.value    = s.acoustid_api_key
+    discogsTokenInput.value   = s.discogs_token ?? ''
     renameOnSaveInput.checked = s.rename_on_save
     renameTemplateInput.value = s.rename_template
     renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
+    updateRenamePreview()
     getScanTagCheckboxes().forEach(cb => {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
@@ -1762,11 +1727,31 @@ async function openSettings() {
     localMusicDirs = [...(s.music_dirs ?? [])]
     renderMusicDirsList()
     renderAcoustidStatus(status)
+    replaygainStatusEl.innerHTML = rgStatus.available
+      ? `<span class="status-ok">✓ ReplayGain available via ${rgStatus.tool}</span>`
+      : '<span class="status-warn">⚠ No ReplayGain tool found — install rsgain or loudgain on the server</span>'
   } catch (e) {
     toast(`Failed to load settings: ${e}`, 'error')
   }
   settingsModal.classList.add('open')
 }
+
+const updateRenamePreview = debounce(async () => {
+  const tpl = renameTemplateInput.value.trim()
+  if (!tpl) { renamePreviewEl.textContent = ''; return }
+  try {
+    const res = await api.settings.renamePreview(tpl)
+    if (res.ok) {
+      renamePreviewEl.textContent = 'Preview: ' + res.preview
+      renamePreviewEl.classList.remove('rename-preview-error')
+    } else {
+      renamePreviewEl.textContent = res.error ?? 'Invalid template'
+      renamePreviewEl.classList.add('rename-preview-error')
+    }
+  } catch {
+    renamePreviewEl.textContent = ''
+  }
+}, 250)
 
 function renderAcoustidStatus(status: { acoustid_configured: boolean; fpcalc_available: boolean; method: string }) {
   if (!status.acoustid_configured) {
@@ -1792,6 +1777,8 @@ document.getElementById('settings-modal-close')!.addEventListener('click', close
 renameOnSaveInput.addEventListener('change', () => {
   renameTemplateWrap.style.display = renameOnSaveInput.checked ? '' : 'none'
 })
+
+renameTemplateInput.addEventListener('input', updateRenamePreview)
 
 document.getElementById('music-dir-add-btn')!.addEventListener('click', () => {
   const val = musicDirInput.value.trim()
@@ -1820,6 +1807,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   getScanTagCheckboxes().forEach(cb => { if (cb.checked) scanTags.push(cb.dataset.tag!) })
   const update: Partial<AppSettings> = {
     acoustid_api_key:  acoustidKeyInput.value.trim(),
+    discogs_token:     discogsTokenInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,
@@ -1856,6 +1844,11 @@ async function init() {
   api.settings.get().then(s => {
     state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
   }).catch(() => {})
+  api.tags.replaygainStatus().then(s => {
+    replaygainAvailable = s.available
+    updateBulkBar()
+  }).catch(() => {})
+  await refreshUndoButton()
   await loadLibrary()
   await loadTracks()
 }

@@ -28,6 +28,9 @@ _TO_EASY: dict[str, str] = {
 
 _FROM_EASY: dict[str, str] = {v: k for k, v in _TO_EASY.items()}
 
+# Canonical ordered list of editable tag fields (single source of truth).
+TAG_FIELDS: list[str] = list(_TO_EASY)
+
 # MusicBrainz ID fields — handled separately per format
 _MB_TXXX = {
     "mb_track_id":        "MusicBrainz Track Id",

@@ -9,7 +9,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core.database import db
+from core.history import log_change, snapshot
 from core.tagger import write_tags
+from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings
 from core.config import settings as core_settings
 
@@ -24,6 +26,34 @@ def _safe(part: str) -> str:
     return part or '_'
 
 
+def render_template(template: str, tags: dict, ext: str) -> str:
+    """
+    Render a rename template into a sanitized path relative to the music root,
+    with the given extension. Raises ValueError/KeyError on a bad template.
+    """
+    fields = {
+        'title':        tags.get('title') or '',
+        'artist':       tags.get('artist') or '',
+        'album':        tags.get('album') or '',
+        'album_artist': tags.get('album_artist') or tags.get('artist') or '',
+        'year':         tags.get('year') or '',
+        'genre':        tags.get('genre') or '',
+        'track_number': tags.get('track_number') or '0',
+        'disc_number':  tags.get('disc_number') or '0',
+    }
+    track_num = int(re.sub(r'\D.*', '', fields['track_number']) or '0')
+    disc_num  = int(re.sub(r'\D.*', '', fields['disc_number'])  or '0')
+    rel = template.format(
+        track_number=track_num,
+        disc_number=disc_num,
+        **{k: fields[k] for k in ('title', 'artist', 'album', 'album_artist', 'year', 'genre')},
+    )
+    parts = [_safe(p) for p in rel.replace('\\', '/').split('/') if p]
+    if not parts:
+        raise ValueError("template produced an empty path")
+    return str(Path(*parts).with_suffix(ext))
+
+
 def _rename_path(old_path: str, merged: dict) -> str | None:
     """
     Return the new absolute path for the file after applying the rename template,
@@ -33,37 +63,15 @@ def _rename_path(old_path: str, merged: dict) -> str | None:
     if not app.rename_on_save:
         return None
 
-    fields = {
-        'title':        merged.get('title') or '',
-        'artist':       merged.get('artist') or '',
-        'album':        merged.get('album') or '',
-        'album_artist': merged.get('album_artist') or merged.get('artist') or '',
-        'year':         merged.get('year') or '',
-        'genre':        merged.get('genre') or '',
-        'track_number': merged.get('track_number') or '0',
-        'disc_number':  merged.get('disc_number') or '0',
-    }
     try:
-        track_num = int(re.sub(r'\D.*', '', fields['track_number']) or '0')
-        disc_num  = int(re.sub(r'\D.*', '', fields['disc_number'])  or '0')
-        rel = app.rename_template.format(
-            track_number=track_num,
-            disc_number=disc_num,
-            **{k: fields[k] for k in ('title', 'artist', 'album', 'album_artist', 'year', 'genre')},
-        )
-    except (KeyError, ValueError):
+        rel = render_template(app.rename_template, merged, Path(old_path).suffix)
+    except (KeyError, ValueError, IndexError):
         return None  # bad template — skip rename
 
-    ext = Path(old_path).suffix
-    # Sanitize each path component individually
-    parts = [_safe(p) for p in rel.replace('\\', '/').split('/') if p]
-    if not parts:
+    new_path = str(core_settings.music_dir / rel)
+    if new_path == old_path:
         return None
-
-    new_path = core_settings.music_dir / Path(*parts).with_suffix(ext)
-    if str(new_path) == old_path:
-        return None
-    return str(new_path)
+    return new_path
 
 
 def _apply_rename(conn, track_id: int, old_path: str, merged: dict) -> None:
@@ -101,6 +109,33 @@ class BulkTagUpdate(BaseModel):
     tags: TagUpdate
 
 
+class ReplayGainRequest(BaseModel):
+    track_ids: list[int]
+    album_mode: bool = False
+
+
+@router.get("/replaygain/status")
+def replaygain_status():
+    tool = rg_tool()
+    return {"available": tool is not None, "tool": tool}
+
+
+@router.post("/replaygain")
+def scan_replaygain(req: ReplayGainRequest):
+    if not req.track_ids:
+        raise HTTPException(400, "No track IDs provided")
+    with db() as conn:
+        placeholders = ",".join("?" * len(req.track_ids))
+        rows = conn.execute(
+            f"SELECT path FROM tracks WHERE id IN ({placeholders})", req.track_ids
+        ).fetchall()
+    paths = [r["path"] for r in rows]
+    try:
+        return rg_scan(paths, album_mode=req.album_mode)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.patch("/{track_id}")
 def update_track_tags(track_id: int, update: TagUpdate):
     updates = update.model_dump(exclude_none=True)
@@ -114,6 +149,7 @@ def update_track_tags(track_id: int, update: TagUpdate):
         if not row:
             raise HTTPException(404, "Track not found")
 
+        snap = snapshot(row)
         write_tags(row["path"], updates)
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
@@ -125,6 +161,9 @@ def update_track_tags(track_id: int, update: TagUpdate):
         merged = {**dict(row), **updates}
         _apply_rename(conn, track_id, row["path"], merged)
 
+        title = row["title"] or row["filename"]
+        log_change(conn, "tag_edit", f"Edited tags — {title}", [snap])
+
     return {"ok": True}
 
 
@@ -135,6 +174,7 @@ def bulk_update_tags(update: BulkTagUpdate):
         raise HTTPException(400, "No fields provided")
 
     errors = []
+    snaps: list[dict] = []
     with db() as conn:
         for track_id in update.track_ids:
             row = conn.execute(
@@ -144,6 +184,7 @@ def bulk_update_tags(update: BulkTagUpdate):
                 errors.append({"id": track_id, "error": "not found"})
                 continue
             try:
+                snap = snapshot(row)
                 write_tags(row["path"], updates)
                 set_clause = ", ".join(f"{k} = ?" for k in updates)
                 conn.execute(
@@ -152,7 +193,10 @@ def bulk_update_tags(update: BulkTagUpdate):
                 )
                 merged = {**dict(row), **updates}
                 _apply_rename(conn, track_id, row["path"], merged)
+                snaps.append(snap)
             except Exception as exc:
                 errors.append({"id": track_id, "error": str(exc)})
+
+        log_change(conn, "tag_edit", f"Bulk edit — {len(snaps)} tracks", snaps)
 
     return {"ok": True, "errors": errors}

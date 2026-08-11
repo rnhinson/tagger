@@ -48,9 +48,18 @@ export interface AppSettings {
   rename_on_save: boolean
   rename_template: string
   acoustid_api_key: string
+  discogs_token: string
   scan_tags: string[]
   music_dirs: string[]
   default_music_dir?: string
+}
+
+export interface ChangeLogEntry {
+  id: number
+  ts: number
+  kind: string
+  summary: string
+  undone: number
 }
 
 export interface ScanJob {
@@ -146,6 +155,12 @@ export const api = {
     artists: () => request<Artist[]>('GET', '/api/library/artists'),
     albums: (artist?: string) =>
       request<Album[]>('GET', `/api/library/albums${artist ? '?artist=' + encodeURIComponent(artist) : ''}`),
+    exportM3uUrl: (params: Record<string, string | number> = {}) => {
+      const qs = new URLSearchParams(params as Record<string, string>).toString()
+      return `/api/library/export.m3u${qs ? '?' + qs : ''}`
+    },
+    history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
+    undo: (id: number) => request<{ restored: number; kind: string }>('POST', `/api/library/history/${id}/undo`),
   },
 
   tags: {
@@ -153,6 +168,11 @@ export const api = {
       request<{ ok: boolean }>('PATCH', `/api/tags/${trackId}`, tags),
     bulk: (trackIds: number[], tags: TagUpdate) =>
       request<{ ok: boolean; errors: unknown[] }>('POST', '/api/tags/bulk', { track_ids: trackIds, tags }),
+    replaygain: (trackIds: number[], albumMode = false) =>
+      request<{ ok: boolean; tool: string | null; processed: number; error?: string }>(
+        'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
+    replaygainStatus: () =>
+      request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
   },
 
   jobs: {
@@ -169,11 +189,16 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
+    renamePreview: (template: string) =>
+      request<{ ok: boolean; preview?: string; error?: string }>(
+        'POST', '/api/config/rename-preview', { template }),
   },
 
   lookup: {
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
+    infer: (trackId: number) =>
+      request<LookupResult | null>('POST', `/api/lookup/infer/${trackId}`),
     status: () =>
       request<{ acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
         'GET', '/api/lookup/status'
