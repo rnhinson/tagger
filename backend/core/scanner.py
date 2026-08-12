@@ -21,13 +21,29 @@ from core.tagger import read_tags, is_audio_file, TAG_FIELDS
 _BATCH_SIZE = 200
 
 
+def _under(path: str, roots: list[str]) -> bool:
+    norm = os.path.normpath(path)
+    for r in roots:
+        r = os.path.normpath(r)
+        if norm == r or norm.startswith(r + os.sep):
+            return True
+    return False
+
+
 def scan_library(
     progress_cb: Callable[[int, int], None] | None = None,
     scan_tags: list[str] | None = None,
     music_dirs: list[str] | None = None,
+    prune_under: list[str] | None = None,
 ) -> tuple[int, int]:
     """
     Scan the music directories and upsert changed/new tracks into the DB.
+
+    `prune_under` scopes deletion of vanished files: when set, only DB rows
+    under those roots are removed for missing files (used by a targeted rescan
+    so it doesn't wipe tracks outside the scanned folder). When None, every
+    missing file is pruned (a full-library scan).
+
     Returns (total_found, upserted).
     """
     if music_dirs is None:
@@ -138,11 +154,15 @@ def scan_library(
 
         conn.commit()
 
-        # Remove DB rows for files that no longer exist on disk
+        # Remove DB rows for files that no longer exist on disk. A targeted
+        # rescan only prunes within the scanned roots.
         scanned = set(all_files)
         for db_path in list(existing):
-            if db_path not in scanned:
-                conn.execute("DELETE FROM tracks WHERE path = ?", (db_path,))
+            if db_path in scanned:
+                continue
+            if prune_under is not None and not _under(db_path, prune_under):
+                continue
+            conn.execute("DELETE FROM tracks WHERE path = ?", (db_path,))
         conn.commit()
 
     finally:

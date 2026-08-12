@@ -112,6 +112,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <ul id="artist-list" class="nav-list"></ul>
       </nav>
       <nav id="panel-files" class="sidebar-panel" hidden>
+        <div class="nav-toolbar">
+          <button id="rescan-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rescan just the selected folder" disabled>Rescan folder</button>
+        </div>
         <div id="dir-tree" class="dir-tree"></div>
       </nav>
       <nav id="panel-quality" class="sidebar-panel" hidden>
@@ -236,6 +239,7 @@ const bulkActions    = document.getElementById('bulk-actions')!
 const selectionCount = document.getElementById('selection-count')!
 const searchEl       = document.getElementById('search') as HTMLInputElement
 const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
+const rescanFolderBtn = document.getElementById('rescan-folder-btn') as HTMLButtonElement
 const scanStatusEl   = document.getElementById('scan-status')!
 const colPickerBtn   = document.getElementById('col-picker-btn')!
 const colPickerEl    = document.getElementById('col-picker')!
@@ -346,6 +350,7 @@ function renderFilesPanel() {
 
   dirTreeEl.innerHTML = ''
   dirTreeEl.appendChild(ul)
+  updateRescanBtn()
 }
 
 function renderDirNode(node: DirNode, depth: number): HTMLElement {
@@ -1122,14 +1127,21 @@ async function loadTracks() {
 
 // ─── Scan ─────────────────────────────────────────────────────────────────────
 
-async function startScan() {
+function updateRescanBtn() {
+  rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
+}
+
+async function startScan(directory?: string) {
   try {
     scanBtn.disabled = true
-    const { job_id } = await api.jobs.startScan()
+    rescanFolderBtn.disabled = true
+    const { job_id } = await api.jobs.startScan(directory)
     pollScan(job_id)
   } catch (e) {
-    toast(`Scan failed to start: ${e}`, 'error')
+    const msg = String(e).includes('409') ? 'A scan is already running' : `Scan failed to start: ${e}`
+    toast(msg, 'error')
     scanBtn.disabled = false
+    updateRescanBtn()
   }
 }
 
@@ -1144,6 +1156,7 @@ function pollScan(jobId: string) {
         clearInterval(state.scanPollTimer!)
         state.scanPollTimer = null
         scanBtn.disabled = false
+        updateRescanBtn()
         if (job.status === 'done') {
           toast(`Scan complete — ${job.scanned} tracks indexed`, 'success')
           state.qualityIssues = null
@@ -1160,6 +1173,7 @@ function pollScan(jobId: string) {
       clearInterval(state.scanPollTimer!)
       state.scanPollTimer = null
       scanBtn.disabled = false
+      updateRescanBtn()
       toast(`Scan polling failed: ${e}`, 'error')
     }
   }, 1000)
@@ -1718,7 +1732,10 @@ searchEl.addEventListener('input', () => {
   debouncedSearch()
 })
 
-scanBtn.addEventListener('click', startScan)
+scanBtn.addEventListener('click', () => startScan())
+rescanFolderBtn.addEventListener('click', () => {
+  if (state.selectedDirectory) startScan(state.selectedDirectory)
+})
 
 // ─── Settings modal ───────────────────────────────────────────────────────────
 

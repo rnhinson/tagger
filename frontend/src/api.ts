@@ -195,7 +195,9 @@ export const api = {
   },
 
   jobs: {
-    startScan: () => request<{ job_id: string }>('POST', '/api/jobs/scan'),
+    startScan: (directory?: string) =>
+      request<{ job_id: string; directory: string | null }>(
+        'POST', `/api/jobs/scan${directory ? '?directory=' + encodeURIComponent(directory) : ''}`),
     list: () => request<ScanJob[]>('GET', '/api/jobs'),
     get: (jobId: string) => request<ScanJob>('GET', `/api/jobs/${jobId}`),
   },
