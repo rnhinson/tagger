@@ -71,7 +71,7 @@ def test_tag_fields_is_canonical():
     assert ALL_SCAN_TAGS is TAG_FIELDS
     assert TAG_FIELDS == [
         "title", "artist", "album", "album_artist", "year",
-        "genre", "track_number", "disc_number", "comment",
+        "genre", "track_number", "disc_number", "comment", "composer", "bpm",
     ]
 
 

@@ -21,6 +21,8 @@ export interface Track {
   track_number: string | null
   disc_number: string | null
   comment: string | null
+  composer: string | null
+  bpm: string | null
   mb_track_id: string | null
   mb_artist_id: string | null
   mb_album_id: string | null
@@ -85,6 +87,8 @@ export interface TagUpdate {
   track_number?: string | null
   disc_number?: string | null
   comment?: string | null
+  composer?: string | null
+  bpm?: string | null
   mb_track_id?: string | null
   mb_artist_id?: string | null
   mb_album_id?: string | null
@@ -195,6 +199,11 @@ export const api = {
       request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
     reorganize: (trackIds: number[]) =>
       request<{ moved: number; errors: unknown[] }>('POST', '/api/tags/reorganize', { track_ids: trackIds }),
+    autonumber: (trackIds: number[]) =>
+      request<{ numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
+    findReplace: (trackIds: number[], field: string, find: string, replace: string) =>
+      request<{ changed: number }>('POST', '/api/tags/find-replace',
+        { track_ids: trackIds, field, find, replace }),
   },
 
   jobs: {

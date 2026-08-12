@@ -75,6 +75,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <label class="settings-toggle"><input type="checkbox" data-tag="track_number" /><span>Track Number</span></label>
           <label class="settings-toggle"><input type="checkbox" data-tag="disc_number" /><span>Disc Number</span></label>
           <label class="settings-toggle"><input type="checkbox" data-tag="comment" /><span>Comment</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="composer" /><span>Composer</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="bpm" /><span>BPM</span></label>
         </div>
       </div>
       <div class="settings-section">
@@ -133,6 +135,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <div id="bulk-actions" class="bulk-actions" hidden>
             <span id="selection-count" class="selection-count"></span>
             <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
+            <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
+            <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
             <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
             <button id="organize-btn" class="btn btn-ghost btn-sm" title="Move the selected files on disk using the rename template">Organize files</button>
             <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
@@ -214,6 +218,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <label class="field-label">Track #<input name="track_number" type="text" /></label>
         <label class="field-label">Disc #<input name="disc_number" type="text" /></label>
         <label class="field-label">Genre<input name="genre" type="text" /></label>
+        <label class="field-label">Composer<input name="composer" type="text" /></label>
+        <label class="field-label">BPM<input name="bpm" type="text" inputmode="numeric" /></label>
         <label class="field-label">Comment<textarea name="comment" rows="3"></textarea></label>
         <div class="tag-form-actions">
           <button type="submit" class="btn btn-primary">Save</button>
@@ -258,6 +264,8 @@ const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
 const qualityListEl    = document.getElementById('quality-list')!
 const normalizeCaseBtn  = document.getElementById('normalize-case-btn') as HTMLButtonElement
+const autonumberBtn     = document.getElementById('autonumber-btn') as HTMLButtonElement
+const findReplaceBtn    = document.getElementById('find-replace-btn') as HTMLButtonElement
 const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
 const deleteFilesBtn    = document.getElementById('delete-files-btn') as HTMLButtonElement
 const organizeBtn       = document.getElementById('organize-btn') as HTMLButtonElement
@@ -1357,6 +1365,83 @@ async function organizeFiles() {
   }
 }
 
+// ─── Album flows: auto-number & find/replace ────────────────────────────────────
+
+async function refreshAfterBulk() {
+  state.qualityIssues = null
+  if (state.sidebarMode === 'tags') await loadLibrary()
+  await loadTracks()
+  if (state.sidebarMode === 'quality') await renderQualityPanel()
+  const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (updated.length) populateForm(updated)
+  await refreshUndoButton()
+}
+
+async function autoNumber() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  autonumberBtn.disabled = true
+  try {
+    const { numbered } = await api.tags.autonumber(ids)
+    toast(`Numbered ${numbered} track${numbered !== 1 ? 's' : ''}`, 'success')
+    await refreshAfterBulk()
+  } catch (e) {
+    toast(`Auto-number failed: ${e}`, 'error')
+  } finally {
+    autonumberBtn.disabled = false
+  }
+}
+
+const FIND_REPLACE_FIELDS: { key: string; label: string }[] = [
+  { key: 'title', label: 'Title' }, { key: 'artist', label: 'Artist' },
+  { key: 'album', label: 'Album' }, { key: 'album_artist', label: 'Album Artist' },
+  { key: 'genre', label: 'Genre' }, { key: 'composer', label: 'Composer' },
+  { key: 'comment', label: 'Comment' },
+]
+
+function showFindReplace() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.innerHTML = `
+    <form class="modal-card" id="fr-form">
+      <div class="modal-title">Find & replace in ${ids.length} track${ids.length !== 1 ? 's' : ''}</div>
+      <label class="field-label">Field
+        <select id="fr-field">${FIND_REPLACE_FIELDS.map(f => `<option value="${f.key}">${f.label}</option>`).join('')}</select>
+      </label>
+      <label class="field-label">Find<input id="fr-find" type="text" autocomplete="off" /></label>
+      <label class="field-label">Replace with<input id="fr-replace" type="text" autocomplete="off" /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="fr-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Replace</button>
+      </div>
+    </form>
+  `
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#fr-cancel')!.addEventListener('click', close)
+  const findInput = overlay.querySelector<HTMLInputElement>('#fr-find')!
+  findInput.focus()
+  overlay.querySelector<HTMLFormElement>('#fr-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const field = overlay.querySelector<HTMLSelectElement>('#fr-field')!.value
+    const find = findInput.value
+    const replace = overlay.querySelector<HTMLInputElement>('#fr-replace')!.value
+    if (!find) { findInput.focus(); return }
+    try {
+      const { changed } = await api.tags.findReplace(ids, field, find, replace)
+      toast(changed ? `Replaced in ${changed} track${changed !== 1 ? 's' : ''}` : 'No matches found',
+            changed ? 'success' : 'info')
+      close()
+      await refreshAfterBulk()
+    } catch (err) {
+      toast(`Find/replace failed: ${err}`, 'error')
+    }
+  })
+}
+
 // ─── Infer tags from filename ───────────────────────────────────────────────────
 
 async function inferFromFilename() {
@@ -1710,6 +1795,8 @@ normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
 deleteFilesBtn.addEventListener('click', deleteFiles)
 organizeBtn.addEventListener('click', organizeFiles)
+autonumberBtn.addEventListener('click', autoNumber)
+findReplaceBtn.addEventListener('click', showFindReplace)
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)

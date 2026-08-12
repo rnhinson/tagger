@@ -11,6 +11,15 @@ from typing import Any
 
 import mutagen
 from mutagen.easyid3 import EasyID3
+from mutagen.easymp4 import EasyMP4
+
+# EasyMP4 doesn't register composer/bpm by default — add them so the MP4/M4A
+# path handles the same field set as ID3 and Vorbis.
+for _key, _atom in (("composer", "\xa9wrt"),):
+    if _key not in EasyMP4.Get:
+        EasyMP4.RegisterTextKey(_key, _atom)
+if "bpm" not in EasyMP4.Get:
+    EasyMP4.RegisterIntKey("bpm", "tmpo")
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".oga"}
 
@@ -25,6 +34,8 @@ _TO_EASY: dict[str, str] = {
     "track_number": "tracknumber",
     "disc_number": "discnumber",
     "comment": "comment",
+    "composer": "composer",
+    "bpm": "bpm",
 }
 
 _FROM_EASY: dict[str, str] = {v: k for k, v in _TO_EASY.items()}

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from core.database import db
 from core.history import log_change, snapshot
-from core.tagger import write_tags
+from core.tagger import write_tags, TAG_FIELDS
 from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings
 from core.config import settings as core_settings
@@ -99,6 +99,8 @@ class TagUpdate(BaseModel):
     track_number: Optional[str] = None
     disc_number: Optional[str] = None
     comment: Optional[str] = None
+    composer: Optional[str] = None
+    bpm: Optional[str] = None
     mb_track_id: Optional[str] = None
     mb_artist_id: Optional[str] = None
     mb_album_id: Optional[str] = None
@@ -166,6 +168,74 @@ def update_track_tags(track_id: int, update: TagUpdate):
         log_change(conn, "tag_edit", f"Edited tags — {title}", [snap])
 
     return {"ok": True}
+
+
+class AutoNumber(BaseModel):
+    track_ids: list[int]
+
+
+class FindReplace(BaseModel):
+    track_ids: list[int]
+    field: str
+    find: str
+    replace: str = ""
+
+
+@router.post("/autonumber")
+def autonumber(req: AutoNumber):
+    """Assign sequential track numbers to the selection, ordered by filename."""
+    if not req.track_ids:
+        raise HTTPException(400, "No track IDs provided")
+    with db() as conn:
+        placeholders = ",".join("?" * len(req.track_ids))
+        rows = conn.execute(
+            f"SELECT * FROM tracks WHERE id IN ({placeholders})", req.track_ids
+        ).fetchall()
+        rows = sorted(rows, key=lambda r: r["filename"].lower())
+        snaps = []
+        for i, row in enumerate(rows, start=1):
+            snap = snapshot(row)
+            write_tags(row["path"], {"track_number": str(i)})
+            conn.execute(
+                "UPDATE tracks SET track_number = ?, tagged_at = ? WHERE id = ?",
+                (str(i), time.time(), row["id"]),
+            )
+            snaps.append(snap)
+        log_change(conn, "tag_edit", f"Auto-numbered {len(snaps)} tracks", snaps)
+    return {"numbered": len(rows)}
+
+
+@router.post("/find-replace")
+def find_replace(req: FindReplace):
+    """Replace text within one tag field across the selection (case-sensitive)."""
+    if req.field not in TAG_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    if not req.find:
+        raise HTTPException(400, "Nothing to find")
+    changed = 0
+    snaps = []
+    with db() as conn:
+        placeholders = ",".join("?" * len(req.track_ids))
+        rows = conn.execute(
+            f"SELECT * FROM tracks WHERE id IN ({placeholders})", req.track_ids
+        ).fetchall()
+        for row in rows:
+            val = row[req.field]
+            if not val or req.find not in val:
+                continue
+            new_val = val.replace(req.find, req.replace)
+            if new_val == val:
+                continue
+            snap = snapshot(row)
+            write_tags(row["path"], {req.field: new_val})
+            conn.execute(
+                f"UPDATE tracks SET {req.field} = ?, tagged_at = ? WHERE id = ?",
+                (new_val, time.time(), row["id"]),
+            )
+            snaps.append(snap)
+            changed += 1
+        log_change(conn, "tag_edit", f"Find/replace on {changed} tracks", snaps)
+    return {"changed": changed}
 
 
 class Reorganize(BaseModel):
