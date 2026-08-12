@@ -58,6 +58,29 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
         )
 
 
+async def auto_scan_loop() -> None:
+    """
+    Background freshness loop. When auto_scan_minutes > 0, runs a full scan on
+    that interval (skipping if one is already running). Re-reads settings each
+    cycle, so it can be toggled without a restart. Off by default.
+    """
+    from api.config import _load as load_app_settings
+
+    while True:
+        mins = 0
+        try:
+            mins = load_app_settings().auto_scan_minutes
+        except Exception:
+            pass
+        # When disabled, idle in short hops so re-enabling takes effect quickly.
+        await asyncio.sleep(max(1, mins) * 60 if mins else 60)
+        if mins and not active_scan():
+            try:
+                await run_scan_job(create_scan_job())
+            except Exception:
+                pass
+
+
 async def run_scan_job(job_id: str, directory: str | None = None) -> None:
     """
     Run a library scan as a background task, updating job status in DB.
@@ -83,7 +106,8 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
 
     try:
         total, upserted = await asyncio.to_thread(
-            scan_library, progress, app_settings.scan_tags, music_dirs, prune_under
+            scan_library, progress, app_settings.scan_tags, music_dirs,
+            prune_under, app_settings.scan_exclude,
         )
         _update_job(
             job_id,

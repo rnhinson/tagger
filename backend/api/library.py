@@ -180,6 +180,31 @@ def delete_files(track_ids: list[int]):
     return {"deleted": len(rows)}
 
 
+@router.get("/trash")
+def trash_info():
+    """Count and total size of files sitting in the delete-to-trash folder."""
+    trash = settings.config_dir / "trash"
+    if not trash.is_dir():
+        return {"count": 0, "bytes": 0}
+    files = [f for f in trash.iterdir() if f.is_file()]
+    return {"count": len(files), "bytes": sum(f.stat().st_size for f in files)}
+
+
+@router.post("/trash/empty")
+def empty_trash():
+    """Permanently delete everything in the trash folder. Not undoable."""
+    trash = settings.config_dir / "trash"
+    if not trash.is_dir():
+        return {"removed": 0, "bytes": 0}
+    removed, freed = 0, 0
+    for f in list(trash.iterdir()):
+        if f.is_file():
+            freed += f.stat().st_size
+            f.unlink()
+            removed += 1
+    return {"removed": removed, "bytes": freed}
+
+
 @router.get("/history")
 def get_history(limit: int = Query(50, le=200)):
     with db() as conn:

@@ -43,6 +43,11 @@ const coverImg         = document.getElementById('cover-img') as HTMLImageElemen
 const coverPlaceholder = document.getElementById('cover-placeholder')!
 const coverInput       = document.getElementById('cover-input') as HTMLInputElement
 const playerEl         = document.getElementById('player') as HTMLAudioElement
+const editorRenamePreviewEl = document.getElementById('editor-rename-preview')!
+
+// Rename settings mirrored client-side for the editor's live save-path preview.
+let renameOnSave = false
+let renameTemplate = ''
 const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
 const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
@@ -252,7 +257,7 @@ function renderAlbumGrid() {
     const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
     card.innerHTML = `
       <div class="album-cover-wrap">
-        <img class="album-cover" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
+        <img class="album-cover" loading="lazy" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
         <div class="album-cover-placeholder">♪</div>
       </div>
       <div class="album-info">
@@ -394,6 +399,12 @@ function renderTracks() {
   trackTbody.innerHTML = ''
 
   if (!state.tracks.length) {
+    const pristine = state.total === 0 && !state.query && !state.artists.length
+      && state.selectedArtist === null && state.selectedAlbum === null
+      && state.selectedDirectory === null && !state.selectedIssue
+    trackEmpty.innerHTML = pristine
+      ? 'Your library is empty. Click <strong>Scan Library</strong> to index your music.'
+      : 'No tracks found.'
     trackEmpty.hidden = false
     trackLoading.hidden = true
     trackCount.textContent = '0 tracks'
@@ -485,7 +496,7 @@ function renderPagination() {
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
-  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; return }
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; editorRenamePreviewEl.hidden = true; return }
   tagEditor.hidden = false
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
@@ -497,7 +508,30 @@ function renderEditor() {
   populateForm(sel)
   updateCoverPreview()
   updatePlayer()
+  updateEditorRenamePreview()
 }
+
+const updateEditorRenamePreview = debounce(async () => {
+  if (state.selectedIds.size !== 1 || !renameOnSave || !renameTemplate) {
+    editorRenamePreviewEl.hidden = true
+    return
+  }
+  const tags: Record<string, string> = {}
+  for (const field of TAG_FIELDS) {
+    const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
+    if (el) tags[field] = el.value
+  }
+  const track = state.tracks.find(t => state.selectedIds.has(t.id))
+  const ext = track ? '.' + (track.filename.split('.').pop() || 'flac') : '.flac'
+  try {
+    const res = await api.settings.renamePreview(renameTemplate, tags, ext)
+    editorRenamePreviewEl.hidden = false
+    editorRenamePreviewEl.textContent = res.ok ? 'Saves to: ' + res.preview : (res.error ?? '')
+    editorRenamePreviewEl.classList.toggle('rename-preview-error', !res.ok)
+  } catch {
+    editorRenamePreviewEl.hidden = true
+  }
+}, 250)
 
 function updatePlayer() {
   if (state.selectedIds.size === 1) {
@@ -522,6 +556,8 @@ function updateCoverPreview() {
   coverImg.onerror = () => { coverImg.style.display = 'none';  coverPlaceholder.style.display = 'flex' }
 }
 
+const compilationCheckbox = () => tagForm.elements.namedItem('compilation') as HTMLInputElement
+
 function populateForm(tracks: Track[]) {
   for (const field of TAG_FIELDS) {
     const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
@@ -534,6 +570,12 @@ function populateForm(tracks: Track[]) {
       el.value = ''; el.placeholder = '(multiple values)'; (el as HTMLElement).dataset.mixed = '1'
     }
   }
+  // compilation: boolean checkbox; indeterminate = mixed across the selection.
+  const comp = tracks.map(t => t.compilation === '1')
+  const compSame = comp.every(v => v === comp[0])
+  const cb = compilationCheckbox()
+  cb.indeterminate = !compSame
+  cb.checked = compSame ? comp[0] : false
 }
 
 // ─── MusicBrainz lookup ───────────────────────────────────────────────────────
@@ -548,6 +590,41 @@ const SOURCE_BADGES: Record<string, { cls: string; label: string }> = {
 function renderSourceBadge(source: string): string {
   const b = SOURCE_BADGES[source] ?? SOURCE_BADGES.musicbrainz
   return `<span class="lookup-source-badge ${b.cls}">${b.label}</span>`
+}
+
+function attachEditions(li: HTMLElement, r: LookupResult) {
+  const btn = li.querySelector<HTMLButtonElement>('.lookup-editions-btn')
+  if (!btn || !r.mb_track_id) return
+  let panel: HTMLElement | null = null
+  let loaded = false
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    if (panel) { panel.hidden = !panel.hidden; return }
+    panel = document.createElement('ul')
+    panel.className = 'lookup-editions'
+    panel.innerHTML = '<li class="lookup-editions-note">Loading editions…</li>'
+    li.appendChild(panel)
+    try {
+      const releases = await api.lookup.releases(r.mb_track_id!)
+      loaded = true
+      if (!releases.length) { panel.innerHTML = '<li class="lookup-editions-note">No releases found</li>'; return }
+      panel.innerHTML = ''
+      for (const rel of releases) {
+        const row = document.createElement('li')
+        row.className = 'lookup-edition'
+        const bits = [rel.year, rel.country, rel.format, rel.track_count ? `${rel.track_count} tracks` : null]
+          .filter(Boolean).join(' · ')
+        row.innerHTML = `<span class="lookup-edition-album">${esc(rel.album || '(unknown)')}</span><span class="lookup-edition-meta">${esc(bits)}</span>`
+        row.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          applyLookupResult({ ...r, album: rel.album, year: rel.year, mb_album_id: rel.mb_album_id })
+        })
+        panel.appendChild(row)
+      }
+    } catch (err) {
+      if (!loaded) panel.innerHTML = `<li class="lookup-editions-note">Error: ${esc(String(err))}</li>`
+    }
+  })
 }
 
 async function runLookup() {
@@ -575,20 +652,25 @@ async function runLookup() {
       const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
       const sourceBadge = renderSourceBadge(r.source)
       const thumbHtml = r.mb_album_id
-        ? `<img class="lookup-thumb" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
+        ? `<img class="lookup-thumb" loading="lazy" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
         : `<div class="lookup-thumb lookup-thumb-empty">♪</div>`
+      const canPickEdition = r.source === 'musicbrainz' && !!r.mb_track_id
+      const editionsBtn = canPickEdition
+        ? `<button class="lookup-editions-btn" title="Choose a specific release/edition">Editions ▾</button>`
+        : ''
       li.innerHTML = `
         ${thumbHtml}
         <span class="lookup-score ${scoreClass}">${pct}%</span>
         <span class="lookup-info">
           <span class="lookup-track-title">${esc(r.title || '(unknown)')} ${sourceBadge}</span>
-          <span class="lookup-meta">${esc(r.artist || '')}${r.album ? ' · ' + esc(r.album) : ''}${r.year ? ' · ' + esc(r.year) : ''}</span>
+          <span class="lookup-meta">${esc(r.artist || '')}${r.album ? ' · ' + esc(r.album) : ''}${r.year ? ' · ' + esc(r.year) : ''} ${editionsBtn}</span>
         </span>
       `
       // Hide broken thumbnails gracefully
       li.querySelector<HTMLImageElement>('.lookup-thumb')
         ?.addEventListener('error', function() { this.style.display = 'none' })
       li.addEventListener('click', () => applyLookupResult(r))
+      if (canPickEdition) attachEditions(li, r)
       lookupResults.appendChild(li)
     }
   } catch (e) {
@@ -986,6 +1068,9 @@ async function saveTags(e: Event) {
     if ((el as HTMLElement).dataset.mixed === '1' && el.value === '') continue
     update[field] = el.value
   }
+  // compilation: apply unless it's still "mixed" (indeterminate) across a multi-selection.
+  const cb = compilationCheckbox()
+  if (!cb.indeterminate) update.compilation = cb.checked ? '1' : ''
   // Attach MB IDs from pending lookup result
   if (state.pendingLookupResult) {
     const r = state.pendingLookupResult
@@ -1617,8 +1702,38 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault()
       tagForm.requestSubmit()
     }
+  } else if (e.key === '?') {
+    e.preventDefault()
+    showKeyboardHelp()
   }
 })
+
+const SHORTCUTS: [string, string][] = [
+  ['↑ / ↓', 'Move between tracks'],
+  ['Click', 'Select a track'],
+  ['Shift-click', 'Select a range'],
+  ['Ctrl/⌘ + S', 'Save tags'],
+  ['Esc', 'Close the editor'],
+  ['?', 'Show this help'],
+]
+
+function showKeyboardHelp() {
+  if (document.querySelector('.modal-overlay')) return
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const rows = SHORTCUTS.map(([k, d]) => `<tr><td class="kbd-key"><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-title">Keyboard shortcuts</div>
+      <table class="kbd-table"><tbody>${rows}</tbody></table>
+      <div class="modal-actions"><button class="btn btn-primary" id="kbd-close">Close</button></div>
+    </div>
+  `
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#kbd-close')!.addEventListener('click', close)
+}
 
 // Quality panel: issue item clicks
 qualityListEl.addEventListener('click', async (e) => {
@@ -1642,7 +1757,7 @@ document.getElementById('close-editor')!.addEventListener('click', () => {
 })
 
 tagForm.addEventListener('submit', saveTags)
-tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed })
+tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed; updateEditorRenamePreview() })
 
 document.getElementById('revert-btn')!.addEventListener('click', () => {
   populateForm(state.tracks.filter(t => state.selectedIds.has(t.id)))
@@ -1670,6 +1785,8 @@ rescanFolderBtn.addEventListener('click', () => {
 const settingsModal     = document.getElementById('settings-sidebar')!
 const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
 const discogsTokenInput = document.getElementById('setting-discogs-token') as HTMLInputElement
+const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTMLTextAreaElement
+const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
 const renameTemplateInput = document.getElementById('setting-rename-template') as HTMLInputElement
 const renamePreviewEl   = document.getElementById('rename-preview')!
@@ -1703,6 +1820,8 @@ async function openSettings() {
     ])
     acoustidKeyInput.value    = s.acoustid_api_key
     discogsTokenInput.value   = s.discogs_token ?? ''
+    scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
+    autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
     renameTemplateInput.value = s.rename_template
     renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
@@ -1721,8 +1840,44 @@ async function openSettings() {
     toast(`Failed to load settings: ${e}`, 'error')
   }
   logoutBtn.hidden = !authRequired
+  refreshTrashStatus()
   settingsModal.classList.add('open')
 }
+
+const trashStatusEl = document.getElementById('trash-status')!
+const emptyTrashBtn = document.getElementById('empty-trash-btn') as HTMLButtonElement
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB']
+  let v = n / 1024, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+
+async function refreshTrashStatus() {
+  try {
+    const { count, bytes } = await api.library.trashInfo()
+    trashStatusEl.textContent = count
+      ? `${count} file${count !== 1 ? 's' : ''} in trash · ${fmtBytes(bytes)}`
+      : 'Trash is empty'
+    emptyTrashBtn.disabled = count === 0
+  } catch {
+    trashStatusEl.textContent = ''
+  }
+}
+
+emptyTrashBtn.addEventListener('click', async () => {
+  if (!confirm('Permanently delete all files in the trash? This cannot be undone.')) return
+  emptyTrashBtn.disabled = true
+  try {
+    const { removed, bytes } = await api.library.emptyTrash()
+    toast(`Emptied trash — removed ${removed} file${removed !== 1 ? 's' : ''} (${fmtBytes(bytes)})`, 'success')
+    await refreshTrashStatus()
+  } catch (e) {
+    toast(`Failed to empty trash: ${e}`, 'error')
+  }
+})
 
 const updateRenamePreview = debounce(async () => {
   const tpl = renameTemplateInput.value.trim()
@@ -1811,10 +1966,14 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,
     music_dirs:        localMusicDirs,
+    scan_exclude:      scanExcludeInput.value.split('\n').map(x => x.trim()).filter(Boolean),
+    auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
   }
   try {
     const saved = await api.settings.update(update)
     state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
+    renameOnSave = saved.rename_on_save
+    renameTemplate = saved.rename_template
     // Refresh lookup status after saving
     const status = await api.lookup.status()
     lookupBtn.title = status.method === 'acoustid'
@@ -1891,6 +2050,8 @@ async function startApp() {
   }).catch(() => {})
   api.settings.get().then(s => {
     state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
+    renameOnSave = s.rename_on_save
+    renameTemplate = s.rename_template
   }).catch(() => {})
   api.tags.replaygainStatus().then(s => {
     replaygainAvailable = s.available

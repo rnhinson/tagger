@@ -68,3 +68,15 @@ def test_reorganize_and_undo(client, tmp_path):
 
 def test_delete_files_requires_ids(client):
     assert client.post("/api/library/delete-files", json=[]).status_code == 400
+
+
+def test_trash_info_and_empty(client):
+    trash = settings.config_dir / "trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    (trash / "old.mp3").write_bytes(b"x" * 10)
+
+    info = client.get("/api/library/trash").json()
+    assert info["count"] == 1 and info["bytes"] == 10
+
+    assert client.post("/api/library/trash/empty").json()["removed"] == 1
+    assert client.get("/api/library/trash").json()["count"] == 0

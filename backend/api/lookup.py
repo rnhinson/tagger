@@ -87,6 +87,12 @@ async def search_track(track_id: int):
     ]
 
 
+@router.get("/releases/{mb_track_id}")
+async def list_releases(mb_track_id: str):
+    """List the releases/editions a recording appears on (for the edition picker)."""
+    return await _mb.list_releases(mb_track_id)
+
+
 @router.post("/infer/{track_id}")
 def infer_from_path(track_id: int):
     """Propose tags parsed from the file's path/name (source='filename')."""

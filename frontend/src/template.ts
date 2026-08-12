@@ -50,6 +50,12 @@ export const APP_HTML = `
         <div id="replaygain-status" class="acoustid-status"></div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Trash</div>
+        <p class="settings-hint">Deleted files are moved to a trash folder and can be restored with Undo. Emptying trash frees that space permanently.</p>
+        <div id="trash-status" class="acoustid-status"></div>
+        <button id="empty-trash-btn" class="btn btn-ghost btn-sm">Empty trash</button>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Scan Tags</div>
         <p class="settings-hint">Choose which tags are read from audio files during a library scan. Disabled tags will be left empty in the database.</p>
         <div id="scan-tags-list" class="scan-tags-list">
@@ -64,7 +70,20 @@ export const APP_HTML = `
           <label class="settings-toggle"><input type="checkbox" data-tag="comment" /><span>Comment</span></label>
           <label class="settings-toggle"><input type="checkbox" data-tag="composer" /><span>Composer</span></label>
           <label class="settings-toggle"><input type="checkbox" data-tag="bpm" /><span>BPM</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="lyrics" /><span>Lyrics</span></label>
+          <label class="settings-toggle"><input type="checkbox" data-tag="compilation" /><span>Compilation</span></label>
         </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Scan Options</div>
+        <label class="field-label">Exclude patterns
+          <textarea id="setting-scan-exclude" rows="3" placeholder="One glob per line — e.g. *Podcasts*  or  ._*"></textarea>
+          <span class="settings-hint">Files or folders matching any pattern are skipped during scans.</span>
+        </label>
+        <label class="field-label">Auto-rescan interval (minutes)
+          <input id="setting-auto-scan" type="number" min="0" step="1" />
+          <span class="settings-hint">Automatically rescan the library on this interval. 0 disables it.</span>
+        </label>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">File Renaming</div>
@@ -207,7 +226,10 @@ export const APP_HTML = `
         <label class="field-label">Genre<input name="genre" type="text" /></label>
         <label class="field-label">Composer<input name="composer" type="text" /></label>
         <label class="field-label">BPM<input name="bpm" type="text" inputmode="numeric" /></label>
+        <label class="field-check"><input name="compilation" type="checkbox" /><span>Part of a compilation</span></label>
         <label class="field-label">Comment<textarea name="comment" rows="3"></textarea></label>
+        <label class="field-label">Lyrics<textarea name="lyrics" rows="4"></textarea></label>
+        <div id="editor-rename-preview" class="rename-preview" hidden></div>
         <div class="tag-form-actions">
           <button type="submit" class="btn btn-primary">Save</button>
           <button type="button" id="revert-btn" class="btn btn-ghost">Revert</button>

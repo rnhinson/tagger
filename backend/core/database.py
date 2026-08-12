@@ -38,6 +38,8 @@ def _migrate(conn) -> None:
         ("channels", "INTEGER"),
         ("composer", "TEXT"),
         ("bpm", "TEXT"),
+        ("lyrics", "TEXT"),
+        ("compilation", "TEXT"),
     ):
         if col not in have:
             conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
@@ -69,6 +71,8 @@ def init_db() -> None:
                 comment            TEXT,
                 composer           TEXT,
                 bpm                TEXT,
+                lyrics             TEXT,
+                compilation        TEXT,
                 mb_track_id        TEXT,
                 mb_artist_id       TEXT,
                 mb_album_id        TEXT,

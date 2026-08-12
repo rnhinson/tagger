@@ -16,11 +16,13 @@ export function saveColPrefs(cols: Set<string>): void {
   localStorage.setItem(COLS_KEY, JSON.stringify([...cols]))
 }
 
-export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment' | 'composer' | 'bpm'
+export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment' | 'composer' | 'bpm' | 'lyrics'
 
+// Text/textarea fields driven by the generic form loop. `compilation` is a
+// boolean checkbox handled separately in populateForm/saveTags.
 export const TAG_FIELDS: TagField[] = [
   'title', 'artist', 'album', 'album_artist', 'year',
-  'track_number', 'disc_number', 'genre', 'comment', 'composer', 'bpm',
+  'track_number', 'disc_number', 'genre', 'comment', 'composer', 'bpm', 'lyrics',
 ]
 
 export interface DirNode {

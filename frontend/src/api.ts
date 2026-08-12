@@ -23,6 +23,8 @@ export interface Track {
   comment: string | null
   composer: string | null
   bpm: string | null
+  lyrics: string | null
+  compilation: string | null
   mb_track_id: string | null
   mb_artist_id: string | null
   mb_album_id: string | null
@@ -56,6 +58,8 @@ export interface AppSettings {
   discogs_token: string
   scan_tags: string[]
   music_dirs: string[]
+  scan_exclude: string[]
+  auto_scan_minutes: number
   default_music_dir?: string
 }
 
@@ -89,6 +93,8 @@ export interface TagUpdate {
   comment?: string | null
   composer?: string | null
   bpm?: string | null
+  lyrics?: string | null
+  compilation?: string | null
   mb_track_id?: string | null
   mb_artist_id?: string | null
   mb_album_id?: string | null
@@ -109,6 +115,15 @@ export interface LookupResult {
   mb_album_artist_id: string | null
   score: number
   source: string
+}
+
+export interface MbRelease {
+  mb_album_id: string | null
+  album: string | null
+  year: string | null
+  country: string | null
+  format: string | null
+  track_count: number | null
 }
 
 export interface IssueCount {
@@ -185,6 +200,8 @@ export const api = {
     history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
     undo: (id: number) => request<{ restored: number; kind: string }>('POST', `/api/library/history/${id}/undo`),
     dedupeKeepBest: () => request<{ removed: number }>('POST', '/api/library/dedupe/keep-best'),
+    trashInfo: () => request<{ count: number; bytes: number }>('GET', '/api/library/trash'),
+    emptyTrash: () => request<{ removed: number; bytes: number }>('POST', '/api/library/trash/empty'),
   },
 
   tags: {
@@ -222,9 +239,9 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
-    renamePreview: (template: string) =>
+    renamePreview: (template: string, tags?: Record<string, string>, ext?: string) =>
       request<{ ok: boolean; preview?: string; error?: string }>(
-        'POST', '/api/config/rename-preview', { template }),
+        'POST', '/api/config/rename-preview', { template, tags, ext }),
   },
 
   lookup: {
@@ -232,6 +249,8 @@ export const api = {
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
     infer: (trackId: number) =>
       request<LookupResult | null>('POST', `/api/lookup/infer/${trackId}`),
+    releases: (mbTrackId: string) =>
+      request<MbRelease[]>('GET', `/api/lookup/releases/${encodeURIComponent(mbTrackId)}`),
     status: () =>
       request<{ acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
         'GET', '/api/lookup/status'

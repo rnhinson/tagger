@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from core.database import db
-from core.scanner import _under, scan_library
+from core.scanner import _under, _excluded, scan_library
 from tests.conftest import FFMPEG
 
 
@@ -64,3 +64,26 @@ def test_concurrent_scan_blocked(client):
 def test_targeted_scan_rejects_outside_dir(client):
     r = client.post("/api/jobs/scan", params={"directory": "/etc"})
     assert r.status_code == 403
+
+
+def test_excluded_matching():
+    assert _excluded("/m/a/song.mp3", ["*.mp3"]) is True
+    assert _excluded("/m/a/song.flac", ["*.mp3"]) is False
+    assert _excluded("/m/Podcasts/x.mp3", ["*Podcasts*"]) is True
+    assert _excluded("/m/a/._hidden.mp3", ["._*"]) is True     # basename match
+    assert _excluded("/m/a/song.mp3", []) is False
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
+def test_scan_respects_exclude(temp_db, tmp_path):
+    root = tmp_path / "music"
+    (root / "keep").mkdir(parents=True)
+    (root / "skip").mkdir()
+    for f in (root / "keep" / "a.mp3", root / "skip" / "b.mp3"):
+        subprocess.run(
+            [FFMPEG, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.3",
+             "-c:a", "libmp3lame", "-y", str(f)],
+            check=True, capture_output=True,
+        )
+    total, upserted = scan_library(music_dirs=[str(root)], exclude=["*skip*"])
+    assert total == 1  # the excluded directory is pruned
