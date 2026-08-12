@@ -259,6 +259,11 @@ export const api = {
       request<{ ok: boolean }>('POST', `/api/lookup/cover/${trackId}?mb_album_id=${encodeURIComponent(mbAlbumId)}`),
   },
 
+  spectrogram: {
+    url: (trackId: number) => `/api/spectrogram/${trackId}`,
+    status: () => request<{ available: boolean }>('GET', '/api/spectrogram/status'),
+  },
+
   covers: {
     url: (trackId: number) => `/api/covers/${trackId}`,
     update: async (trackId: number, file: File): Promise<{ ok: boolean }> => {

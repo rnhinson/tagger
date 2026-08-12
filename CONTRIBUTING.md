@@ -51,3 +51,9 @@ surrounding style; keep comment density and naming consistent.
 - Keep pull requests focused; describe what changed and why.
 - Database schema changes need a matching `ALTER`-based migration in
   `core/database.py` (`_migrate`) so existing libraries upgrade cleanly.
+
+## Code of conduct & security
+
+By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+Please report security vulnerabilities privately — see the
+[Security Policy](SECURITY.md), not a public issue.

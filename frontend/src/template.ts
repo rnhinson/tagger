@@ -216,6 +216,13 @@ export const APP_HTML = `
           </label>
         </div>
         <audio id="player" class="editor-player" controls preload="none" hidden></audio>
+        <div id="spectro-section" class="spectro-section" hidden>
+          <button type="button" id="spectro-btn" class="btn btn-ghost btn-sm">Spectrogram ▾</button>
+          <div id="spectro-wrap" class="spectro-wrap" hidden>
+            <img id="spectro-img" class="spectro-img" alt="Frequency spectrogram" />
+            <div id="spectro-status" class="spectro-status"></div>
+          </div>
+        </div>
         <label class="field-label">Title<input name="title" type="text" /></label>
         <label class="field-label">Artist<input name="artist" type="text" /></label>
         <label class="field-label">Album<input name="album" type="text" /></label>

@@ -13,6 +13,10 @@ frontend/dist/
 # Build output (frontend builds into here)
 backend/static/
 
+# Secrets / local env
+.env
+.env.*
+
 # Database & config (runtime data)
 *.db
 *.db-shm
