@@ -12,10 +12,15 @@ router = APIRouter()
 
 
 def _is_under_any(target: str, dirs: list[str]) -> bool:
-    """Return True if target is equal to or under any of the given dirs."""
+    """
+    True if target is equal to or under any of the given dirs. Compares fully
+    resolved (realpath) paths so a symlink inside a music dir can't be used to
+    escape it, while still allowing a music dir that is itself a symlink.
+    """
+    rt = os.path.realpath(target)
     for d in dirs:
-        d = os.path.normpath(d)
-        if target == d or target.startswith(d + os.sep):
+        rd = os.path.realpath(d)
+        if rt == rd or rt.startswith(rd + os.sep):
             return True
     return False
 
