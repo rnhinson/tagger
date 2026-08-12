@@ -169,6 +169,7 @@ tagger/
 | `TAGGER_CONFIG_DIR` | `/config`  | Where settings.json is stored      |
 | `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup |
 | `TAGGER_PASSWORD`   | *(unset)*  | If set, requires this password to log in |
+| `TAGGER_LOG_LEVEL`  | `INFO`     | Log verbosity (DEBUG/INFO/WARNING/…)|
 
 AcoustID also requires the `fpcalc` binary (`libchromaprint-tools`), which is
 already included in the Docker image. The API key can also be set at runtime in
@@ -187,6 +188,13 @@ feature reports itself unavailable in Settings. The Docker image installs
 `rsgain` by default — build with `--build-arg INSTALL_RSGAIN=0` to skip it, or
 `--build-arg RSGAIN_VERSION=x.y` to pin a version. If the install fails at build
 time the image still builds; the feature just stays disabled.
+
+## Monitoring
+
+- `GET /api/health` — an unauthenticated liveness check returning
+  `{"status": "ok", "version": …}`, suitable for a container `HEALTHCHECK`
+  or an uptime monitor.
+- `/docs` and `/openapi.json` — the auto-generated OpenAPI API reference.
 
 ## Testing
 
