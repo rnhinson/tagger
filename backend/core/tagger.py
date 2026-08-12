@@ -5,6 +5,7 @@ Uses mutagen's Easy* interfaces for a unified key namespace across formats.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -62,8 +63,19 @@ def read_tags(path: str | Path) -> dict:
 
     tags = f.tags or {}
     result: dict = {internal: _first(tags.get(easy)) for easy, internal in _FROM_EASY.items()}
-    result["duration"] = getattr(f.info, "length", None)
+    info = f.info
+    result["duration"] = getattr(info, "length", None)
     result["format"] = _detect_format(str(path))
+    result["sample_rate"] = getattr(info, "sample_rate", None)
+    result["channels"] = getattr(info, "channels", None)
+    bitrate = getattr(info, "bitrate", None)
+    # FLAC and some lossless streams don't expose a bitrate — approximate it.
+    if not bitrate and result["duration"]:
+        try:
+            bitrate = int(os.path.getsize(str(path)) * 8 / result["duration"])
+        except OSError:
+            bitrate = None
+    result["bitrate"] = bitrate or None
     return result
 
 

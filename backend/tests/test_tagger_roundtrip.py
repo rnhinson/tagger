@@ -33,6 +33,10 @@ def test_tag_write_read_roundtrip(make_audio, ext):
     assert tags["genre"] == "Jazz"
     assert tags["format"] != "unknown"
     assert tags["duration"] and tags["duration"] > 0
+    # Audio-quality info read from the stream (fixtures are mono 44.1 kHz).
+    assert tags["sample_rate"] == 44100
+    assert tags["channels"] == 1
+    assert tags["bitrate"] and tags["bitrate"] > 0
 
 
 @pytest.mark.parametrize("ext", FORMATS)

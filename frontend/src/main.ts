@@ -117,6 +117,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <nav id="panel-quality" class="sidebar-panel" hidden>
         <div class="nav-toolbar" id="quality-toolbar" hidden>
           <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
+          <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
         </div>
         <ul id="quality-list" class="nav-list"></ul>
       </nav>
@@ -969,7 +970,28 @@ autoFixBtn.addEventListener('click', async () => {
 })
 
 const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
+const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
+
+dedupeBtn.addEventListener('click', async () => {
+  dedupeBtn.disabled = true
+  try {
+    const { removed } = await api.library.dedupeKeepBest()
+    if (removed === 0) {
+      toast('No duplicates to remove', 'info')
+    } else {
+      toast(`Removed ${removed} duplicate${removed !== 1 ? 's' : ''} — kept best quality`, 'success')
+      state.qualityIssues = null
+      await loadTracks()
+      await renderQualityPanel()
+      await refreshUndoButton()
+    }
+  } catch (e) {
+    toast(`Dedupe failed: ${e}`, 'error')
+  } finally {
+    dedupeBtn.disabled = false
+  }
+})
 
 fixAllBtn.addEventListener('click', async () => {
   const tracks = [...state.tracks]
@@ -1663,6 +1685,9 @@ qualityListEl.addEventListener('click', async (e) => {
   const issue = li.dataset.issue
   state.selectedIssue = state.selectedIssue === issue ? null : issue
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
+  const isDupes = state.selectedIssue === 'duplicate_tracks'
+  dedupeBtn.hidden = !isDupes
+  fixAllBtn.hidden = isDupes
   state.selectedIds.clear()
   state.page = 0
   await renderQualityPanel()

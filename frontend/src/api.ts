@@ -9,6 +9,9 @@ export interface Track {
   size: number | null
   mtime: number | null
   duration: number | null
+  bitrate: number | null
+  sample_rate: number | null
+  channels: number | null
   title: string | null
   artist: string | null
   album: string | null
@@ -176,6 +179,7 @@ export const api = {
     },
     history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
     undo: (id: number) => request<{ restored: number; kind: string }>('POST', `/api/library/history/${id}/undo`),
+    dedupeKeepBest: () => request<{ removed: number }>('POST', '/api/library/dedupe/keep-best'),
   },
 
   tags: {

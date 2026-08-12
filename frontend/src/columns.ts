@@ -1,6 +1,6 @@
 import { Track } from './api'
 import { state } from './state'
-import { esc, fmtDuration } from './util'
+import { esc, fmtDuration, fmtBitrate, fmtSampleRate, fmtChannels } from './util'
 
 export interface ColDef {
   key:    string
@@ -20,6 +20,9 @@ export const COL_DEFS: ColDef[] = [
   { key: 'disc_number',  label: 'Disc #',       cls: 'col-disc',   render: t => esc(t.disc_number || '') },
   { key: 'genre',        label: 'Genre',        cls: 'col-genre',  render: t => esc(t.genre || '') },
   { key: 'format',       label: 'Format',       cls: 'col-format', render: t => t.format.toUpperCase() },
+  { key: 'bitrate',      label: 'Bitrate',      cls: 'col-bitrate', render: t => fmtBitrate(t.bitrate) },
+  { key: 'sample_rate',  label: 'Sample Rate',  cls: 'col-srate',  render: t => fmtSampleRate(t.sample_rate) },
+  { key: 'channels',     label: 'Channels',     cls: 'col-chan',   render: t => fmtChannels(t.channels) },
   { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
   { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
     const match = state.musicDirs.find(d => t.directory === d || t.directory.startsWith(d + '/'))

@@ -110,6 +110,40 @@ def remove_tracks(track_ids: list[int]):
     return {"removed": len(rows)}
 
 
+@router.post("/dedupe/keep-best")
+def dedupe_keep_best():
+    """
+    For each set of tracks sharing a title+artist, keep the highest-quality copy
+    (bitrate, then file size) and remove the rest from the library DB. Files are
+    left on disk; the removal is logged so it can be undone.
+    """
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM tracks "
+            "WHERE (title IS NOT NULL AND title != '') "
+            "  AND (artist IS NOT NULL AND artist != '')"
+        ).fetchall()
+        groups: dict[tuple[str, str], list] = {}
+        for r in rows:
+            groups.setdefault((r["title"].lower(), r["artist"].lower()), []).append(r)
+
+        losers = []
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            ranked = sorted(members, key=lambda r: ((r["bitrate"] or 0), (r["size"] or 0)), reverse=True)
+            losers.extend(ranked[1:])
+
+        if not losers:
+            return {"removed": 0, "kept": 0}
+        snaps = [snapshot(r) for r in losers]
+        ids = [r["id"] for r in losers]
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", ids)
+        log_change(conn, "remove", f"Removed {len(ids)} duplicate tracks (kept best quality)", snaps)
+    return {"removed": len(ids)}
+
+
 @router.get("/history")
 def get_history(limit: int = Query(50, le=200)):
     with db() as conn:
