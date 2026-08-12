@@ -55,7 +55,7 @@ class AuthMiddleware:
         await self.app(scope, receive, send)
 
 
-app = FastAPI(title="Tagger", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Tagger", version="0.2.0", lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])

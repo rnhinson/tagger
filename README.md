@@ -47,6 +47,39 @@ docker compose up --build
 # 4. Open http://localhost:8000
 ```
 
+## Prebuilt image (GHCR)
+
+Multi-arch images (`linux/amd64` + `linux/arm64`) are published to the GitHub
+Container Registry on every version tag, so you can run without building:
+
+```bash
+docker run -p 8000:8000 \
+  -v /your/music:/music -v tagger-config:/config \
+  ghcr.io/rnhinson/tagger:latest
+```
+
+### Apple `container` runtime
+
+The same image runs under Apple's [`container`](https://github.com/apple/container)
+CLI on Apple Silicon (macOS 15+). There's no Compose equivalent, so run it
+directly and bind-mount a local config folder (named volumes aren't supported):
+
+```bash
+container system start
+mkdir -p ./tagger-config
+container run --detach --name tagger \
+  --publish 8000:8000 \
+  --volume /Users/you/Music:/music \
+  --volume "$PWD/tagger-config:/config" \
+  ghcr.io/rnhinson/tagger:latest
+```
+
+Open <http://localhost:8000>. If the host can't reach `localhost`, Apple
+`container` gives each container its own IP — run `container ls` and browse to
+`http://<container-ip>:8000`. Add `--env TAGGER_PASSWORD=…` to require a login.
+(GHCR packages start private; make the package public or `container registry
+login ghcr.io` first, otherwise the pull is denied.)
+
 ## Local Development (no Docker)
 
 Requires Python 3.11+ and Node 18+.
