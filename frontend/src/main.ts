@@ -43,6 +43,11 @@ const coverImg         = document.getElementById('cover-img') as HTMLImageElemen
 const coverPlaceholder = document.getElementById('cover-placeholder')!
 const coverInput       = document.getElementById('cover-input') as HTMLInputElement
 const playerEl         = document.getElementById('player') as HTMLAudioElement
+const editorRenamePreviewEl = document.getElementById('editor-rename-preview')!
+
+// Rename settings mirrored client-side for the editor's live save-path preview.
+let renameOnSave = false
+let renameTemplate = ''
 const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
 const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
@@ -485,7 +490,7 @@ function renderPagination() {
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
-  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; return }
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; editorRenamePreviewEl.hidden = true; return }
   tagEditor.hidden = false
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
@@ -497,7 +502,30 @@ function renderEditor() {
   populateForm(sel)
   updateCoverPreview()
   updatePlayer()
+  updateEditorRenamePreview()
 }
+
+const updateEditorRenamePreview = debounce(async () => {
+  if (state.selectedIds.size !== 1 || !renameOnSave || !renameTemplate) {
+    editorRenamePreviewEl.hidden = true
+    return
+  }
+  const tags: Record<string, string> = {}
+  for (const field of TAG_FIELDS) {
+    const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
+    if (el) tags[field] = el.value
+  }
+  const track = state.tracks.find(t => state.selectedIds.has(t.id))
+  const ext = track ? '.' + (track.filename.split('.').pop() || 'flac') : '.flac'
+  try {
+    const res = await api.settings.renamePreview(renameTemplate, tags, ext)
+    editorRenamePreviewEl.hidden = false
+    editorRenamePreviewEl.textContent = res.ok ? 'Saves to: ' + res.preview : (res.error ?? '')
+    editorRenamePreviewEl.classList.toggle('rename-preview-error', !res.ok)
+  } catch {
+    editorRenamePreviewEl.hidden = true
+  }
+}, 250)
 
 function updatePlayer() {
   if (state.selectedIds.size === 1) {
@@ -522,6 +550,8 @@ function updateCoverPreview() {
   coverImg.onerror = () => { coverImg.style.display = 'none';  coverPlaceholder.style.display = 'flex' }
 }
 
+const compilationCheckbox = () => tagForm.elements.namedItem('compilation') as HTMLInputElement
+
 function populateForm(tracks: Track[]) {
   for (const field of TAG_FIELDS) {
     const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
@@ -534,6 +564,12 @@ function populateForm(tracks: Track[]) {
       el.value = ''; el.placeholder = '(multiple values)'; (el as HTMLElement).dataset.mixed = '1'
     }
   }
+  // compilation: boolean checkbox; indeterminate = mixed across the selection.
+  const comp = tracks.map(t => t.compilation === '1')
+  const compSame = comp.every(v => v === comp[0])
+  const cb = compilationCheckbox()
+  cb.indeterminate = !compSame
+  cb.checked = compSame ? comp[0] : false
 }
 
 // ─── MusicBrainz lookup ───────────────────────────────────────────────────────
@@ -1026,6 +1062,9 @@ async function saveTags(e: Event) {
     if ((el as HTMLElement).dataset.mixed === '1' && el.value === '') continue
     update[field] = el.value
   }
+  // compilation: apply unless it's still "mixed" (indeterminate) across a multi-selection.
+  const cb = compilationCheckbox()
+  if (!cb.indeterminate) update.compilation = cb.checked ? '1' : ''
   // Attach MB IDs from pending lookup result
   if (state.pendingLookupResult) {
     const r = state.pendingLookupResult
@@ -1682,7 +1721,7 @@ document.getElementById('close-editor')!.addEventListener('click', () => {
 })
 
 tagForm.addEventListener('submit', saveTags)
-tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed })
+tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed; updateEditorRenamePreview() })
 
 document.getElementById('revert-btn')!.addEventListener('click', () => {
   populateForm(state.tracks.filter(t => state.selectedIds.has(t.id)))
@@ -1761,8 +1800,44 @@ async function openSettings() {
     toast(`Failed to load settings: ${e}`, 'error')
   }
   logoutBtn.hidden = !authRequired
+  refreshTrashStatus()
   settingsModal.classList.add('open')
 }
+
+const trashStatusEl = document.getElementById('trash-status')!
+const emptyTrashBtn = document.getElementById('empty-trash-btn') as HTMLButtonElement
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB']
+  let v = n / 1024, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+
+async function refreshTrashStatus() {
+  try {
+    const { count, bytes } = await api.library.trashInfo()
+    trashStatusEl.textContent = count
+      ? `${count} file${count !== 1 ? 's' : ''} in trash · ${fmtBytes(bytes)}`
+      : 'Trash is empty'
+    emptyTrashBtn.disabled = count === 0
+  } catch {
+    trashStatusEl.textContent = ''
+  }
+}
+
+emptyTrashBtn.addEventListener('click', async () => {
+  if (!confirm('Permanently delete all files in the trash? This cannot be undone.')) return
+  emptyTrashBtn.disabled = true
+  try {
+    const { removed, bytes } = await api.library.emptyTrash()
+    toast(`Emptied trash — removed ${removed} file${removed !== 1 ? 's' : ''} (${fmtBytes(bytes)})`, 'success')
+    await refreshTrashStatus()
+  } catch (e) {
+    toast(`Failed to empty trash: ${e}`, 'error')
+  }
+})
 
 const updateRenamePreview = debounce(async () => {
   const tpl = renameTemplateInput.value.trim()
@@ -1855,6 +1930,8 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   try {
     const saved = await api.settings.update(update)
     state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
+    renameOnSave = saved.rename_on_save
+    renameTemplate = saved.rename_template
     // Refresh lookup status after saving
     const status = await api.lookup.status()
     lookupBtn.title = status.method === 'acoustid'
@@ -1931,6 +2008,8 @@ async function startApp() {
   }).catch(() => {})
   api.settings.get().then(s => {
     state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
+    renameOnSave = s.rename_on_save
+    renameTemplate = s.rename_template
   }).catch(() => {})
   api.tags.replaygainStatus().then(s => {
     replaygainAvailable = s.available

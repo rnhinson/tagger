@@ -78,15 +78,22 @@ _SAMPLE_TRACK = {
 
 class RenamePreviewRequest(BaseModel):
     template: str
+    tags: dict | None = None
+    ext: str = ".flac"
 
 
 @router.post("/rename-preview")
 def rename_preview(req: RenamePreviewRequest):
-    """Render a rename template against a sample track for live UI feedback."""
+    """
+    Render a rename template for live UI feedback — against a sample track by
+    default, or a specific track's tags/extension when provided (editor preview).
+    """
     from api.tags import render_template  # local import avoids a router import cycle
 
+    fields = req.tags or _SAMPLE_TRACK
+    ext = req.ext or ".flac"
     try:
-        rel = render_template(req.template, _SAMPLE_TRACK, ".flac")
+        rel = render_template(req.template, fields, ext)
     except (KeyError, ValueError, IndexError) as exc:
         return {"ok": False, "error": f"Invalid template: {exc}"}
     return {"ok": True, "preview": rel}

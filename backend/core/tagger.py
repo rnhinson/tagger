@@ -40,8 +40,12 @@ _TO_EASY: dict[str, str] = {
 
 _FROM_EASY: dict[str, str] = {v: k for k, v in _TO_EASY.items()}
 
+# Fields that the Easy* interface can't handle uniformly, written per format
+# below (lyrics = USLT/©lyr/VORBIS; compilation = TCMP/cpil/VORBIS).
+_EXTENDED = ["lyrics", "compilation"]
+
 # Canonical ordered list of editable tag fields (single source of truth).
-TAG_FIELDS: list[str] = list(_TO_EASY)
+TAG_FIELDS: list[str] = list(_TO_EASY) + _EXTENDED
 
 # MusicBrainz ID fields — handled separately per format
 _MB_TXXX = {
@@ -66,14 +70,23 @@ def _first(val: Any) -> str | None:
     return str(val)
 
 
-def read_tags(path: str | Path) -> dict:
-    """Return normalised tag fields + duration/format for an audio file."""
+def read_tags(path: str | Path, extended: bool = True) -> dict:
+    """
+    Return normalised tag fields + duration/format for an audio file.
+
+    `extended` reads lyrics/compilation via a second (per-format) open; callers
+    that don't need them (e.g. a scan with those tags disabled) can skip it.
+    """
     f = mutagen.File(str(path), easy=True)
     if f is None:
         return {}
 
     tags = f.tags or {}
     result: dict = {internal: _first(tags.get(easy)) for easy, internal in _FROM_EASY.items()}
+    if extended:
+        result.update(_read_extended(str(path)))
+    else:
+        result["lyrics"] = result["compilation"] = None
     info = f.info
     result["duration"] = getattr(info, "length", None)
     result["format"] = _detect_format(str(path))
@@ -117,6 +130,9 @@ def write_tags(path: str | Path, updates: dict) -> None:
     mb_updates = {k: updates[k] for k in _MB_TXXX if k in updates}
     if mb_updates:
         _write_mb_ids(str(path), mb_updates)
+
+    if any(k in updates for k in _EXTENDED):
+        _write_extended(str(path), updates)
 
 
 def _write_mb_ids(path: str, mb_updates: dict) -> None:
@@ -169,6 +185,91 @@ def _write_mb_ids(path: str, mb_updates: dict) -> None:
                 f.tags[key] = [MP4FreeForm(val.encode())]
             elif key in f.tags:
                 del f.tags[key]
+        f.save()
+
+
+def _read_extended(path: str) -> dict:
+    """Read lyrics/compilation via format-specific frames. Never raises."""
+    ext = Path(path).suffix.lower()
+    out: dict = {"lyrics": None, "compilation": None}
+    try:
+        if ext == ".mp3":
+            from mutagen.id3 import ID3
+            tags = ID3(path)
+            uslt = tags.getall("USLT")
+            if uslt:
+                out["lyrics"] = uslt[0].text
+            tcmp = tags.getall("TCMP")
+            if tcmp and tcmp[0].text and str(tcmp[0].text[0]) not in ("0", ""):
+                out["compilation"] = "1"
+        elif ext in (".m4a", ".aac"):
+            from mutagen.mp4 import MP4
+            f = MP4(path)
+            lyr = f.get("\xa9lyr")
+            out["lyrics"] = lyr[0] if lyr else None
+            out["compilation"] = "1" if f.get("cpil") else None
+        elif ext in (".flac", ".ogg", ".oga"):
+            f = mutagen.File(path)
+            lyr = f.get("lyrics")
+            out["lyrics"] = lyr[0] if lyr else None
+            comp = f.get("compilation")
+            out["compilation"] = "1" if (comp and str(comp[0]) not in ("0", "")) else None
+    except Exception:
+        pass
+    return out
+
+
+def _write_extended(path: str, updates: dict) -> None:
+    """Write lyrics/compilation using format-specific frames."""
+    ext = Path(path).suffix.lower()
+    has_lyr, lyrics = "lyrics" in updates, updates.get("lyrics")
+    has_cmp, comp = "compilation" in updates, updates.get("compilation")
+
+    if ext == ".mp3":
+        from mutagen.id3 import ID3, USLT, TCMP
+        try:
+            tags = ID3(path)
+        except Exception:
+            tags = ID3()
+        if has_lyr:
+            tags.delall("USLT")
+            if lyrics:
+                tags.add(USLT(encoding=3, lang="eng", desc="", text=lyrics))
+        if has_cmp:
+            tags.delall("TCMP")
+            if comp:
+                tags.add(TCMP(encoding=3, text=["1"]))
+        tags.save(path)
+
+    elif ext in (".m4a", ".aac"):
+        from mutagen.mp4 import MP4
+        f = MP4(path)
+        if f.tags is None:
+            f.add_tags()
+        if has_lyr:
+            if lyrics:
+                f["\xa9lyr"] = [lyrics]
+            elif "\xa9lyr" in f:
+                del f["\xa9lyr"]
+        if has_cmp:
+            if comp:
+                f["cpil"] = True
+            elif "cpil" in f:
+                del f["cpil"]
+        f.save()
+
+    elif ext in (".flac", ".ogg", ".oga"):
+        f = mutagen.File(path)
+        if has_lyr:
+            if lyrics:
+                f["lyrics"] = [lyrics]
+            elif "lyrics" in f:
+                del f["lyrics"]
+        if has_cmp:
+            if comp:
+                f["compilation"] = ["1"]
+            elif "compilation" in f:
+                del f["compilation"]
         f.save()
 
 

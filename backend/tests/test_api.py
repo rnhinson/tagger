@@ -21,6 +21,14 @@ def test_rename_preview_ok_and_error(client):
     assert "error" in bad
 
 
+def test_rename_preview_with_track_tags(client):
+    r = client.post("/api/config/rename-preview", json={
+        "template": "{artist}/{title}", "tags": {"artist": "A", "title": "B"}, "ext": ".mp3",
+    }).json()
+    assert r["ok"] is True
+    assert r["preview"] == "A/B.mp3"
+
+
 def test_replaygain_status(client):
     body = client.get("/api/tags/replaygain/status").json()
     assert "available" in body and "tool" in body

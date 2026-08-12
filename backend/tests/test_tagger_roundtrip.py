@@ -23,10 +23,13 @@ def test_tag_write_read_roundtrip(make_audio, ext):
         "title": "So What", "artist": "Miles Davis", "album": "Kind of Blue",
         "year": "1959", "track_number": "3", "genre": "Jazz",
         "composer": "Miles Davis", "bpm": "132",
+        "lyrics": "So what\nSo what", "compilation": "1",
     })
     tags = read_tags(path)
     assert tags["composer"] == "Miles Davis"
     assert tags["bpm"] == "132"
+    assert tags["lyrics"] == "So what\nSo what"
+    assert tags["compilation"] == "1"
     assert tags["title"] == "So What"
     assert tags["artist"] == "Miles Davis"
     assert tags["album"] == "Kind of Blue"
@@ -49,6 +52,18 @@ def test_tag_deletion_via_empty_string(make_audio, ext):
     assert read_tags(path)["title"] == "Temp"
     write_tags(path, {"title": ""})
     assert read_tags(path)["title"] in (None, "")
+
+
+@pytest.mark.parametrize("ext", FORMATS)
+def test_extended_fields_deletion(make_audio, ext):
+    path = make_audio(ext)
+    write_tags(path, {"lyrics": "keep", "compilation": "1"})
+    assert read_tags(path)["lyrics"] == "keep"
+    assert read_tags(path)["compilation"] == "1"
+    write_tags(path, {"lyrics": "", "compilation": ""})
+    tags = read_tags(path)
+    assert tags["lyrics"] in (None, "")
+    assert tags["compilation"] is None
 
 
 @pytest.mark.parametrize("ext", FORMATS)
