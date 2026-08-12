@@ -14,11 +14,11 @@ NAS or remote machine from any browser.
 
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
 - Browse by artist/album, by directory tree, or by data-quality issues
-- Read and edit tags (incl. composer & BPM) individually or in bulk
+- Read and edit tags (incl. composer, BPM, lyrics, compilation) solo or in bulk
 - Album flows: auto-number by filename, and find/replace within a tag
 - Inline audio playback in the tag editor (range-streamed, seekable)
 - Full-text search across title/artist/album
-- MusicBrainz text lookup, plus AcoustID fingerprint identification (optional)
+- MusicBrainz text lookup (with an edition picker), plus AcoustID (optional)
 - Discogs as an optional second metadata source (token-gated)
 - Tag inference from a file's path/name for untagged files ("From filename")
 - One-click Auto-fix to apply the best match, with a before/after confirmation
@@ -29,10 +29,12 @@ NAS or remote machine from any browser.
 - Quality panel surfacing missing tags, duplicates, and dead files, with a
   one-click "keep best quality" de-duplicator
 - Optional single-password authentication with login rate-limiting
-- Full-library or single-folder rescan, with a concurrent-scan guard
-- File operations: move to a recoverable trash, or reorganize on disk
-  using the rename template (both undoable)
-- Configurable rename-on-save with a live template preview
+- Full-library or single-folder rescan, a concurrent-scan guard, exclude
+  patterns, and an optional auto-rescan interval
+- File operations: move to a recoverable trash (with empty-trash), or
+  reorganize on disk using the rename template (both undoable)
+- Configurable rename-on-save with a live template preview (settings + editor)
+- Keyboard shortcuts (press `?` for the list)
 - ReplayGain scanning via `rsgain`/`loudgain` (bundled in the Docker image)
 - Export the current filtered view or search as an `.m3u` playlist
 - Undo for tag edits, bulk edits, renames, removals, deletes, and reorganizes
