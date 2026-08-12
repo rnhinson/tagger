@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 import shutil
 import urllib.error
 import urllib.request
@@ -120,18 +121,30 @@ def infer_from_path(track_id: int):
     }
 
 
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_MAX_COVER_BYTES = 20 * 1024 * 1024  # 20 MB
+
+
 def _fetch_caa(mb_album_id: str) -> tuple[str, bytes]:
     """Fetch the front cover from the Cover Art Archive. Raises on failure."""
     url = f"https://coverartarchive.org/release/{mb_album_id}/front"
-    req = urllib.request.Request(url, headers={"User-Agent": "tagger/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "tagger/0.2"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         mime = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-        return mime, resp.read()
+        data = resp.read(_MAX_COVER_BYTES + 1)
+    if len(data) > _MAX_COVER_BYTES:
+        raise ValueError("cover art exceeds 20 MB")
+    if not mime.startswith("image/"):
+        raise ValueError(f"unexpected content type: {mime}")
+    return mime, data
 
 
 @router.post("/cover/{track_id}")
 async def apply_cover_from_mb(track_id: int, mb_album_id: str):
     """Fetch cover art from Cover Art Archive and write it to the audio file."""
+    # mb_album_id is interpolated into the outbound URL — require a real UUID.
+    if not _UUID_RE.match(mb_album_id):
+        raise HTTPException(400, "Invalid MusicBrainz album id")
     with db() as conn:
         row = conn.execute("SELECT path FROM tracks WHERE id = ?", (track_id,)).fetchone()
     if not row:

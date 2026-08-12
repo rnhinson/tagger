@@ -1,22 +1,22 @@
 export const APP_HTML = `
   <header class="topbar">
-    <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar">☰</button>
+    <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
     <span class="logo">Tagger</span>
     <div class="search-wrap">
-      <input id="search" class="search-input" type="search" placeholder="Search tracks…" autocomplete="off" />
+      <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
     </div>
     <div class="topbar-actions">
       <span id="scan-status" class="scan-status"></span>
-      <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" hidden>↶</button>
+      <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
       <button id="scan-btn" class="btn btn-primary">Scan Library</button>
-      <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings">⚙</button>
+      <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
 
   <aside id="settings-sidebar" class="settings-sidebar">
     <div class="settings-sidebar-header">
       <span class="settings-sidebar-title">Settings</span>
-      <button id="settings-modal-close" class="btn btn-ghost btn-icon">✕</button>
+      <button id="settings-modal-close" class="btn btn-ghost btn-icon" aria-label="Close settings">✕</button>
     </div>
     <div class="settings-sidebar-body">
       <div class="settings-section">
@@ -194,7 +194,7 @@ export const APP_HTML = `
           <button id="auto-fix-btn" class="btn btn-ghost btn-sm" title="Auto-fix: look up and save the best match">Auto-fix</button>
           <button id="infer-btn" class="btn btn-ghost btn-sm" title="Guess tags from the file name and folders">From filename</button>
           <button id="lookup-btn" class="btn btn-ghost btn-sm" title="Search MusicBrainz">Lookup</button>
-          <button id="close-editor" class="btn btn-ghost btn-icon" title="Close">✕</button>
+          <button id="close-editor" class="btn btn-ghost btn-icon" title="Close" aria-label="Close editor">✕</button>
         </div>
       </div>
       <div id="lookup-panel" class="lookup-panel" hidden>

@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core.auth import (
-    COOKIE_NAME, COOKIE_MAX_AGE, auth_enabled, check_password, make_token, valid_token,
+    COOKIE_NAME, COOKIE_MAX_AGE, auth_enabled, check_password, make_token,
+    secure_cookie, valid_token,
 )
 
 router = APIRouter()
@@ -59,6 +60,7 @@ def login(req: LoginRequest, request: Request):
     resp.set_cookie(
         COOKIE_NAME, make_token(),
         max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax", path="/",
+        secure=secure_cookie(),
     )
     return resp
 

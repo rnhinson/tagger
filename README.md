@@ -10,6 +10,11 @@ NAS or remote machine from any browser.
 |:---:|:---:|:---:|
 | ![Track list](docs/tracks.png) | ![Album grid](docs/albums.png) | ![Tag editor](docs/editor.png) |
 
+The UI is responsive — the sidebar and tag editor collapse to overlays on
+phones and tablets.
+
+<img src="docs/mobile.png" alt="Mobile track list" width="280" />
+
 ## Features
 
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
@@ -164,6 +169,8 @@ tagger/
 | `TAGGER_CONFIG_DIR` | `/config`  | Where settings.json is stored      |
 | `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup |
 | `TAGGER_PASSWORD`   | *(unset)*  | If set, requires this password to log in |
+| `TAGGER_SECURE_COOKIE` | *(unset)* | Mark the session cookie `Secure` (set behind HTTPS) |
+| `TAGGER_LOG_LEVEL`  | `INFO`     | Log verbosity (DEBUG/INFO/WARNING/…)|
 
 AcoustID also requires the `fpcalc` binary (`libchromaprint-tools`), which is
 already included in the Docker image. The API key can also be set at runtime in
@@ -174,7 +181,9 @@ metadata source.
 `TAGGER_PASSWORD` is set. When set, a login is required and the session is held
 in an HttpOnly cookie that survives restarts (and invalidates if the password
 changes); repeated failed logins from an IP are rate-limited. Put it behind
-HTTPS if you expose it beyond a trusted LAN.
+HTTPS if you expose it beyond a trusted LAN, and set `TAGGER_SECURE_COOKIE=1`.
+See the [self-hosting guide](docs/SELF-HOSTING.md) for reverse-proxy, HTTPS,
+health-check, and backup notes.
 
 **ReplayGain** scanning shells out to [`rsgain`](https://github.com/complexlogic/rsgain)
 or `loudgain` if either is on the server's `PATH`; when neither is installed the
@@ -182,6 +191,13 @@ feature reports itself unavailable in Settings. The Docker image installs
 `rsgain` by default — build with `--build-arg INSTALL_RSGAIN=0` to skip it, or
 `--build-arg RSGAIN_VERSION=x.y` to pin a version. If the install fails at build
 time the image still builds; the feature just stays disabled.
+
+## Monitoring
+
+- `GET /api/health` — an unauthenticated liveness check returning
+  `{"status": "ok", "version": …}`, suitable for a container `HEALTHCHECK`
+  or an uptime monitor.
+- `/docs` and `/openapi.json` — the auto-generated OpenAPI API reference.
 
 ## Testing
 
@@ -202,8 +218,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the backend suite (with
 
 ## Planned
 
-- Live per-file rename preview in the tag editor (settings preview exists today)
-- MusicBrainz release browsing to pick a specific edition
 - Batch cover-art fetch for whole albums
-- Lyrics and compilation-flag tag fields
-- An "empty trash" action for deleted files
+- Filename/path inference improvements (more layout heuristics)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the checks CI runs, and
+project conventions.
+
+## License
+
+[MIT](LICENSE).

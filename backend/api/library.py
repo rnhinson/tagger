@@ -293,7 +293,9 @@ def export_m3u(
 
 def _fts_query(q: str) -> str:
     """Convert a user query into an FTS5 prefix-match expression."""
-    terms = q.split()
+    # Strip double quotes so a stray quote can't break out of the quoted term
+    # and produce a malformed MATCH expression (500 / query error).
+    terms = q.replace('"', " ").split()
     return " ".join(f'"{t}"*' for t in terms if t)
 
 

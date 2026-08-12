@@ -8,6 +8,8 @@ from core.tagger import read_cover, write_cover
 
 router = APIRouter()
 
+_MAX_COVER_BYTES = 20 * 1024 * 1024  # 20 MB
+
 
 @router.get("/{track_id}")
 def get_cover(track_id: int):
@@ -30,7 +32,9 @@ async def set_cover(track_id: int, file: UploadFile = File(...)):
         raise HTTPException(404, "Track not found")
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
-    data = await file.read()
+    data = await file.read(_MAX_COVER_BYTES + 1)
+    if len(data) > _MAX_COVER_BYTES:
+        raise HTTPException(413, "Cover image too large (max 20 MB)")
     try:
         write_cover(row["path"], file.content_type, data)
     except ValueError as e:

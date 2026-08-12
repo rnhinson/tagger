@@ -4,11 +4,14 @@ Background job management — scan jobs persisted to SQLite.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import Any
 
 from core.database import db
+
+logger = logging.getLogger("tagger.scan")
 
 
 def create_scan_job() -> str:
@@ -104,6 +107,8 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
     def progress(scanned: int, total: int) -> None:
         _update_job(job_id, scanned=scanned, total=total)
 
+    logger.info("scan %s started (%s)", job_id, directory or "full library")
+    started = time.time()
     try:
         total, upserted = await asyncio.to_thread(
             scan_library, progress, app_settings.scan_tags, music_dirs,
@@ -116,6 +121,8 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
             total=total,
             scanned=upserted,
         )
+        logger.info("scan %s done: %d found, %d upserted in %.1fs",
+                    job_id, total, upserted, time.time() - started)
     except Exception as exc:
         _update_job(
             job_id,
@@ -123,3 +130,4 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
             finished_at=time.time(),
             error=str(exc),
         )
+        logger.exception("scan %s failed: %s", job_id, exc)

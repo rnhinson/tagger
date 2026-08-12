@@ -242,7 +242,40 @@ function getVisibleAlbums(): Album[] {
   return all
 }
 
+function makeAlbumCard(alb: Album): HTMLElement {
+  const card = document.createElement('div')
+  card.className = 'album-card'
+  const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
+  card.innerHTML = `
+    <div class="album-cover-wrap">
+      <img class="album-cover" loading="lazy" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
+      <div class="album-cover-placeholder">♪</div>
+    </div>
+    <div class="album-info">
+      <div class="album-title">${esc(alb.album || '(Unknown Album)')}</div>
+      <div class="album-artist">${artistDisplay}</div>
+      <div class="album-count">${alb.track_count} track${alb.track_count !== 1 ? 's' : ''}</div>
+    </div>
+  `
+  const img = card.querySelector<HTMLImageElement>('.album-cover')!
+  const placeholder = card.querySelector<HTMLElement>('.album-cover-placeholder')!
+  img.addEventListener('error', () => { img.style.display = 'none'; placeholder.style.display = 'flex' })
+  img.addEventListener('load',  () => { img.style.display = 'block'; placeholder.style.display = 'none' })
+  card.addEventListener('click', () => {
+    state.viewMode = 'list'
+    renderViewMode()
+    navigateTo(alb.artist ?? '', alb.album)
+  })
+  return card
+}
+
+// Render album cards in batches, appending more as the user scrolls, so a
+// library with thousands of albums doesn't build every card up front.
+const ALBUM_BATCH = 60
+let albumObserver: IntersectionObserver | null = null
+
 function renderAlbumGrid() {
+  albumObserver?.disconnect()
   albumGridEl.innerHTML = ''
   const albums = getVisibleAlbums()
 
@@ -251,32 +284,25 @@ function renderAlbumGrid() {
     return
   }
 
-  for (const alb of albums) {
-    const card = document.createElement('div')
-    card.className = 'album-card'
-    const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
-    card.innerHTML = `
-      <div class="album-cover-wrap">
-        <img class="album-cover" loading="lazy" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
-        <div class="album-cover-placeholder">♪</div>
-      </div>
-      <div class="album-info">
-        <div class="album-title">${esc(alb.album || '(Unknown Album)')}</div>
-        <div class="album-artist">${artistDisplay}</div>
-        <div class="album-count">${alb.track_count} track${alb.track_count !== 1 ? 's' : ''}</div>
-      </div>
-    `
-    const img = card.querySelector<HTMLImageElement>('.album-cover')!
-    const placeholder = card.querySelector<HTMLElement>('.album-cover-placeholder')!
-    img.addEventListener('error', () => { img.style.display = 'none'; placeholder.style.display = 'flex' })
-    img.addEventListener('load',  () => { img.style.display = 'block'; placeholder.style.display = 'none' })
+  const sentinel = document.createElement('div')
+  sentinel.className = 'album-sentinel'
+  albumGridEl.appendChild(sentinel)
 
-    card.addEventListener('click', () => {
-      state.viewMode = 'list'
-      renderViewMode()
-      navigateTo(alb.artist ?? '', alb.album)
-    })
-    albumGridEl.appendChild(card)
+  let rendered = 0
+  const renderMore = () => {
+    const next = albums.slice(rendered, rendered + ALBUM_BATCH)
+    for (const alb of next) albumGridEl.insertBefore(makeAlbumCard(alb), sentinel)
+    rendered += next.length
+    if (rendered >= albums.length) { albumObserver?.disconnect(); sentinel.remove() }
+  }
+  renderMore()
+
+  if (rendered < albums.length) {
+    albumObserver = new IntersectionObserver(
+      entries => { if (entries.some(e => e.isIntersecting)) renderMore() },
+      { root: albumGridEl, rootMargin: '600px' },
+    )
+    albumObserver.observe(sentinel)
   }
 }
 
@@ -1429,6 +1455,17 @@ function onSelectAll() {
 
 document.getElementById('sidebar-toggle')!.addEventListener('click', () => {
   appEl.classList.toggle('sidebar-collapsed')
+})
+
+// On phones/tablets the sidebar overlays the content, so start it collapsed
+// and close it once the user picks something from it.
+const MOBILE_BP = 820
+if (window.innerWidth <= MOBILE_BP) appEl.classList.add('sidebar-collapsed')
+document.querySelector('.sidebar')!.addEventListener('click', (e) => {
+  if (window.innerWidth > MOBILE_BP) return
+  if ((e.target as HTMLElement).closest('.nav-item, .tree-row, .quality-issue-item')) {
+    appEl.classList.add('sidebar-collapsed')
+  }
 })
 
 // Sidebar tabs

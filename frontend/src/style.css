@@ -618,6 +618,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 
 .album-empty { padding: 48px; text-align: center; color: var(--text-muted); }
+.album-sentinel { grid-column: 1 / -1; height: 1px; }
 
 .album-card {
   background: var(--surface2);
@@ -930,3 +931,27 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+/* ─── Accessibility: visible keyboard focus ─────────────────────────────────── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
+
+/* ─── Responsive: tablet / phone ────────────────────────────────────────────── */
+.workspace { position: relative; }
+
+@media (max-width: 820px) {
+  .topbar { flex-wrap: wrap; height: auto; row-gap: 6px; padding: 6px 10px; }
+  .search-wrap { order: 3; flex-basis: 100%; min-width: 0; }
+  .search-input { width: 100%; }
+
+  /* Sidebar slides over the content instead of taking a fixed column. */
+  .sidebar {
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 50;
+    box-shadow: 6px 0 20px rgba(0, 0, 0, 0.45);
+  }
+  #app.sidebar-collapsed .sidebar { box-shadow: none; }
+
+  /* The tag editor becomes a full-screen overlay. */
+  .tag-editor {
+    position: absolute; inset: 0; width: 100%; min-width: 0; z-index: 60;
+  }
+}
