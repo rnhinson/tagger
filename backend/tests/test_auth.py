@@ -8,7 +8,9 @@ from core.config import settings
 def auth_client(tmp_path, monkeypatch):
     """TestClient with a password configured."""
     import main
+    import api.auth
     monkeypatch.setenv("TAGGER_PASSWORD", "hunter2")
+    api.auth._attempts.clear()  # isolate the login throttle between tests
     prev = settings.config_dir
     settings.config_dir = tmp_path
     try:
@@ -16,6 +18,7 @@ def auth_client(tmp_path, monkeypatch):
             yield c
     finally:
         settings.config_dir = prev
+        api.auth._attempts.clear()
 
 
 def test_disabled_when_no_password(client):
@@ -49,3 +52,10 @@ def test_login_grants_access_then_logout(auth_client):
 def test_auth_endpoints_reachable_without_cookie(auth_client):
     # The login/status endpoints must not be gated, or you could never log in.
     assert auth_client.get("/api/auth/status").status_code == 200
+
+
+def test_login_rate_limited_after_repeated_failures(auth_client):
+    for _ in range(5):
+        assert auth_client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401
+    # Even the correct password is refused once the throttle trips.
+    assert auth_client.post("/api/auth/login", json={"password": "hunter2"}).status_code == 429
