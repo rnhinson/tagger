@@ -22,9 +22,16 @@ from api.stream import router as stream_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from core.tasks import auto_scan_loop
+
     settings.config_dir.mkdir(parents=True, exist_ok=True)
     init_db()
-    yield
+    task = asyncio.create_task(auto_scan_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
 
 
 class AuthMiddleware:

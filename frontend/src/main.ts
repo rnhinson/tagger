@@ -257,7 +257,7 @@ function renderAlbumGrid() {
     const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
     card.innerHTML = `
       <div class="album-cover-wrap">
-        <img class="album-cover" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
+        <img class="album-cover" loading="lazy" src="${coverUrl(alb.cover_track_id)}" alt="${esc(alb.album || '')}" />
         <div class="album-cover-placeholder">♪</div>
       </div>
       <div class="album-info">
@@ -646,7 +646,7 @@ async function runLookup() {
       const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
       const sourceBadge = renderSourceBadge(r.source)
       const thumbHtml = r.mb_album_id
-        ? `<img class="lookup-thumb" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
+        ? `<img class="lookup-thumb" loading="lazy" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
         : `<div class="lookup-thumb lookup-thumb-empty">♪</div>`
       const canPickEdition = r.source === 'musicbrainz' && !!r.mb_track_id
       const editionsBtn = canPickEdition
@@ -1749,6 +1749,8 @@ rescanFolderBtn.addEventListener('click', () => {
 const settingsModal     = document.getElementById('settings-sidebar')!
 const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
 const discogsTokenInput = document.getElementById('setting-discogs-token') as HTMLInputElement
+const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTMLTextAreaElement
+const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
 const renameTemplateInput = document.getElementById('setting-rename-template') as HTMLInputElement
 const renamePreviewEl   = document.getElementById('rename-preview')!
@@ -1782,6 +1784,8 @@ async function openSettings() {
     ])
     acoustidKeyInput.value    = s.acoustid_api_key
     discogsTokenInput.value   = s.discogs_token ?? ''
+    scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
+    autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
     renameTemplateInput.value = s.rename_template
     renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
@@ -1926,6 +1930,8 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,
     music_dirs:        localMusicDirs,
+    scan_exclude:      scanExcludeInput.value.split('\n').map(x => x.trim()).filter(Boolean),
+    auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
   }
   try {
     const saved = await api.settings.update(update)

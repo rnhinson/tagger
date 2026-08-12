@@ -75,6 +75,17 @@ export const APP_HTML = `
         </div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Scan Options</div>
+        <label class="field-label">Exclude patterns
+          <textarea id="setting-scan-exclude" rows="3" placeholder="One glob per line — e.g. *Podcasts*  or  ._*"></textarea>
+          <span class="settings-hint">Files or folders matching any pattern are skipped during scans.</span>
+        </label>
+        <label class="field-label">Auto-rescan interval (minutes)
+          <input id="setting-auto-scan" type="number" min="0" step="1" />
+          <span class="settings-hint">Automatically rescan the library on this interval. 0 disables it.</span>
+        </label>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">File Renaming</div>
         <label class="settings-toggle">
           <input id="setting-rename-on-save" type="checkbox" />

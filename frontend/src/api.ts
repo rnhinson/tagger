@@ -58,6 +58,8 @@ export interface AppSettings {
   discogs_token: string
   scan_tags: string[]
   music_dirs: string[]
+  scan_exclude: string[]
+  auto_scan_minutes: number
   default_music_dir?: string
 }
 

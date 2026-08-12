@@ -21,6 +21,8 @@ class AppSettings(BaseModel):
     discogs_token: str = ""
     scan_tags: list[str] = ALL_SCAN_TAGS
     music_dirs: list[str] = []
+    scan_exclude: list[str] = []       # glob patterns; matching paths are skipped
+    auto_scan_minutes: int = 0         # 0 = off; else rescan every N minutes
 
 
 def get_music_dirs() -> list[str]:

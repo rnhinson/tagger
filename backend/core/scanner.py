@@ -9,6 +9,7 @@ Strategy:
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 import time
 from pathlib import Path
@@ -30,11 +31,18 @@ def _under(path: str, roots: list[str]) -> bool:
     return False
 
 
+def _excluded(path: str, patterns: list[str]) -> bool:
+    """True if the path (or its basename) matches any exclude glob."""
+    base = os.path.basename(path)
+    return any(fnmatch.fnmatch(path, p) or fnmatch.fnmatch(base, p) for p in patterns)
+
+
 def scan_library(
     progress_cb: Callable[[int, int], None] | None = None,
     scan_tags: list[str] | None = None,
     music_dirs: list[str] | None = None,
     prune_under: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> tuple[int, int]:
     """
     Scan the music directories and upsert changed/new tracks into the DB.
@@ -49,15 +57,19 @@ def scan_library(
     if music_dirs is None:
         music_dirs = [str(settings.music_dir)]
 
+    patterns = exclude or []
+
     # Collect all audio files first so we know the total
     all_files: list[str] = []
     for music_dir in music_dirs:
         if not os.path.isdir(music_dir):
             continue
-        for root, _, files in os.walk(music_dir):
+        for root, dirs, files in os.walk(music_dir):
+            # Prune excluded directories so we don't descend into them.
+            dirs[:] = [d for d in dirs if not _excluded(os.path.join(root, d), patterns)]
             for fname in sorted(files):
                 fpath = os.path.join(root, fname)
-                if is_audio_file(fpath):
+                if is_audio_file(fpath) and not _excluded(fpath, patterns):
                     all_files.append(fpath)
 
     total = len(all_files)
