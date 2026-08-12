@@ -9,6 +9,7 @@ NAS or remote machine from any browser.
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
 - Browse by artist/album, by directory tree, or by data-quality issues
 - Read and edit tags for individual files, or bulk-edit across a selection
+- Inline audio playback in the tag editor (range-streamed, seekable)
 - Full-text search across title/artist/album
 - MusicBrainz text lookup, plus AcoustID fingerprint identification (optional)
 - Discogs as an optional second metadata source (token-gated)
@@ -17,7 +18,10 @@ NAS or remote machine from any browser.
 - Embedded cover art: view, upload, or pull from the Cover Art Archive
 - Album grid view with cover thumbnails
 - Case normalization (Title Case) for shouty or lowercase tags
-- Quality panel surfacing missing tags, duplicates, and dead files
+- Audio-quality columns (bitrate / sample rate / channels)
+- Quality panel surfacing missing tags, duplicates, and dead files, with a
+  one-click "keep best quality" de-duplicator
+- Optional single-password authentication (`TAGGER_PASSWORD`)
 - Configurable rename-on-save with a live template preview
 - ReplayGain scanning via `rsgain`/`loudgain` when installed
 - Export the current filtered view or search as an `.m3u` playlist
@@ -64,18 +68,21 @@ tagger/
 │   ├── main.py                    # FastAPI app entry point
 │   ├── requirements.txt
 │   ├── api/                       # HTTP routers
-│   │   ├── library.py             # Listing, search, issues, m3u export, history
+│   │   ├── auth.py                # Login / logout / status
+│   │   ├── library.py             # Listing, search, issues, m3u, history, dedupe
 │   │   ├── tags.py                # Tag read/write/bulk, rename, ReplayGain
 │   │   ├── jobs.py                # Scan job endpoints
 │   │   ├── config.py              # Settings model + rename preview
 │   │   ├── fs.py                  # Filesystem browse/tree endpoints
 │   │   ├── covers.py              # Cover art read/write
-│   │   └── lookup.py              # MusicBrainz / AcoustID / Discogs / infer
+│   │   ├── lookup.py              # MusicBrainz / AcoustID / Discogs / infer
+│   │   └── stream.py              # Range-aware audio streaming
 │   ├── core/
 │   │   ├── config.py             # Env-based settings + paths
-│   │   ├── database.py           # SQLite schema, connection, FTS index
+│   │   ├── auth.py               # Password + HMAC session token
+│   │   ├── database.py           # SQLite schema, migrations, FTS index
 │   │   ├── scanner.py            # Library walk + incremental upsert
-│   │   ├── tagger.py             # mutagen read/write for all formats
+│   │   ├── tagger.py             # mutagen read/write + audio info
 │   │   ├── tasks.py              # Background scan job runner
 │   │   ├── inference.py          # Path/filename → tag heuristics
 │   │   ├── history.py            # Change log + undo
@@ -85,7 +92,7 @@ tagger/
 │   │       ├── musicbrainz.py    # MusicBrainz text search + result parser
 │   │       ├── acoustid_provider.py  # AcoustID fingerprint lookup
 │   │       └── discogs.py        # Discogs release search
-│   └── tests/                     # pytest suite (pure-logic coverage)
+│   └── tests/                     # pytest suite (logic, API, audio round-trip)
 ├── frontend/
 │   ├── index.html
 │   ├── vite.config.ts            # Builds into backend/static/
@@ -110,11 +117,17 @@ tagger/
 | `TAGGER_MUSIC_DIR`  | `/music`   | Root path of your music library    |
 | `TAGGER_CONFIG_DIR` | `/config`  | Where settings.json is stored      |
 | `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup |
+| `TAGGER_PASSWORD`   | *(unset)*  | If set, requires this password to log in |
 
 AcoustID also requires the `fpcalc` binary (`libchromaprint-tools`), which is
 already included in the Docker image. The API key can also be set at runtime in
 the Settings panel, alongside an optional **Discogs** token for a second
 metadata source.
+
+**Authentication** is off by default — the app is fully open unless
+`TAGGER_PASSWORD` is set. When set, a login is required and the session is held
+in an HttpOnly cookie that survives restarts (and invalidates if the password
+changes). Put it behind HTTPS if you expose it beyond a trusted LAN.
 
 **ReplayGain** scanning shells out to [`rsgain`](https://github.com/complexlogic/rsgain)
 or `loudgain` if either is on the server's `PATH`; when neither is installed the
@@ -129,9 +142,14 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers the pure logic — tag inference, rename-template rendering,
-the MusicBrainz result parser, playlist/FTS helpers, and undo/history — without
-requiring audio fixtures.
+The suite covers pure logic (tag inference, rename-template rendering, the
+MusicBrainz parser, playlist/FTS helpers, undo/history), the HTTP API via
+TestClient (including auth and the audio stream), and real-audio tag/cover
+round-trips across all four formats. The round-trip tests synthesise fixtures
+with `ffmpeg` and skip automatically when it isn't installed.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the backend suite (with
+`ffmpeg`) and the frontend typecheck + build on every push and pull request.
 
 ## Planned
 

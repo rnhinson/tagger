@@ -29,6 +29,18 @@ def db() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def _migrate(conn) -> None:
+    """Add columns introduced after a DB was first created."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
+    for col, decl in (
+        ("bitrate", "INTEGER"),
+        ("sample_rate", "INTEGER"),
+        ("channels", "INTEGER"),
+    ):
+        if col not in have:
+            conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
+
+
 def init_db() -> None:
     with db() as conn:
         conn.executescript("""
@@ -41,6 +53,9 @@ def init_db() -> None:
                 size               INTEGER,
                 mtime              REAL,
                 duration           REAL,
+                bitrate            INTEGER,
+                sample_rate        INTEGER,
+                channels           INTEGER,
                 title              TEXT,
                 artist             TEXT,
                 album              TEXT,
@@ -112,3 +127,4 @@ def init_db() -> None:
                 undone  INTEGER NOT NULL DEFAULT 0
             );
         """)
+        _migrate(conn)

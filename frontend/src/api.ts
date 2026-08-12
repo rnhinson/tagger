@@ -9,6 +9,9 @@ export interface Track {
   size: number | null
   mtime: number | null
   duration: number | null
+  bitrate: number | null
+  sample_rate: number | null
+  channels: number | null
   title: string | null
   artist: string | null
   album: string | null
@@ -126,6 +129,13 @@ export interface TreeResult {
   files: TreeEntry[]
 }
 
+let unauthorizedHandler: (() => void) | null = null
+
+/** Register a callback invoked whenever an API call returns 401. */
+export function setUnauthorizedHandler(fn: () => void): void {
+  unauthorizedHandler = fn
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -133,6 +143,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {
+    // A 401 on anything other than the login attempt means the session lapsed.
+    if (res.status === 401 && !url.startsWith('/api/auth/login')) unauthorizedHandler?.()
     const text = await res.text()
     throw new Error(`${method} ${url} → ${res.status}: ${text}`)
   }
@@ -141,6 +153,12 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 // Library
 export const api = {
+  auth: {
+    status: () => request<{ required: boolean; authed: boolean }>('GET', '/api/auth/status'),
+    login: (password: string) => request<{ ok: boolean }>('POST', '/api/auth/login', { password }),
+    logout: () => request<{ ok: boolean }>('POST', '/api/auth/logout'),
+  },
+
   library: {
     tracks: (params: Record<string, string | number> = {}) => {
       const qs = new URLSearchParams(params as Record<string, string>).toString()
@@ -161,6 +179,7 @@ export const api = {
     },
     history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
     undo: (id: number) => request<{ restored: number; kind: string }>('POST', `/api/library/history/${id}/undo`),
+    dedupeKeepBest: () => request<{ removed: number }>('POST', '/api/library/dedupe/keep-best'),
   },
 
   tags: {

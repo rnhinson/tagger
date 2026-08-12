@@ -21,6 +21,7 @@ _WRITABLE = TAG_FIELDS + _MB_FIELDS
 # Full column set, used to re-insert a removed row verbatim.
 _ALL_COLUMNS = [
     "id", "path", "filename", "directory", "format", "size", "mtime", "duration",
+    "bitrate", "sample_rate", "channels",
     *TAG_FIELDS, *_MB_FIELDS, "scanned_at", "tagged_at",
 ]
 

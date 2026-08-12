@@ -1,5 +1,5 @@
 import './style.css'
-import { api, Track, Artist, Album, LookupResult, AppSettings } from './api'
+import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs } from './state'
@@ -92,6 +92,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       </div>
     </div>
     <div class="settings-sidebar-footer">
+      <button id="settings-logout" class="btn btn-ghost" hidden>Log out</button>
       <button id="settings-save" class="btn btn-primary">Save</button>
     </div>
   </aside>
@@ -116,6 +117,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <nav id="panel-quality" class="sidebar-panel" hidden>
         <div class="nav-toolbar" id="quality-toolbar" hidden>
           <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
+          <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
         </div>
         <ul id="quality-list" class="nav-list"></ul>
       </nav>
@@ -198,6 +200,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <input id="cover-input" type="file" accept="image/jpeg,image/png,image/webp" />
           </label>
         </div>
+        <audio id="player" class="editor-player" controls preload="none" hidden></audio>
         <label class="field-label">Title<input name="title" type="text" /></label>
         <label class="field-label">Artist<input name="artist" type="text" /></label>
         <label class="field-label">Album<input name="album" type="text" /></label>
@@ -243,6 +246,7 @@ const viewAlbumsBtn  = document.getElementById('view-albums-btn')!
 const coverImg         = document.getElementById('cover-img') as HTMLImageElement
 const coverPlaceholder = document.getElementById('cover-placeholder')!
 const coverInput       = document.getElementById('cover-input') as HTMLInputElement
+const playerEl         = document.getElementById('player') as HTMLAudioElement
 const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
 const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
@@ -680,7 +684,7 @@ function renderPagination() {
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
-  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; return }
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; return }
   tagEditor.hidden = false
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
@@ -691,6 +695,20 @@ function renderEditor() {
   editorTitle.textContent = sel.length === 1 ? (sel[0].title || sel[0].filename) : `${sel.length} tracks`
   populateForm(sel)
   updateCoverPreview()
+  updatePlayer()
+}
+
+function updatePlayer() {
+  if (state.selectedIds.size === 1) {
+    const url = `/api/stream/${[...state.selectedIds][0]}`
+    if (playerEl.getAttribute('src') !== url) playerEl.src = url
+    playerEl.hidden = false
+  } else {
+    playerEl.pause()
+    playerEl.removeAttribute('src')
+    playerEl.load()
+    playerEl.hidden = true
+  }
 }
 
 function updateCoverPreview() {
@@ -952,7 +970,28 @@ autoFixBtn.addEventListener('click', async () => {
 })
 
 const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
+const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
+
+dedupeBtn.addEventListener('click', async () => {
+  dedupeBtn.disabled = true
+  try {
+    const { removed } = await api.library.dedupeKeepBest()
+    if (removed === 0) {
+      toast('No duplicates to remove', 'info')
+    } else {
+      toast(`Removed ${removed} duplicate${removed !== 1 ? 's' : ''} — kept best quality`, 'success')
+      state.qualityIssues = null
+      await loadTracks()
+      await renderQualityPanel()
+      await refreshUndoButton()
+    }
+  } catch (e) {
+    toast(`Dedupe failed: ${e}`, 'error')
+  } finally {
+    dedupeBtn.disabled = false
+  }
+})
 
 fixAllBtn.addEventListener('click', async () => {
   const tracks = [...state.tracks]
@@ -1646,6 +1685,9 @@ qualityListEl.addEventListener('click', async (e) => {
   const issue = li.dataset.issue
   state.selectedIssue = state.selectedIssue === issue ? null : issue
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
+  const isDupes = state.selectedIssue === 'duplicate_tracks'
+  dedupeBtn.hidden = !isDupes
+  fixAllBtn.hidden = isDupes
   state.selectedIds.clear()
   state.page = 0
   await renderQualityPanel()
@@ -1733,6 +1775,7 @@ async function openSettings() {
   } catch (e) {
     toast(`Failed to load settings: ${e}`, 'error')
   }
+  logoutBtn.hidden = !authRequired
   settingsModal.classList.add('open')
 }
 
@@ -1773,6 +1816,17 @@ document.getElementById('settings-btn')!.addEventListener('click', () => {
   settingsModal.classList.contains('open') ? closeSettings() : openSettings()
 })
 document.getElementById('settings-modal-close')!.addEventListener('click', closeSettings)
+
+const logoutBtn = document.getElementById('settings-logout') as HTMLButtonElement
+logoutBtn.addEventListener('click', async () => {
+  try {
+    await api.auth.logout()
+    showLogin()
+    closeSettings()
+  } catch (e) {
+    toast(`Logout failed: ${e}`, 'error')
+  }
+})
 
 renameOnSaveInput.addEventListener('change', () => {
   renameTemplateWrap.style.display = renameOnSaveInput.checked ? '' : 'none'
@@ -1828,11 +1882,60 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   }
 })
 
+// ─── Authentication gate ────────────────────────────────────────────────────────
+
+let authRequired = false
+let loginOverlay: HTMLElement | null = null
+
+function showLogin() {
+  if (loginOverlay) { loginOverlay.hidden = false; return }
+  const overlay = document.createElement('div')
+  overlay.className = 'login-overlay'
+  overlay.innerHTML = `
+    <form class="login-card" id="login-form">
+      <div class="login-title">Tagger</div>
+      <p class="login-hint">This library is password-protected.</p>
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" autofocus />
+      <div id="login-error" class="login-error"></div>
+      <button type="submit" class="btn btn-primary">Log in</button>
+    </form>
+  `
+  document.body.appendChild(overlay)
+  loginOverlay = overlay
+  const form = overlay.querySelector<HTMLFormElement>('#login-form')!
+  const pw = overlay.querySelector<HTMLInputElement>('#login-password')!
+  const err = overlay.querySelector<HTMLElement>('#login-error')!
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    err.textContent = ''
+    try {
+      await api.auth.login(pw.value)
+      overlay.hidden = true
+      pw.value = ''
+      await startApp()
+    } catch {
+      err.textContent = 'Incorrect password'
+      pw.select()
+    }
+  })
+  pw.focus()
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 async function init() {
   renderColHeaders()
   renderViewMode()
+  setUnauthorizedHandler(showLogin)
+  try {
+    const st = await api.auth.status()
+    authRequired = st.required
+    if (st.required && !st.authed) { showLogin(); return }
+  } catch { /* status unreachable — fall through and let calls surface errors */ }
+  await startApp()
+}
+
+async function startApp() {
   api.lookup.status().then(s => {
     lookupBtn.title = s.method === 'acoustid'
       ? 'Identify via AcoustID fingerprint'

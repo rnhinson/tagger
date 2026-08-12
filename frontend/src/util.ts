@@ -14,3 +14,16 @@ export function debounce(fn: () => void, ms: number): () => void {
   let t: ReturnType<typeof setTimeout>
   return () => { clearTimeout(t); t = setTimeout(fn, ms) }
 }
+
+export function fmtBitrate(bps: number | null): string {
+  return bps ? `${Math.round(bps / 1000)} kbps` : '—'
+}
+
+export function fmtSampleRate(hz: number | null): string {
+  return hz ? `${(hz / 1000).toFixed(1)} kHz` : '—'
+}
+
+export function fmtChannels(n: number | null): string {
+  if (!n) return '—'
+  return n === 1 ? 'Mono' : n === 2 ? 'Stereo' : `${n}ch`
+}

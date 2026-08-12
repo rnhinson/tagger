@@ -72,10 +72,12 @@ def scan_library(
                         """
                         INSERT INTO tracks (
                             path, filename, directory, format, size, mtime, duration,
+                            bitrate, sample_rate, channels,
                             title, artist, album, album_artist, year, genre,
                             track_number, disc_number, comment, scanned_at
                         ) VALUES (
                             :path, :filename, :directory, :format, :size, :mtime, :duration,
+                            :bitrate, :sample_rate, :channels,
                             :title, :artist, :album, :album_artist, :year, :genre,
                             :track_number, :disc_number, :comment, :scanned_at
                         )
@@ -86,6 +88,9 @@ def scan_library(
                             size         = excluded.size,
                             mtime        = excluded.mtime,
                             duration     = excluded.duration,
+                            bitrate      = excluded.bitrate,
+                            sample_rate  = excluded.sample_rate,
+                            channels     = excluded.channels,
                             title        = excluded.title,
                             artist       = excluded.artist,
                             album        = excluded.album,
@@ -105,6 +110,9 @@ def scan_library(
                             "size": stat.st_size,
                             "mtime": mtime,
                             "duration": tags.get("duration"),
+                            "bitrate": tags.get("bitrate"),
+                            "sample_rate": tags.get("sample_rate"),
+                            "channels": tags.get("channels"),
                             "title": tags.get("title"),
                             "artist": tags.get("artist"),
                             "album": tags.get("album"),
