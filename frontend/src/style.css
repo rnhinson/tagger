@@ -618,6 +618,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 
 .album-empty { padding: 48px; text-align: center; color: var(--text-muted); }
+.album-sentinel { grid-column: 1 / -1; height: 1px; }
 
 .album-card {
   background: var(--surface2);
