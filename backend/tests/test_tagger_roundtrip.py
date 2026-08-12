@@ -22,8 +22,11 @@ def test_tag_write_read_roundtrip(make_audio, ext):
     write_tags(path, {
         "title": "So What", "artist": "Miles Davis", "album": "Kind of Blue",
         "year": "1959", "track_number": "3", "genre": "Jazz",
+        "composer": "Miles Davis", "bpm": "132",
     })
     tags = read_tags(path)
+    assert tags["composer"] == "Miles Davis"
+    assert tags["bpm"] == "132"
     assert tags["title"] == "So What"
     assert tags["artist"] == "Miles Davis"
     assert tags["album"] == "Kind of Blue"

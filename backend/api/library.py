@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
+from core.config import settings
 from core.database import db
 from core.history import log_change, snapshot, list_changes, undo_change
 
@@ -142,6 +144,40 @@ def dedupe_keep_best():
         conn.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", ids)
         log_change(conn, "remove", f"Removed {len(ids)} duplicate tracks (kept best quality)", snaps)
     return {"removed": len(ids)}
+
+
+@router.post("/delete-files")
+def delete_files(track_ids: list[int]):
+    """
+    Move the selected files to a trash folder and remove their DB rows. Files
+    are not hard-deleted — the move is logged so it can be undone (which
+    restores both the file and the row).
+    """
+    if not track_ids:
+        raise HTTPException(400, "No track IDs provided")
+    trash_dir = settings.config_dir / "trash"
+    trash_dir.mkdir(parents=True, exist_ok=True)
+
+    with db() as conn:
+        placeholders = ",".join("?" * len(track_ids))
+        rows = conn.execute(
+            f"SELECT * FROM tracks WHERE id IN ({placeholders})", track_ids
+        ).fetchall()
+        snaps = []
+        for r in rows:
+            snap = snapshot(r)
+            src = Path(r["path"])
+            if src.exists():
+                dest = trash_dir / f"{r['id']}_{src.name}"
+                shutil.move(str(src), str(dest))
+                snap["_trash"] = str(dest)
+            else:
+                snap["_trash"] = None
+            snaps.append(snap)
+        ids = [r["id"] for r in rows]
+        conn.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", ids)
+        log_change(conn, "delete_files", f"Deleted {len(ids)} files (moved to trash)", snaps)
+    return {"deleted": len(rows)}
 
 
 @router.get("/history")

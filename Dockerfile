@@ -17,6 +17,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libchromaprint-tools \
     && rm -rf /var/lib/apt/lists/*
 
+# ReplayGain scanning (optional). Installs rsgain from its GitHub .deb release.
+# Wrapped so a download/dependency failure only warns — the app detects rsgain
+# at runtime and disables the feature gracefully when it's absent. Override the
+# version with --build-arg RSGAIN_VERSION=x.y, or disable with
+# --build-arg INSTALL_RSGAIN=0.
+ARG INSTALL_RSGAIN=1
+ARG RSGAIN_VERSION=3.6
+RUN if [ "$INSTALL_RSGAIN" = "1" ]; then \
+      ( apt-get update \
+        && apt-get install -y --no-install-recommends curl ca-certificates \
+        && curl -fsSL -o /tmp/rsgain.deb \
+             "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/rsgain_${RSGAIN_VERSION}_amd64.deb" \
+        && apt-get install -y --no-install-recommends /tmp/rsgain.deb \
+        && rm -f /tmp/rsgain.deb ) \
+      || echo "WARNING: rsgain install failed — ReplayGain will be unavailable"; \
+      rm -rf /var/lib/apt/lists/*; \
+    fi
+
 WORKDIR /app
 
 # Install Python deps

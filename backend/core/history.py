@@ -9,6 +9,7 @@ tracked.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -66,6 +67,8 @@ def undo_change(conn, change_id: int) -> dict:
         restored = _undo_tag_edits(conn, tracks)
     elif row["kind"] == "remove":
         restored = _undo_removes(conn, tracks)
+    elif row["kind"] == "delete_files":
+        restored = _undo_deletes(conn, tracks)
     else:
         raise ValueError(f"Cannot undo change of kind {row['kind']!r}")
 
@@ -104,14 +107,30 @@ def _undo_tag_edits(conn, snapshots: list[dict]) -> int:
     return restored
 
 
-def _undo_removes(conn, snapshots: list[dict]) -> int:
-    restored = 0
+def _reinsert(conn, snap: dict) -> None:
     cols = ", ".join(_ALL_COLUMNS)
     placeholders = ", ".join("?" * len(_ALL_COLUMNS))
+    conn.execute(
+        f"INSERT OR REPLACE INTO tracks ({cols}) VALUES ({placeholders})",
+        [snap.get(c) for c in _ALL_COLUMNS],
+    )
+
+
+def _undo_removes(conn, snapshots: list[dict]) -> int:
     for snap in snapshots:
-        conn.execute(
-            f"INSERT OR REPLACE INTO tracks ({cols}) VALUES ({placeholders})",
-            [snap.get(c) for c in _ALL_COLUMNS],
-        )
+        _reinsert(conn, snap)
+    return len(snapshots)
+
+
+def _undo_deletes(conn, snapshots: list[dict]) -> int:
+    """Restore files moved to trash, then re-insert their rows."""
+    restored = 0
+    for snap in snapshots:
+        trash = snap.get("_trash")
+        dest = Path(snap["path"])
+        if trash and Path(trash).exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(trash, str(dest))
+        _reinsert(conn, snap)
         restored += 1
     return restored

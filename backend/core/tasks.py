@@ -29,6 +29,16 @@ def get_job(job_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def active_scan() -> dict | None:
+    """Return the currently running/pending scan job, if any."""
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM scan_jobs WHERE status IN ('pending', 'running') "
+            "ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def list_jobs(limit: int = 20) -> list[dict]:
     with db() as conn:
         rows = conn.execute(
@@ -48,21 +58,33 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
         )
 
 
-async def run_scan_job(job_id: str) -> None:
-    """Run a full library scan as a background task, updating job status in DB."""
+async def run_scan_job(job_id: str, directory: str | None = None) -> None:
+    """
+    Run a library scan as a background task, updating job status in DB.
+
+    With `directory`, only that subtree is scanned and pruned; otherwise the
+    full set of configured music directories is scanned.
+    """
     from core.scanner import scan_library
     from api.config import _load as load_app_settings, get_music_dirs
 
     _update_job(job_id, status="running")
 
     app_settings = load_app_settings()
-    music_dirs = get_music_dirs()
+    if directory:
+        music_dirs = [directory]
+        prune_under: list[str] | None = [directory]
+    else:
+        music_dirs = get_music_dirs()
+        prune_under = None
 
     def progress(scanned: int, total: int) -> None:
         _update_job(job_id, scanned=scanned, total=total)
 
     try:
-        total, upserted = await asyncio.to_thread(scan_library, progress, app_settings.scan_tags, music_dirs)
+        total, upserted = await asyncio.to_thread(
+            scan_library, progress, app_settings.scan_tags, music_dirs, prune_under
+        )
         _update_job(
             job_id,
             status="done",

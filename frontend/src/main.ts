@@ -8,216 +8,11 @@ import {
   trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
 } from './quality'
+import { APP_HTML } from './template'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <header class="topbar">
-    <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar">☰</button>
-    <span class="logo">Tagger</span>
-    <div class="search-wrap">
-      <input id="search" class="search-input" type="search" placeholder="Search tracks…" autocomplete="off" />
-    </div>
-    <div class="topbar-actions">
-      <span id="scan-status" class="scan-status"></span>
-      <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" hidden>↶</button>
-      <button id="scan-btn" class="btn btn-primary">Scan Library</button>
-      <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings">⚙</button>
-    </div>
-  </header>
-
-  <aside id="settings-sidebar" class="settings-sidebar">
-    <div class="settings-sidebar-header">
-      <span class="settings-sidebar-title">Settings</span>
-      <button id="settings-modal-close" class="btn btn-ghost btn-icon">✕</button>
-    </div>
-    <div class="settings-sidebar-body">
-      <div class="settings-section">
-        <div class="settings-section-title">Music Directories</div>
-        <p class="settings-hint">Directories scanned for audio files. The default from <code>TAGGER_MUSIC_DIR</code> is always included.</p>
-        <div id="music-dirs-default" class="music-dir-row music-dir-default"></div>
-        <ul id="music-dirs-list" class="music-dirs-list"></ul>
-        <div class="music-dir-add-row">
-          <input id="music-dir-input" type="text" placeholder="Absolute path, e.g. /mnt/data/Music" />
-          <button id="music-dir-add-btn" class="btn btn-ghost btn-sm">Add</button>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">AcoustID</div>
-        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free API key at <span class="settings-link">acoustid.org</span>, then install chromaprint: <code>sudo apt install libchromaprint-tools</code></p>
-        <label class="field-label">API Key
-          <input id="setting-acoustid-key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" />
-        </label>
-        <div id="acoustid-status" class="acoustid-status"></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Discogs</div>
-        <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
-        <label class="field-label">Token
-          <input id="setting-discogs-token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" />
-        </label>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">ReplayGain</div>
-        <p class="settings-hint">Scan volume levels and write ReplayGain tags. Requires <code>rsgain</code> or <code>loudgain</code> installed on the server. Run it from the selection toolbar.</p>
-        <div id="replaygain-status" class="acoustid-status"></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Scan Tags</div>
-        <p class="settings-hint">Choose which tags are read from audio files during a library scan. Disabled tags will be left empty in the database.</p>
-        <div id="scan-tags-list" class="scan-tags-list">
-          <label class="settings-toggle"><input type="checkbox" data-tag="title" /><span>Title</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="artist" /><span>Artist</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="album" /><span>Album</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="album_artist" /><span>Album Artist</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="year" /><span>Year</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="genre" /><span>Genre</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="track_number" /><span>Track Number</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="disc_number" /><span>Disc Number</span></label>
-          <label class="settings-toggle"><input type="checkbox" data-tag="comment" /><span>Comment</span></label>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">File Renaming</div>
-        <label class="settings-toggle">
-          <input id="setting-rename-on-save" type="checkbox" />
-          <span>Rename files on save</span>
-        </label>
-        <p class="settings-hint">When enabled, saving a track's tags will also move the audio file to a new path built from the template below, relative to your music root directory.</p>
-        <label class="field-label" id="rename-template-wrap">Template
-          <input id="setting-rename-template" type="text" />
-          <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
-          <div id="rename-preview" class="rename-preview"></div>
-        </label>
-      </div>
-    </div>
-    <div class="settings-sidebar-footer">
-      <button id="settings-logout" class="btn btn-ghost" hidden>Log out</button>
-      <button id="settings-save" class="btn btn-primary">Save</button>
-    </div>
-  </aside>
-
-  <div class="workspace">
-    <aside class="sidebar">
-      <div class="sidebar-tabs">
-        <button class="stab active" data-mode="tags">Tags</button>
-        <button class="stab" data-mode="files">Files</button>
-        <button class="stab" data-mode="quality">Quality</button>
-      </div>
-      <nav id="panel-tags" class="sidebar-panel">
-        <div class="nav-toolbar">
-          <button id="expand-all-btn" class="btn btn-ghost btn-sm">Expand all</button>
-          <button id="collapse-all-btn" class="btn btn-ghost btn-sm">Collapse all</button>
-        </div>
-        <ul id="artist-list" class="nav-list"></ul>
-      </nav>
-      <nav id="panel-files" class="sidebar-panel" hidden>
-        <div id="dir-tree" class="dir-tree"></div>
-      </nav>
-      <nav id="panel-quality" class="sidebar-panel" hidden>
-        <div class="nav-toolbar" id="quality-toolbar" hidden>
-          <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
-          <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
-        </div>
-        <ul id="quality-list" class="nav-list"></ul>
-      </nav>
-    </aside>
-
-    <main class="track-pane">
-      <div class="track-pane-toolbar">
-        <div class="toolbar-left">
-          <span id="track-count" class="track-count"></span>
-          <div id="bulk-actions" class="bulk-actions" hidden>
-            <span id="selection-count" class="selection-count"></span>
-            <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
-            <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
-            <button id="remove-tracks-btn" class="btn btn-danger btn-sm">Remove from library</button>
-            <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
-          </div>
-        </div>
-        <div class="toolbar-right">
-          <div class="filter-group">
-            <span class="filter-label">Filter</span>
-            <select id="filter-quality" class="filter-select">
-              <option value="">Quality</option>
-              <option value="good">Good</option>
-              <option value="fair">Fair</option>
-              <option value="poor">Poor</option>
-            </select>
-            <select id="filter-format" class="filter-select">
-              <option value="">Format</option>
-            </select>
-          </div>
-          <div class="toolbar-divider"></div>
-          <button id="export-m3u-btn" class="btn btn-ghost btn-sm" title="Export the current view as an .m3u playlist">Export M3U</button>
-          <div class="col-picker-wrap">
-            <button id="col-picker-btn" class="btn btn-ghost btn-sm">Columns ▾</button>
-            <div id="col-picker" class="col-picker" hidden></div>
-          </div>
-          <div class="view-toggle">
-            <button id="view-list-btn" class="btn btn-ghost btn-sm active" title="Track list">Tracks</button>
-            <button id="view-albums-btn" class="btn btn-ghost btn-sm" title="Album grid">Albums</button>
-          </div>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table class="track-table">
-          <thead><tr id="track-thead-row"></tr></thead>
-          <tbody id="track-tbody"></tbody>
-        </table>
-        <div id="track-empty" class="track-empty" hidden>No tracks found.</div>
-        <div id="track-loading" class="track-loading" hidden>Loading…</div>
-      </div>
-      <div id="album-grid" class="album-grid" style="display:none"></div>
-      <div id="pagination" class="pagination" hidden></div>
-    </main>
-
-    <aside id="tag-editor" class="tag-editor" hidden>
-      <div class="tag-editor-header">
-        <span id="editor-title" class="editor-title"></span>
-        <div class="editor-header-actions">
-          <button id="auto-fix-btn" class="btn btn-ghost btn-sm" title="Auto-fix: look up and save the best match">Auto-fix</button>
-          <button id="infer-btn" class="btn btn-ghost btn-sm" title="Guess tags from the file name and folders">From filename</button>
-          <button id="lookup-btn" class="btn btn-ghost btn-sm" title="Search MusicBrainz">Lookup</button>
-          <button id="close-editor" class="btn btn-ghost btn-icon" title="Close">✕</button>
-        </div>
-      </div>
-      <div id="lookup-panel" class="lookup-panel" hidden>
-        <div class="lookup-header">
-          <span class="lookup-title">MusicBrainz results</span>
-          <button id="lookup-close" class="btn btn-ghost btn-icon btn-sm">✕</button>
-        </div>
-        <ul id="lookup-results" class="lookup-results"></ul>
-      </div>
-      <form id="tag-form" class="tag-form" autocomplete="off">
-        <div class="cover-section">
-          <div class="cover-preview" id="cover-preview">
-            <img id="cover-img" alt="Cover art" />
-            <div id="cover-placeholder" class="cover-placeholder">♪</div>
-          </div>
-          <label class="btn btn-ghost btn-sm cover-upload-label">
-            Change Cover
-            <input id="cover-input" type="file" accept="image/jpeg,image/png,image/webp" />
-          </label>
-        </div>
-        <audio id="player" class="editor-player" controls preload="none" hidden></audio>
-        <label class="field-label">Title<input name="title" type="text" /></label>
-        <label class="field-label">Artist<input name="artist" type="text" /></label>
-        <label class="field-label">Album<input name="album" type="text" /></label>
-        <label class="field-label">Album Artist<input name="album_artist" type="text" /></label>
-        <label class="field-label">Year<input name="year" type="text" maxlength="4" /></label>
-        <label class="field-label">Track #<input name="track_number" type="text" /></label>
-        <label class="field-label">Disc #<input name="disc_number" type="text" /></label>
-        <label class="field-label">Genre<input name="genre" type="text" /></label>
-        <label class="field-label">Comment<textarea name="comment" rows="3"></textarea></label>
-        <div class="tag-form-actions">
-          <button type="submit" class="btn btn-primary">Save</button>
-          <button type="button" id="revert-btn" class="btn btn-ghost">Revert</button>
-        </div>
-      </form>
-    </aside>
-  </div>
-`
+document.querySelector<HTMLDivElement>('#app')!.innerHTML = APP_HTML
 
 // ─── Element refs ─────────────────────────────────────────────────────────────
 
@@ -236,6 +31,7 @@ const bulkActions    = document.getElementById('bulk-actions')!
 const selectionCount = document.getElementById('selection-count')!
 const searchEl       = document.getElementById('search') as HTMLInputElement
 const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
+const rescanFolderBtn = document.getElementById('rescan-folder-btn') as HTMLButtonElement
 const scanStatusEl   = document.getElementById('scan-status')!
 const colPickerBtn   = document.getElementById('col-picker-btn')!
 const colPickerEl    = document.getElementById('col-picker')!
@@ -252,7 +48,11 @@ const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
 const qualityListEl    = document.getElementById('quality-list')!
 const normalizeCaseBtn  = document.getElementById('normalize-case-btn') as HTMLButtonElement
+const autonumberBtn     = document.getElementById('autonumber-btn') as HTMLButtonElement
+const findReplaceBtn    = document.getElementById('find-replace-btn') as HTMLButtonElement
 const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
+const deleteFilesBtn    = document.getElementById('delete-files-btn') as HTMLButtonElement
+const organizeBtn       = document.getElementById('organize-btn') as HTMLButtonElement
 const replaygainBtn     = document.getElementById('replaygain-btn') as HTMLButtonElement
 const filterQualityEl  = document.getElementById('filter-quality') as HTMLSelectElement
 const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectElement
@@ -346,6 +146,7 @@ function renderFilesPanel() {
 
   dirTreeEl.innerHTML = ''
   dirTreeEl.appendChild(ul)
+  updateRescanBtn()
 }
 
 function renderDirNode(node: DirNode, depth: number): HTMLElement {
@@ -1122,14 +923,21 @@ async function loadTracks() {
 
 // ─── Scan ─────────────────────────────────────────────────────────────────────
 
-async function startScan() {
+function updateRescanBtn() {
+  rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
+}
+
+async function startScan(directory?: string) {
   try {
     scanBtn.disabled = true
-    const { job_id } = await api.jobs.startScan()
+    rescanFolderBtn.disabled = true
+    const { job_id } = await api.jobs.startScan(directory)
     pollScan(job_id)
   } catch (e) {
-    toast(`Scan failed to start: ${e}`, 'error')
+    const msg = String(e).includes('409') ? 'A scan is already running' : `Scan failed to start: ${e}`
+    toast(msg, 'error')
     scanBtn.disabled = false
+    updateRescanBtn()
   }
 }
 
@@ -1144,6 +952,7 @@ function pollScan(jobId: string) {
         clearInterval(state.scanPollTimer!)
         state.scanPollTimer = null
         scanBtn.disabled = false
+        updateRescanBtn()
         if (job.status === 'done') {
           toast(`Scan complete — ${job.scanned} tracks indexed`, 'success')
           state.qualityIssues = null
@@ -1160,6 +969,7 @@ function pollScan(jobId: string) {
       clearInterval(state.scanPollTimer!)
       state.scanPollTimer = null
       scanBtn.disabled = false
+      updateRescanBtn()
       toast(`Scan polling failed: ${e}`, 'error')
     }
   }, 1000)
@@ -1286,6 +1096,134 @@ async function removeFromLibrary() {
   } finally {
     removeTracksBtn.disabled = false
   }
+}
+
+// ─── Delete files / reorganize ────────────────────────────────────────────────────
+
+async function deleteFiles() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  const ok = confirm(
+    `Move ${ids.length} file${ids.length !== 1 ? 's' : ''} to trash?\n\n` +
+    `The files leave your library folder but can be restored with Undo.`
+  )
+  if (!ok) return
+  deleteFilesBtn.disabled = true
+  try {
+    const { deleted } = await api.library.deleteFiles(ids)
+    toast(`Moved ${deleted} file${deleted !== 1 ? 's' : ''} to trash`, 'success')
+    state.selectedIds.clear()
+    state.qualityIssues = null
+    await loadTracks()
+    renderEditor()
+    if (state.sidebarMode === 'quality') await renderQualityPanel()
+    await refreshUndoButton()
+  } catch (e) {
+    toast(`Delete failed: ${e}`, 'error')
+  } finally {
+    deleteFilesBtn.disabled = false
+  }
+}
+
+async function organizeFiles() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  organizeBtn.disabled = true
+  try {
+    const { moved, errors } = await api.tags.reorganize(ids)
+    if (moved === 0 && errors.length === 0) {
+      toast('Files already match the template', 'info')
+    } else {
+      const errNote = errors.length ? `, ${errors.length} skipped` : ''
+      toast(`Moved ${moved} file${moved !== 1 ? 's' : ''}${errNote}`, moved ? 'success' : 'error')
+    }
+    if (state.sidebarMode === 'tags') await loadLibrary()
+    if (state.sidebarMode === 'files') await loadTree()
+    await loadTracks()
+    renderEditor()
+    await refreshUndoButton()
+  } catch (e) {
+    toast(`Organize failed: ${e}`, 'error')
+  } finally {
+    organizeBtn.disabled = false
+  }
+}
+
+// ─── Album flows: auto-number & find/replace ────────────────────────────────────
+
+async function refreshAfterBulk() {
+  state.qualityIssues = null
+  if (state.sidebarMode === 'tags') await loadLibrary()
+  await loadTracks()
+  if (state.sidebarMode === 'quality') await renderQualityPanel()
+  const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (updated.length) populateForm(updated)
+  await refreshUndoButton()
+}
+
+async function autoNumber() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  autonumberBtn.disabled = true
+  try {
+    const { numbered } = await api.tags.autonumber(ids)
+    toast(`Numbered ${numbered} track${numbered !== 1 ? 's' : ''}`, 'success')
+    await refreshAfterBulk()
+  } catch (e) {
+    toast(`Auto-number failed: ${e}`, 'error')
+  } finally {
+    autonumberBtn.disabled = false
+  }
+}
+
+const FIND_REPLACE_FIELDS: { key: string; label: string }[] = [
+  { key: 'title', label: 'Title' }, { key: 'artist', label: 'Artist' },
+  { key: 'album', label: 'Album' }, { key: 'album_artist', label: 'Album Artist' },
+  { key: 'genre', label: 'Genre' }, { key: 'composer', label: 'Composer' },
+  { key: 'comment', label: 'Comment' },
+]
+
+function showFindReplace() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.innerHTML = `
+    <form class="modal-card" id="fr-form">
+      <div class="modal-title">Find & replace in ${ids.length} track${ids.length !== 1 ? 's' : ''}</div>
+      <label class="field-label">Field
+        <select id="fr-field">${FIND_REPLACE_FIELDS.map(f => `<option value="${f.key}">${f.label}</option>`).join('')}</select>
+      </label>
+      <label class="field-label">Find<input id="fr-find" type="text" autocomplete="off" /></label>
+      <label class="field-label">Replace with<input id="fr-replace" type="text" autocomplete="off" /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="fr-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Replace</button>
+      </div>
+    </form>
+  `
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#fr-cancel')!.addEventListener('click', close)
+  const findInput = overlay.querySelector<HTMLInputElement>('#fr-find')!
+  findInput.focus()
+  overlay.querySelector<HTMLFormElement>('#fr-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const field = overlay.querySelector<HTMLSelectElement>('#fr-field')!.value
+    const find = findInput.value
+    const replace = overlay.querySelector<HTMLInputElement>('#fr-replace')!.value
+    if (!find) { findInput.focus(); return }
+    try {
+      const { changed } = await api.tags.findReplace(ids, field, find, replace)
+      toast(changed ? `Replaced in ${changed} track${changed !== 1 ? 's' : ''}` : 'No matches found',
+            changed ? 'success' : 'info')
+      close()
+      await refreshAfterBulk()
+    } catch (err) {
+      toast(`Find/replace failed: ${err}`, 'error')
+    }
+  })
 }
 
 // ─── Infer tags from filename ───────────────────────────────────────────────────
@@ -1639,6 +1577,10 @@ document.getElementById('clear-selection')!.addEventListener('click', () => {
 
 normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
+deleteFilesBtn.addEventListener('click', deleteFiles)
+organizeBtn.addEventListener('click', organizeFiles)
+autonumberBtn.addEventListener('click', autoNumber)
+findReplaceBtn.addEventListener('click', showFindReplace)
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)
@@ -1718,7 +1660,10 @@ searchEl.addEventListener('input', () => {
   debouncedSearch()
 })
 
-scanBtn.addEventListener('click', startScan)
+scanBtn.addEventListener('click', () => startScan())
+rescanFolderBtn.addEventListener('click', () => {
+  if (state.selectedDirectory) startScan(state.selectedDirectory)
+})
 
 // ─── Settings modal ───────────────────────────────────────────────────────────
 

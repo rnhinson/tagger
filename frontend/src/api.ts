@@ -21,6 +21,8 @@ export interface Track {
   track_number: string | null
   disc_number: string | null
   comment: string | null
+  composer: string | null
+  bpm: string | null
   mb_track_id: string | null
   mb_artist_id: string | null
   mb_album_id: string | null
@@ -85,6 +87,8 @@ export interface TagUpdate {
   track_number?: string | null
   disc_number?: string | null
   comment?: string | null
+  composer?: string | null
+  bpm?: string | null
   mb_track_id?: string | null
   mb_artist_id?: string | null
   mb_album_id?: string | null
@@ -170,6 +174,7 @@ export const api = {
     issues: () => request<IssueCount>('GET', '/api/library/issues'),
     dead: () => request<TrackList>('GET', '/api/library/dead'),
     removeTracks: (ids: number[]) => request<{ removed: number }>('POST', '/api/library/remove', ids),
+    deleteFiles: (ids: number[]) => request<{ deleted: number }>('POST', '/api/library/delete-files', ids),
     artists: () => request<Artist[]>('GET', '/api/library/artists'),
     albums: (artist?: string) =>
       request<Album[]>('GET', `/api/library/albums${artist ? '?artist=' + encodeURIComponent(artist) : ''}`),
@@ -192,10 +197,19 @@ export const api = {
         'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
     replaygainStatus: () =>
       request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
+    reorganize: (trackIds: number[]) =>
+      request<{ moved: number; errors: unknown[] }>('POST', '/api/tags/reorganize', { track_ids: trackIds }),
+    autonumber: (trackIds: number[]) =>
+      request<{ numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
+    findReplace: (trackIds: number[], field: string, find: string, replace: string) =>
+      request<{ changed: number }>('POST', '/api/tags/find-replace',
+        { track_ids: trackIds, field, find, replace }),
   },
 
   jobs: {
-    startScan: () => request<{ job_id: string }>('POST', '/api/jobs/scan'),
+    startScan: (directory?: string) =>
+      request<{ job_id: string; directory: string | null }>(
+        'POST', `/api/jobs/scan${directory ? '?directory=' + encodeURIComponent(directory) : ''}`),
     list: () => request<ScanJob[]>('GET', '/api/jobs'),
     get: (jobId: string) => request<ScanJob>('GET', `/api/jobs/${jobId}`),
   },

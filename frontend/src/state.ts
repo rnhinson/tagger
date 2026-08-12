@@ -16,11 +16,11 @@ export function saveColPrefs(cols: Set<string>): void {
   localStorage.setItem(COLS_KEY, JSON.stringify([...cols]))
 }
 
-export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment'
+export type TagField = 'title' | 'artist' | 'album' | 'album_artist' | 'year' | 'track_number' | 'disc_number' | 'genre' | 'comment' | 'composer' | 'bpm'
 
 export const TAG_FIELDS: TagField[] = [
   'title', 'artist', 'album', 'album_artist', 'year',
-  'track_number', 'disc_number', 'genre', 'comment',
+  'track_number', 'disc_number', 'genre', 'comment', 'composer', 'bpm',
 ]
 
 export interface DirNode {

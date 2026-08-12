@@ -8,7 +8,8 @@ NAS or remote machine from any browser.
 
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
 - Browse by artist/album, by directory tree, or by data-quality issues
-- Read and edit tags for individual files, or bulk-edit across a selection
+- Read and edit tags (incl. composer & BPM) individually or in bulk
+- Album flows: auto-number by filename, and find/replace within a tag
 - Inline audio playback in the tag editor (range-streamed, seekable)
 - Full-text search across title/artist/album
 - MusicBrainz text lookup, plus AcoustID fingerprint identification (optional)
@@ -21,11 +22,14 @@ NAS or remote machine from any browser.
 - Audio-quality columns (bitrate / sample rate / channels)
 - Quality panel surfacing missing tags, duplicates, and dead files, with a
   one-click "keep best quality" de-duplicator
-- Optional single-password authentication (`TAGGER_PASSWORD`)
+- Optional single-password authentication with login rate-limiting
+- Full-library or single-folder rescan, with a concurrent-scan guard
+- File operations: move to a recoverable trash, or reorganize on disk
+  using the rename template (both undoable)
 - Configurable rename-on-save with a live template preview
-- ReplayGain scanning via `rsgain`/`loudgain` when installed
+- ReplayGain scanning via `rsgain`/`loudgain` (bundled in the Docker image)
 - Export the current filtered view or search as an `.m3u` playlist
-- Undo for tag edits, bulk edits, renames, and library removals
+- Undo for tag edits, bulk edits, renames, removals, deletes, and reorganizes
 - Multiple music directories, persisted to `/config/settings.json`
 
 ## Quick Start — Docker
@@ -97,7 +101,8 @@ tagger/
 │   ├── index.html
 │   ├── vite.config.ts            # Builds into backend/static/
 │   └── src/
-│       ├── main.ts               # App shell, panels, track list, tag editor
+│       ├── main.ts               # App logic: panels, track list, tag editor
+│       ├── template.ts           # Static app markup
 │       ├── api.ts                # Typed REST client
 │       ├── state.ts              # Shared UI state + column prefs
 │       ├── columns.ts            # Track-table column definitions
@@ -127,12 +132,15 @@ metadata source.
 **Authentication** is off by default — the app is fully open unless
 `TAGGER_PASSWORD` is set. When set, a login is required and the session is held
 in an HttpOnly cookie that survives restarts (and invalidates if the password
-changes). Put it behind HTTPS if you expose it beyond a trusted LAN.
+changes); repeated failed logins from an IP are rate-limited. Put it behind
+HTTPS if you expose it beyond a trusted LAN.
 
 **ReplayGain** scanning shells out to [`rsgain`](https://github.com/complexlogic/rsgain)
 or `loudgain` if either is on the server's `PATH`; when neither is installed the
-feature reports itself unavailable in Settings. Neither ships in the Docker image
-by default — install one in a derived image to enable it.
+feature reports itself unavailable in Settings. The Docker image installs
+`rsgain` by default — build with `--build-arg INSTALL_RSGAIN=0` to skip it, or
+`--build-arg RSGAIN_VERSION=x.y` to pin a version. If the install fails at build
+time the image still builds; the feature just stays disabled.
 
 ## Testing
 
@@ -156,3 +164,5 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the backend suite (with
 - Live per-file rename preview in the tag editor (settings preview exists today)
 - MusicBrainz release browsing to pick a specific edition
 - Batch cover-art fetch for whole albums
+- Lyrics and compilation-flag tag fields
+- An "empty trash" action for deleted files
