@@ -550,6 +550,41 @@ function renderSourceBadge(source: string): string {
   return `<span class="lookup-source-badge ${b.cls}">${b.label}</span>`
 }
 
+function attachEditions(li: HTMLElement, r: LookupResult) {
+  const btn = li.querySelector<HTMLButtonElement>('.lookup-editions-btn')
+  if (!btn || !r.mb_track_id) return
+  let panel: HTMLElement | null = null
+  let loaded = false
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    if (panel) { panel.hidden = !panel.hidden; return }
+    panel = document.createElement('ul')
+    panel.className = 'lookup-editions'
+    panel.innerHTML = '<li class="lookup-editions-note">Loading editions…</li>'
+    li.appendChild(panel)
+    try {
+      const releases = await api.lookup.releases(r.mb_track_id!)
+      loaded = true
+      if (!releases.length) { panel.innerHTML = '<li class="lookup-editions-note">No releases found</li>'; return }
+      panel.innerHTML = ''
+      for (const rel of releases) {
+        const row = document.createElement('li')
+        row.className = 'lookup-edition'
+        const bits = [rel.year, rel.country, rel.format, rel.track_count ? `${rel.track_count} tracks` : null]
+          .filter(Boolean).join(' · ')
+        row.innerHTML = `<span class="lookup-edition-album">${esc(rel.album || '(unknown)')}</span><span class="lookup-edition-meta">${esc(bits)}</span>`
+        row.addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          applyLookupResult({ ...r, album: rel.album, year: rel.year, mb_album_id: rel.mb_album_id })
+        })
+        panel.appendChild(row)
+      }
+    } catch (err) {
+      if (!loaded) panel.innerHTML = `<li class="lookup-editions-note">Error: ${esc(String(err))}</li>`
+    }
+  })
+}
+
 async function runLookup() {
   if (state.selectedIds.size !== 1) return
   const trackId = [...state.selectedIds][0]
@@ -577,18 +612,23 @@ async function runLookup() {
       const thumbHtml = r.mb_album_id
         ? `<img class="lookup-thumb" src="https://coverartarchive.org/release/${r.mb_album_id}/front-250" alt="" />`
         : `<div class="lookup-thumb lookup-thumb-empty">♪</div>`
+      const canPickEdition = r.source === 'musicbrainz' && !!r.mb_track_id
+      const editionsBtn = canPickEdition
+        ? `<button class="lookup-editions-btn" title="Choose a specific release/edition">Editions ▾</button>`
+        : ''
       li.innerHTML = `
         ${thumbHtml}
         <span class="lookup-score ${scoreClass}">${pct}%</span>
         <span class="lookup-info">
           <span class="lookup-track-title">${esc(r.title || '(unknown)')} ${sourceBadge}</span>
-          <span class="lookup-meta">${esc(r.artist || '')}${r.album ? ' · ' + esc(r.album) : ''}${r.year ? ' · ' + esc(r.year) : ''}</span>
+          <span class="lookup-meta">${esc(r.artist || '')}${r.album ? ' · ' + esc(r.album) : ''}${r.year ? ' · ' + esc(r.year) : ''} ${editionsBtn}</span>
         </span>
       `
       // Hide broken thumbnails gracefully
       li.querySelector<HTMLImageElement>('.lookup-thumb')
         ?.addEventListener('error', function() { this.style.display = 'none' })
       li.addEventListener('click', () => applyLookupResult(r))
+      if (canPickEdition) attachEditions(li, r)
       lookupResults.appendChild(li)
     }
   } catch (e) {

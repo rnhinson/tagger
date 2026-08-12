@@ -510,6 +510,14 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .source-discogs { background: rgba(234,179,8,0.15); color: #eab308; }
 .source-filename { background: rgba(148,163,184,0.15); color: #94a3b8; }
 
+.lookup-editions-btn { margin-left: 6px; font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.lookup-editions-btn:hover { color: var(--text); }
+.lookup-editions { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.lookup-editions-note { font-size: 11px; color: var(--text-muted); padding: 2px 0; }
+.lookup-edition { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; background: rgba(255,255,255,0.03); }
+.lookup-edition:hover { background: rgba(255,255,255,0.08); }
+.lookup-edition-meta { color: var(--text-muted); white-space: nowrap; }
+
 .tag-form {
   flex: 1;
   overflow-y: auto;

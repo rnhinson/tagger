@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import musicbrainzngs
 
 from core.providers.base import MetadataProvider, TrackMetadata
 
-musicbrainzngs.set_useragent("tagger", "0.1", "https://github.com/user/tagger")
+musicbrainzngs.set_useragent("tagger", "0.2", "https://github.com/rnhinson/tagger")
+# MusicBrainz asks for at most one request per second; musicbrainzngs enforces
+# this, but set it explicitly so bulk Auto-fix stays within policy.
+musicbrainzngs.set_rate_limit(1.0, 1)
 
 _MB_INCLUDES = ["artists", "releases", "release-groups"]
+
+
+def _with_retry(fn, *args, attempts: int = 3, **kwargs):
+    """Call a musicbrainzngs function, retrying transient errors with backoff."""
+    delay = 1.0
+    for i in range(attempts):
+        try:
+            return fn(*args, **kwargs)
+        except musicbrainzngs.WebServiceError:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def recording_to_metadata(rec: dict, *, source: str, score: float) -> TrackMetadata:
@@ -75,7 +92,7 @@ class MusicBrainzProvider(MetadataProvider):
             dur_ms = int(duration * 1000)
             params["dur"] = f"[{dur_ms - tol} TO {dur_ms + tol}]"
         try:
-            resp = musicbrainzngs.search_recordings(**params)
+            resp = _with_retry(musicbrainzngs.search_recordings, **params)
         except Exception:
             return []
         return [
@@ -92,7 +109,32 @@ class MusicBrainzProvider(MetadataProvider):
 
     def _lookup_sync(self, recording_id: str) -> TrackMetadata | None:
         try:
-            resp = musicbrainzngs.get_recording_by_id(recording_id, includes=_MB_INCLUDES)
+            resp = _with_retry(musicbrainzngs.get_recording_by_id, recording_id, includes=_MB_INCLUDES)
         except Exception:
             return None
         return recording_to_metadata(resp.get("recording", {}), source="musicbrainz", score=1.0)
+
+    async def list_releases(self, recording_id: str) -> list[dict]:
+        return await asyncio.to_thread(self._releases_sync, recording_id)
+
+    def _releases_sync(self, recording_id: str) -> list[dict]:
+        """Return the distinct releases (editions) a recording appears on."""
+        try:
+            resp = _with_retry(
+                musicbrainzngs.get_recording_by_id,
+                recording_id, includes=["releases", "media", "release-groups"],
+            )
+        except Exception:
+            return []
+        out = []
+        for rel in resp.get("recording", {}).get("release-list", []):
+            medium = (rel.get("medium-list") or [{}])[0]
+            out.append({
+                "mb_album_id": rel.get("id"),
+                "album": rel.get("title"),
+                "year": (rel.get("date") or "")[:4] or None,
+                "country": rel.get("country"),
+                "format": medium.get("format"),
+                "track_count": medium.get("track-count"),
+            })
+        return out

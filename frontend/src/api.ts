@@ -111,6 +111,15 @@ export interface LookupResult {
   source: string
 }
 
+export interface MbRelease {
+  mb_album_id: string | null
+  album: string | null
+  year: string | null
+  country: string | null
+  format: string | null
+  track_count: number | null
+}
+
 export interface IssueCount {
   missing_title: number
   missing_artist: number
@@ -232,6 +241,8 @@ export const api = {
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
     infer: (trackId: number) =>
       request<LookupResult | null>('POST', `/api/lookup/infer/${trackId}`),
+    releases: (mbTrackId: string) =>
+      request<MbRelease[]>('GET', `/api/lookup/releases/${encodeURIComponent(mbTrackId)}`),
     status: () =>
       request<{ acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
         'GET', '/api/lookup/status'
