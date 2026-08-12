@@ -24,11 +24,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --build-arg INSTALL_RSGAIN=0.
 ARG INSTALL_RSGAIN=1
 ARG RSGAIN_VERSION=3.6
+# TARGETARCH is set automatically by buildx (amd64/arm64); defaults for plain builds.
+ARG TARGETARCH
 RUN if [ "$INSTALL_RSGAIN" = "1" ]; then \
+      arch="${TARGETARCH:-amd64}"; \
       ( apt-get update \
         && apt-get install -y --no-install-recommends curl ca-certificates \
         && curl -fsSL -o /tmp/rsgain.deb \
-             "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/rsgain_${RSGAIN_VERSION}_amd64.deb" \
+             "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/rsgain_${RSGAIN_VERSION}_${arch}.deb" \
         && apt-get install -y --no-install-recommends /tmp/rsgain.deb \
         && rm -f /tmp/rsgain.deb ) \
       || echo "WARNING: rsgain install failed — ReplayGain will be unavailable"; \
