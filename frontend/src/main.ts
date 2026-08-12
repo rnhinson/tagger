@@ -134,7 +134,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <span id="selection-count" class="selection-count"></span>
             <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
             <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
-            <button id="remove-tracks-btn" class="btn btn-danger btn-sm">Remove from library</button>
+            <button id="organize-btn" class="btn btn-ghost btn-sm" title="Move the selected files on disk using the rename template">Organize files</button>
+            <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
+            <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
             <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
           </div>
         </div>
@@ -257,6 +259,8 @@ const lookupResults    = document.getElementById('lookup-results')!
 const qualityListEl    = document.getElementById('quality-list')!
 const normalizeCaseBtn  = document.getElementById('normalize-case-btn') as HTMLButtonElement
 const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
+const deleteFilesBtn    = document.getElementById('delete-files-btn') as HTMLButtonElement
+const organizeBtn       = document.getElementById('organize-btn') as HTMLButtonElement
 const replaygainBtn     = document.getElementById('replaygain-btn') as HTMLButtonElement
 const filterQualityEl  = document.getElementById('filter-quality') as HTMLSelectElement
 const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectElement
@@ -1302,6 +1306,57 @@ async function removeFromLibrary() {
   }
 }
 
+// ─── Delete files / reorganize ────────────────────────────────────────────────────
+
+async function deleteFiles() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  const ok = confirm(
+    `Move ${ids.length} file${ids.length !== 1 ? 's' : ''} to trash?\n\n` +
+    `The files leave your library folder but can be restored with Undo.`
+  )
+  if (!ok) return
+  deleteFilesBtn.disabled = true
+  try {
+    const { deleted } = await api.library.deleteFiles(ids)
+    toast(`Moved ${deleted} file${deleted !== 1 ? 's' : ''} to trash`, 'success')
+    state.selectedIds.clear()
+    state.qualityIssues = null
+    await loadTracks()
+    renderEditor()
+    if (state.sidebarMode === 'quality') await renderQualityPanel()
+    await refreshUndoButton()
+  } catch (e) {
+    toast(`Delete failed: ${e}`, 'error')
+  } finally {
+    deleteFilesBtn.disabled = false
+  }
+}
+
+async function organizeFiles() {
+  const ids = [...state.selectedIds]
+  if (!ids.length) return
+  organizeBtn.disabled = true
+  try {
+    const { moved, errors } = await api.tags.reorganize(ids)
+    if (moved === 0 && errors.length === 0) {
+      toast('Files already match the template', 'info')
+    } else {
+      const errNote = errors.length ? `, ${errors.length} skipped` : ''
+      toast(`Moved ${moved} file${moved !== 1 ? 's' : ''}${errNote}`, moved ? 'success' : 'error')
+    }
+    if (state.sidebarMode === 'tags') await loadLibrary()
+    if (state.sidebarMode === 'files') await loadTree()
+    await loadTracks()
+    renderEditor()
+    await refreshUndoButton()
+  } catch (e) {
+    toast(`Organize failed: ${e}`, 'error')
+  } finally {
+    organizeBtn.disabled = false
+  }
+}
+
 // ─── Infer tags from filename ───────────────────────────────────────────────────
 
 async function inferFromFilename() {
@@ -1653,6 +1708,8 @@ document.getElementById('clear-selection')!.addEventListener('click', () => {
 
 normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
+deleteFilesBtn.addEventListener('click', deleteFiles)
+organizeBtn.addEventListener('click', organizeFiles)
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)

@@ -170,6 +170,7 @@ export const api = {
     issues: () => request<IssueCount>('GET', '/api/library/issues'),
     dead: () => request<TrackList>('GET', '/api/library/dead'),
     removeTracks: (ids: number[]) => request<{ removed: number }>('POST', '/api/library/remove', ids),
+    deleteFiles: (ids: number[]) => request<{ deleted: number }>('POST', '/api/library/delete-files', ids),
     artists: () => request<Artist[]>('GET', '/api/library/artists'),
     albums: (artist?: string) =>
       request<Album[]>('GET', `/api/library/albums${artist ? '?artist=' + encodeURIComponent(artist) : ''}`),
@@ -192,6 +193,8 @@ export const api = {
         'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
     replaygainStatus: () =>
       request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
+    reorganize: (trackIds: number[]) =>
+      request<{ moved: number; errors: unknown[] }>('POST', '/api/tags/reorganize', { track_ids: trackIds }),
   },
 
   jobs: {

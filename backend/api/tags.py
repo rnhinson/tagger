@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -165,6 +166,56 @@ def update_track_tags(track_id: int, update: TagUpdate):
         log_change(conn, "tag_edit", f"Edited tags — {title}", [snap])
 
     return {"ok": True}
+
+
+class Reorganize(BaseModel):
+    track_ids: list[int]
+
+
+@router.post("/reorganize")
+def reorganize(req: Reorganize):
+    """
+    Apply the configured rename template to the selected files, moving them on
+    disk regardless of the rename-on-save setting. Undoable (moves files back).
+    """
+    if not req.track_ids:
+        raise HTTPException(400, "No track IDs provided")
+    template = load_settings().rename_template
+    moved = 0
+    errors = []
+    snaps: list[dict] = []
+    with db() as conn:
+        for tid in req.track_ids:
+            row = conn.execute("SELECT * FROM tracks WHERE id = ?", (tid,)).fetchone()
+            if not row:
+                errors.append({"id": tid, "error": "not found"})
+                continue
+            try:
+                rel = render_template(template, dict(row), Path(row["path"]).suffix)
+            except (KeyError, ValueError, IndexError) as exc:
+                errors.append({"id": tid, "error": f"bad template: {exc}"})
+                continue
+            new_path = str(core_settings.music_dir / rel)
+            if new_path == row["path"]:
+                continue
+            dest = Path(new_path)
+            if dest.exists():
+                errors.append({"id": tid, "error": "destination already exists"})
+                continue
+            try:
+                snap = snapshot(row)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(row["path"], str(dest))
+                conn.execute(
+                    "UPDATE tracks SET path = ?, filename = ?, directory = ? WHERE id = ?",
+                    (new_path, dest.name, str(dest.parent), tid),
+                )
+                snaps.append(snap)
+                moved += 1
+            except Exception as exc:
+                errors.append({"id": tid, "error": str(exc)})
+        log_change(conn, "tag_edit", f"Reorganized {moved} files", snaps)
+    return {"moved": moved, "errors": errors}
 
 
 @router.post("/bulk")
