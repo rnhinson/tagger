@@ -18,12 +18,27 @@ on a NAS or server and tag your library from any browser.
 
 ### Docker Compose
 
-```bash
-git clone https://github.com/rnhinson/tagger.git && cd tagger
-# In docker-compose.yml, set your library path on the left of ":/music"
-docker compose up -d
-# → http://localhost:8000
+Save this as `docker-compose.yml`, set your music path, and run `docker compose up -d`:
+
+```yaml
+services:
+  tagger:
+    image: ghcr.io/rnhinson/tagger:latest
+    container_name: tagger
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /your/music:/music       # ← your library (read/write)
+      - tagger-config:/config    # library.db + settings.json
+    # environment:
+    #   - TAGGER_PASSWORD=change-me
+
+volumes:
+  tagger-config:
 ```
+
+→ http://localhost:8000
 
 ### Docker CLI
 
