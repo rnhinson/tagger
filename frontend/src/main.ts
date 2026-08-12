@@ -199,6 +199,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <input id="cover-input" type="file" accept="image/jpeg,image/png,image/webp" />
           </label>
         </div>
+        <audio id="player" class="editor-player" controls preload="none" hidden></audio>
         <label class="field-label">Title<input name="title" type="text" /></label>
         <label class="field-label">Artist<input name="artist" type="text" /></label>
         <label class="field-label">Album<input name="album" type="text" /></label>
@@ -244,6 +245,7 @@ const viewAlbumsBtn  = document.getElementById('view-albums-btn')!
 const coverImg         = document.getElementById('cover-img') as HTMLImageElement
 const coverPlaceholder = document.getElementById('cover-placeholder')!
 const coverInput       = document.getElementById('cover-input') as HTMLInputElement
+const playerEl         = document.getElementById('player') as HTMLAudioElement
 const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
 const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
@@ -681,7 +683,7 @@ function renderPagination() {
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
-  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; return }
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; return }
   tagEditor.hidden = false
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
@@ -692,6 +694,20 @@ function renderEditor() {
   editorTitle.textContent = sel.length === 1 ? (sel[0].title || sel[0].filename) : `${sel.length} tracks`
   populateForm(sel)
   updateCoverPreview()
+  updatePlayer()
+}
+
+function updatePlayer() {
+  if (state.selectedIds.size === 1) {
+    const url = `/api/stream/${[...state.selectedIds][0]}`
+    if (playerEl.getAttribute('src') !== url) playerEl.src = url
+    playerEl.hidden = false
+  } else {
+    playerEl.pause()
+    playerEl.removeAttribute('src')
+    playerEl.load()
+    playerEl.hidden = true
+  }
 }
 
 function updateCoverPreview() {
