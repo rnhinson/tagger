@@ -399,6 +399,12 @@ function renderTracks() {
   trackTbody.innerHTML = ''
 
   if (!state.tracks.length) {
+    const pristine = state.total === 0 && !state.query && !state.artists.length
+      && state.selectedArtist === null && state.selectedAlbum === null
+      && state.selectedDirectory === null && !state.selectedIssue
+    trackEmpty.innerHTML = pristine
+      ? 'Your library is empty. Click <strong>Scan Library</strong> to index your music.'
+      : 'No tracks found.'
     trackEmpty.hidden = false
     trackLoading.hidden = true
     trackCount.textContent = '0 tracks'
@@ -1696,8 +1702,38 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault()
       tagForm.requestSubmit()
     }
+  } else if (e.key === '?') {
+    e.preventDefault()
+    showKeyboardHelp()
   }
 })
+
+const SHORTCUTS: [string, string][] = [
+  ['↑ / ↓', 'Move between tracks'],
+  ['Click', 'Select a track'],
+  ['Shift-click', 'Select a range'],
+  ['Ctrl/⌘ + S', 'Save tags'],
+  ['Esc', 'Close the editor'],
+  ['?', 'Show this help'],
+]
+
+function showKeyboardHelp() {
+  if (document.querySelector('.modal-overlay')) return
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  const rows = SHORTCUTS.map(([k, d]) => `<tr><td class="kbd-key"><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('')
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <div class="modal-title">Keyboard shortcuts</div>
+      <table class="kbd-table"><tbody>${rows}</tbody></table>
+      <div class="modal-actions"><button class="btn btn-primary" id="kbd-close">Close</button></div>
+    </div>
+  `
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#kbd-close')!.addEventListener('click', close)
+}
 
 // Quality panel: issue item clicks
 qualityListEl.addEventListener('click', async (e) => {

@@ -249,20 +249,22 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  height: 38px;
+  padding: 5px 14px;
+  min-height: 38px;
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
   gap: 12px;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .track-count { font-size: 12px; color: var(--text-muted); }
 
-.toolbar-left { display: flex; align-items: center; flex: 1; min-width: 0; }
+.toolbar-left { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
 
-.toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
-.bulk-actions { display: flex; align-items: center; gap: 8px; }
+.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
 .bulk-actions[hidden] { display: none; }
 
 .selection-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
@@ -818,6 +820,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .modal-title { font-size: 15px; font-weight: 600; }
 .modal-card select, .modal-card input { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border, #2a2f3a); background: var(--bg, #0f1115); color: var(--text, #e6e8eb); font-size: 14px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.kbd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.kbd-table td { padding: 4px 8px; }
+.kbd-key { width: 40%; }
+.kbd-table kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); font-family: ui-monospace, monospace; font-size: 12px; }
 
 /* ── Login overlay ─────────────────────────────────────────────────────────── */
 .login-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: var(--bg, #0f1115); }

@@ -4,6 +4,12 @@ A self-hosted web application for editing audio file tags. Supports FLAC, MP3,
 AAC/M4A, and OGG Vorbis. Designed to run as a server so you can tag files on a
 NAS or remote machine from any browser.
 
+## Screenshots
+
+| Track list | Album grid | Tag editor |
+|:---:|:---:|:---:|
+| ![Track list](docs/tracks.png) | ![Album grid](docs/albums.png) | ![Tag editor](docs/editor.png) |
+
 ## Features
 
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
