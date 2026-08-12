@@ -12,9 +12,10 @@ RUN npm run build
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# fpcalc is required for AcoustID fingerprinting (chromaprint package)
+# fpcalc (chromaprint) for AcoustID fingerprinting; ffmpeg for spectrograms
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libchromaprint-tools \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ReplayGain scanning (optional). Installs rsgain from its GitHub .deb release.

@@ -57,7 +57,8 @@ health-check, and backup notes.
 - **Files** — template-based rename/reorganize, `.m3u` export, ReplayGain, and
   a recoverable trash — all undoable.
 - **Quality** — a panel for missing tags, duplicates, and dead files, with a
-  "keep best quality" de-duplicator and bitrate/sample-rate columns.
+  "keep best quality" de-duplicator, bitrate/sample-rate columns, and a
+  per-file **spectrogram** to spot lossy transcodes by their frequency cutoff.
 - **Playback** — inline, seekable audio right in the tag editor.
 - **Ops** — optional rate-limited password auth, `/api/health`, a responsive
   UI, and keyboard shortcuts (press `?`).

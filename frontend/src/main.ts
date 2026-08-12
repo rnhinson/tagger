@@ -44,6 +44,12 @@ const coverPlaceholder = document.getElementById('cover-placeholder')!
 const coverInput       = document.getElementById('cover-input') as HTMLInputElement
 const playerEl         = document.getElementById('player') as HTMLAudioElement
 const editorRenamePreviewEl = document.getElementById('editor-rename-preview')!
+const spectroSection   = document.getElementById('spectro-section')!
+const spectroBtn       = document.getElementById('spectro-btn') as HTMLButtonElement
+const spectroWrap      = document.getElementById('spectro-wrap')!
+const spectroImg       = document.getElementById('spectro-img') as HTMLImageElement
+const spectroStatus    = document.getElementById('spectro-status')!
+let spectrogramAvailable = false
 
 // Rename settings mirrored client-side for the editor's live save-path preview.
 let renameOnSave = false
@@ -535,6 +541,35 @@ function renderEditor() {
   updateCoverPreview()
   updatePlayer()
   updateEditorRenamePreview()
+  updateSpectro()
+}
+
+function updateSpectro() {
+  // Shown for a single selection; collapsed by default (rendering is lazy).
+  const show = state.selectedIds.size === 1 && spectrogramAvailable
+  spectroSection.hidden = !show
+  spectroWrap.hidden = true
+  spectroImg.removeAttribute('src')
+  spectroBtn.textContent = 'Spectrogram ▾'
+}
+
+function toggleSpectro() {
+  if (state.selectedIds.size !== 1) return
+  if (!spectroWrap.hidden) {
+    spectroWrap.hidden = true
+    spectroBtn.textContent = 'Spectrogram ▾'
+    return
+  }
+  spectroWrap.hidden = false
+  spectroBtn.textContent = 'Spectrogram ▴'
+  const url = api.spectrogram.url([...state.selectedIds][0])
+  if (spectroImg.getAttribute('src') !== url) {
+    spectroStatus.textContent = 'Rendering…'
+    spectroImg.style.display = 'none'
+    spectroImg.onload = () => { spectroImg.style.display = 'block'; spectroStatus.textContent = '' }
+    spectroImg.onerror = () => { spectroStatus.textContent = 'Could not render spectrogram' }
+    spectroImg.src = url
+  }
 }
 
 const updateEditorRenamePreview = debounce(async () => {
@@ -1635,6 +1670,7 @@ trackTbody.addEventListener('click', (e) => {
 
 // MusicBrainz lookup
 lookupBtn.addEventListener('click', runLookup)
+spectroBtn.addEventListener('click', toggleSpectro)
 document.getElementById('lookup-close')!.addEventListener('click', () => { lookupPanel.hidden = true })
 
 // View toggle
@@ -2094,6 +2130,7 @@ async function startApp() {
     replaygainAvailable = s.available
     updateBulkBar()
   }).catch(() => {})
+  api.spectrogram.status().then(s => { spectrogramAvailable = s.available }).catch(() => {})
   await refreshUndoButton()
   await loadLibrary()
   await loadTracks()

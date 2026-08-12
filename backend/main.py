@@ -25,6 +25,7 @@ from api.fs import router as fs_router
 from api.covers import router as covers_router
 from api.lookup import router as lookup_router
 from api.stream import router as stream_router
+from api.spectrogram import router as spectrogram_router
 
 
 @asynccontextmanager
@@ -97,6 +98,7 @@ app.include_router(fs_router, prefix="/api/fs", tags=["fs"])
 app.include_router(covers_router, prefix="/api/covers", tags=["covers"])
 app.include_router(lookup_router, prefix="/api/lookup", tags=["lookup"])
 app.include_router(stream_router, prefix="/api/stream", tags=["stream"])
+app.include_router(spectrogram_router, prefix="/api/spectrogram", tags=["spectrogram"])
 
 # Serve built frontend assets (production only — dev uses Vite's server)
 _static = os.path.join(os.path.dirname(__file__), "static")
