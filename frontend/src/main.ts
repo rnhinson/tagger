@@ -1431,6 +1431,17 @@ document.getElementById('sidebar-toggle')!.addEventListener('click', () => {
   appEl.classList.toggle('sidebar-collapsed')
 })
 
+// On phones/tablets the sidebar overlays the content, so start it collapsed
+// and close it once the user picks something from it.
+const MOBILE_BP = 820
+if (window.innerWidth <= MOBILE_BP) appEl.classList.add('sidebar-collapsed')
+document.querySelector('.sidebar')!.addEventListener('click', (e) => {
+  if (window.innerWidth > MOBILE_BP) return
+  if ((e.target as HTMLElement).closest('.nav-item, .tree-row, .quality-issue-item')) {
+    appEl.classList.add('sidebar-collapsed')
+  }
+})
+
 // Sidebar tabs
 document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.stab')

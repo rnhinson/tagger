@@ -10,6 +10,11 @@ NAS or remote machine from any browser.
 |:---:|:---:|:---:|
 | ![Track list](docs/tracks.png) | ![Album grid](docs/albums.png) | ![Tag editor](docs/editor.png) |
 
+The UI is responsive — the sidebar and tag editor collapse to overlays on
+phones and tablets.
+
+<img src="docs/mobile.png" alt="Mobile track list" width="280" />
+
 ## Features
 
 - Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
