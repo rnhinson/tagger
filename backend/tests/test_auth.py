@@ -59,6 +59,12 @@ def test_health_exempt_from_auth(auth_client):
     assert auth_client.get("/api/health").status_code == 200
 
 
+def test_secure_cookie_flag(auth_client, monkeypatch):
+    monkeypatch.setenv("TAGGER_SECURE_COOKIE", "1")
+    r = auth_client.post("/api/auth/login", json={"password": "hunter2"})
+    assert "secure" in r.headers.get("set-cookie", "").lower()
+
+
 def test_login_rate_limited_after_repeated_failures(auth_client):
     for _ in range(5):
         assert auth_client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401

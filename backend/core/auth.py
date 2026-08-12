@@ -24,6 +24,11 @@ def auth_enabled() -> bool:
     return bool(password())
 
 
+def secure_cookie() -> bool:
+    """Whether to mark the session cookie Secure (set behind HTTPS)."""
+    return os.environ.get("TAGGER_SECURE_COOKIE", "").lower() in ("1", "true", "yes")
+
+
 def _secret() -> bytes:
     return hashlib.sha256(password().encode()).digest()
 
