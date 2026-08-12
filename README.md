@@ -1,8 +1,43 @@
-# tagger
+```
+████████╗ █████╗  ██████╗  ██████╗ ███████╗██████╗
+╚══██╔══╝██╔══██╗██╔════╝ ██╔════╝ ██╔════╝██╔══██╗
+   ██║   ███████║██║  ███╗██║  ███╗█████╗  ██████╔╝
+   ██║   ██╔══██║██║   ██║██║   ██║██╔══╝  ██╔══██╗
+   ██║   ██║  ██║╚██████╔╝╚██████╔╝███████╗██║  ██║
+   ╚═╝   ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝
+```
 
-A self-hosted web application for editing audio file tags. Supports FLAC, MP3,
-AAC/M4A, and OGG Vorbis. Designed to run as a server so you can tag files on a
-NAS or remote machine from any browser.
+Self-hosted web app for editing audio tags (FLAC, MP3, AAC/M4A, OGG) — run it
+on a NAS or server and tag your library from any browser.
+
+[![CI](https://github.com/rnhinson/tagger/actions/workflows/ci.yml/badge.svg)](https://github.com/rnhinson/tagger/actions/workflows/ci.yml)
+[![Publish image](https://github.com/rnhinson/tagger/actions/workflows/publish.yml/badge.svg)](https://github.com/rnhinson/tagger/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+## Quick start
+
+### Docker Compose
+
+```bash
+git clone https://github.com/rnhinson/tagger.git && cd tagger
+# In docker-compose.yml, set your library path on the left of ":/music"
+docker compose up -d
+# → http://localhost:8000
+```
+
+### Docker CLI
+
+```bash
+docker run -d -p 8000:8000 \
+  -v /your/music:/music \
+  -v tagger-config:/config \
+  ghcr.io/rnhinson/tagger:latest
+# → http://localhost:8000
+```
+
+Multi-arch images (`amd64` + `arm64`) are published to GHCR on each release.
+See the [self-hosting guide](docs/SELF-HOSTING.md) for HTTPS, reverse-proxy,
+health-check, and backup notes.
 
 ## Screenshots
 
@@ -10,221 +45,51 @@ NAS or remote machine from any browser.
 |:---:|:---:|:---:|
 | ![Track list](docs/tracks.png) | ![Album grid](docs/albums.png) | ![Tag editor](docs/editor.png) |
 
-The UI is responsive — the sidebar and tag editor collapse to overlays on
-phones and tablets.
-
-<img src="docs/mobile.png" alt="Mobile track list" width="280" />
-
 ## Features
 
-- Scan a music library into a SQLite index (FLAC, MP3, AAC/M4A, OGG Vorbis)
-- Browse by artist/album, by directory tree, or by data-quality issues
-- Read and edit tags (incl. composer, BPM, lyrics, compilation) solo or in bulk
-- Album flows: auto-number by filename, and find/replace within a tag
-- Inline audio playback in the tag editor (range-streamed, seekable)
-- Full-text search across title/artist/album
-- MusicBrainz text lookup (with an edition picker), plus AcoustID (optional)
-- Discogs as an optional second metadata source (token-gated)
-- Tag inference from a file's path/name for untagged files ("From filename")
-- One-click Auto-fix to apply the best match, with a before/after confirmation
-- Embedded cover art: view, upload, or pull from the Cover Art Archive
-- Album grid view with cover thumbnails
-- Case normalization (Title Case) for shouty or lowercase tags
-- Audio-quality columns (bitrate / sample rate / channels)
-- Quality panel surfacing missing tags, duplicates, and dead files, with a
-  one-click "keep best quality" de-duplicator
-- Optional single-password authentication with login rate-limiting
-- Full-library or single-folder rescan, a concurrent-scan guard, exclude
-  patterns, and an optional auto-rescan interval
-- File operations: move to a recoverable trash (with empty-trash), or
-  reorganize on disk using the rename template (both undoable)
-- Configurable rename-on-save with a live template preview (settings + editor)
-- Keyboard shortcuts (press `?` for the list)
-- ReplayGain scanning via `rsgain`/`loudgain` (bundled in the Docker image)
-- Export the current filtered view or search as an `.m3u` playlist
-- Undo for tag edits, bulk edits, renames, removals, deletes, and reorganizes
-- Multiple music directories, persisted to `/config/settings.json`
+- **Library** — scan into a searchable SQLite index; browse by artist/album,
+  folder, or data-quality issue; full-text search.
+- **Editing** — all common tags (incl. composer, BPM, lyrics, compilation),
+  solo or in bulk; auto-number, find/replace, case normalization; embedded
+  cover art (view / upload / fetch from the Cover Art Archive).
+- **Metadata lookup** — MusicBrainz (with an edition picker), AcoustID
+  fingerprinting, and Discogs; one-click Auto-fix and filename inference.
+- **Files** — template-based rename/reorganize, `.m3u` export, ReplayGain, and
+  a recoverable trash — all undoable.
+- **Quality** — a panel for missing tags, duplicates, and dead files, with a
+  "keep best quality" de-duplicator and bitrate/sample-rate columns.
+- **Playback** — inline, seekable audio right in the tag editor.
+- **Ops** — optional rate-limited password auth, `/api/health`, a responsive
+  UI, and keyboard shortcuts (press `?`).
 
-## Quick Start — Docker
+## Configuration
 
-```bash
-# 1. Clone / download the project
-git clone <repo> tagger && cd tagger
+| Variable            | Default    | Description                              |
+|---------------------|------------|------------------------------------------|
+| `TAGGER_MUSIC_DIR`  | `/music`   | Root of your music library               |
+| `TAGGER_CONFIG_DIR` | `/config`  | Where `library.db` + `settings.json` live |
+| `TAGGER_PASSWORD`   | *(unset)*  | If set, requires a login                 |
+| `TAGGER_SECURE_COOKIE` | *(unset)* | Mark the session cookie `Secure` (HTTPS) |
+| `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup      |
+| `TAGGER_LOG_LEVEL`  | `INFO`     | Log verbosity                            |
 
-# 2. Edit docker-compose.yml — set the left side of the music volume:
-#      - /your/actual/music/path:/music
+The AcoustID key and a Discogs token can also be set at runtime in **Settings**.
+Auth is off unless `TAGGER_PASSWORD` is set; ReplayGain uses `rsgain` (bundled
+in the image) or `loudgain` when present. Full details, including HTTPS setup,
+are in the [self-hosting guide](docs/SELF-HOSTING.md).
 
-# 3. Build and run
-docker compose up --build
-
-# 4. Open http://localhost:8000
-```
-
-## Prebuilt image (GHCR)
-
-Multi-arch images (`linux/amd64` + `linux/arm64`) are published to the GitHub
-Container Registry on every version tag, so you can run without building:
-
-```bash
-docker run -p 8000:8000 \
-  -v /your/music:/music -v tagger-config:/config \
-  ghcr.io/rnhinson/tagger:latest
-```
-
-### Apple `container` runtime
-
-The same image runs under Apple's [`container`](https://github.com/apple/container)
-CLI on Apple Silicon (macOS 15+). There's no Compose equivalent, so run it
-directly and bind-mount a local config folder (named volumes aren't supported):
-
-```bash
-container system start
-mkdir -p ./tagger-config
-container run --detach --name tagger \
-  --publish 8000:8000 \
-  --volume /Users/you/Music:/music \
-  --volume "$PWD/tagger-config:/config" \
-  ghcr.io/rnhinson/tagger:latest
-```
-
-Open <http://localhost:8000>. If the host can't reach `localhost`, Apple
-`container` gives each container its own IP — run `container ls` and browse to
-`http://<container-ip>:8000`. Add `--env TAGGER_PASSWORD=…` to require a login.
-(GHCR packages start private; make the package public or `container registry
-login ghcr.io` first, otherwise the pull is denied.)
-
-## Local Development (no Docker)
+## Development
 
 Requires Python 3.11+ and Node 18+.
 
 ```bash
-# Optional: point at your real music library
-export TAGGER_MUSIC_DIR=~/Music
-
-./dev.sh
+export TAGGER_MUSIC_DIR=~/Music   # optional
+./dev.sh                          # backend :8000 + Vite dev server :5173
 ```
 
-- Backend:  http://localhost:8000  (FastAPI + uvicorn, auto-reload)
-- Frontend: http://localhost:5173  (Vite dev server, HMR)
-
-The Vite dev server proxies all `/api` requests to the backend, so there are no
-CORS issues during development.
-
-## Project Structure
-
-```
-tagger/
-├── backend/
-│   ├── main.py                    # FastAPI app entry point
-│   ├── requirements.txt
-│   ├── api/                       # HTTP routers
-│   │   ├── auth.py                # Login / logout / status
-│   │   ├── library.py             # Listing, search, issues, m3u, history, dedupe
-│   │   ├── tags.py                # Tag read/write/bulk, rename, ReplayGain
-│   │   ├── jobs.py                # Scan job endpoints
-│   │   ├── config.py              # Settings model + rename preview
-│   │   ├── fs.py                  # Filesystem browse/tree endpoints
-│   │   ├── covers.py              # Cover art read/write
-│   │   ├── lookup.py              # MusicBrainz / AcoustID / Discogs / infer
-│   │   └── stream.py              # Range-aware audio streaming
-│   ├── core/
-│   │   ├── config.py             # Env-based settings + paths
-│   │   ├── auth.py               # Password + HMAC session token
-│   │   ├── database.py           # SQLite schema, migrations, FTS index
-│   │   ├── scanner.py            # Library walk + incremental upsert
-│   │   ├── tagger.py             # mutagen read/write + audio info
-│   │   ├── tasks.py              # Background scan job runner
-│   │   ├── inference.py          # Path/filename → tag heuristics
-│   │   ├── history.py            # Change log + undo
-│   │   ├── replaygain.py         # rsgain/loudgain wrapper
-│   │   └── providers/            # Metadata providers
-│   │       ├── base.py           # Provider interface + TrackMetadata
-│   │       ├── musicbrainz.py    # MusicBrainz text search + result parser
-│   │       ├── acoustid_provider.py  # AcoustID fingerprint lookup
-│   │       └── discogs.py        # Discogs release search
-│   └── tests/                     # pytest suite (logic, API, audio round-trip)
-├── frontend/
-│   ├── index.html
-│   ├── vite.config.ts            # Builds into backend/static/
-│   └── src/
-│       ├── main.ts               # App logic: panels, track list, tag editor
-│       ├── template.ts           # Static app markup
-│       ├── api.ts                # Typed REST client
-│       ├── state.ts              # Shared UI state + column prefs
-│       ├── columns.ts            # Track-table column definitions
-│       ├── quality.ts            # Quality rating + case normalization
-│       ├── util.ts               # esc / fmtDuration / debounce
-│       ├── toast.ts              # Toast notifications
-│       └── style.css             # Dark theme
-├── Dockerfile                    # Multi-stage: Node build + Python runtime
-├── docker-compose.yml
-└── dev.sh                        # Local dev launcher
-```
-
-## Environment Variables
-
-| Variable            | Default    | Description                        |
-|---------------------|------------|------------------------------------|
-| `TAGGER_MUSIC_DIR`  | `/music`   | Root path of your music library    |
-| `TAGGER_CONFIG_DIR` | `/config`  | Where settings.json is stored      |
-| `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup |
-| `TAGGER_PASSWORD`   | *(unset)*  | If set, requires this password to log in |
-| `TAGGER_SECURE_COOKIE` | *(unset)* | Mark the session cookie `Secure` (set behind HTTPS) |
-| `TAGGER_LOG_LEVEL`  | `INFO`     | Log verbosity (DEBUG/INFO/WARNING/…)|
-
-AcoustID also requires the `fpcalc` binary (`libchromaprint-tools`), which is
-already included in the Docker image. The API key can also be set at runtime in
-the Settings panel, alongside an optional **Discogs** token for a second
-metadata source.
-
-**Authentication** is off by default — the app is fully open unless
-`TAGGER_PASSWORD` is set. When set, a login is required and the session is held
-in an HttpOnly cookie that survives restarts (and invalidates if the password
-changes); repeated failed logins from an IP are rate-limited. Put it behind
-HTTPS if you expose it beyond a trusted LAN, and set `TAGGER_SECURE_COOKIE=1`.
-See the [self-hosting guide](docs/SELF-HOSTING.md) for reverse-proxy, HTTPS,
-health-check, and backup notes.
-
-**ReplayGain** scanning shells out to [`rsgain`](https://github.com/complexlogic/rsgain)
-or `loudgain` if either is on the server's `PATH`; when neither is installed the
-feature reports itself unavailable in Settings. The Docker image installs
-`rsgain` by default — build with `--build-arg INSTALL_RSGAIN=0` to skip it, or
-`--build-arg RSGAIN_VERSION=x.y` to pin a version. If the install fails at build
-time the image still builds; the feature just stays disabled.
-
-## Monitoring
-
-- `GET /api/health` — an unauthenticated liveness check returning
-  `{"status": "ok", "version": …}`, suitable for a container `HEALTHCHECK`
-  or an uptime monitor.
-- `/docs` and `/openapi.json` — the auto-generated OpenAPI API reference.
-
-## Testing
-
-```bash
-cd backend
-pip install -r requirements-dev.txt
-pytest
-```
-
-The suite covers pure logic (tag inference, rename-template rendering, the
-MusicBrainz parser, playlist/FTS helpers, undo/history), the HTTP API via
-TestClient (including auth and the audio stream), and real-audio tag/cover
-round-trips across all four formats. The round-trip tests synthesise fixtures
-with `ffmpeg` and skip automatically when it isn't installed.
-
-GitHub Actions (`.github/workflows/ci.yml`) runs the backend suite (with
-`ffmpeg`) and the frontend typecheck + build on every push and pull request.
-
-## Planned
-
-- Batch cover-art fetch for whole albums
-- Filename/path inference improvements (more layout heuristics)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the checks CI runs, and
-project conventions.
+Run the checks CI runs: `cd backend && pytest`, and
+`cd frontend && npx tsc --noEmit && npm run build`. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for project layout and conventions.
 
 ## License
 
