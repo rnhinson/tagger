@@ -1,10 +1,17 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+
+logging.basicConfig(
+    level=os.environ.get("TAGGER_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("tagger")
 
 from core.config import settings
 from core.database import init_db
@@ -49,7 +56,11 @@ class AuthMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and auth_enabled():
             path = scope["path"]
-            if path.startswith("/api/") and not path.startswith("/api/auth/"):
+            if (
+                path.startswith("/api/")
+                and not path.startswith("/api/auth/")
+                and path != "/api/health"
+            ):
                 cookies = SimpleCookie()
                 for name, value in scope["headers"]:
                     if name == b"cookie":
@@ -64,6 +75,18 @@ class AuthMiddleware:
 
 app = FastAPI(title="Tagger", version="0.2.0", lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
+
+@app.get("/api/health", tags=["ops"])
+def health():
+    """Unauthenticated liveness/version check for monitoring."""
+    return {"status": "ok", "version": app.version}
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(library_router, prefix="/api/library", tags=["library"])

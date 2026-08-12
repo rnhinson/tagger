@@ -54,6 +54,11 @@ def test_auth_endpoints_reachable_without_cookie(auth_client):
     assert auth_client.get("/api/auth/status").status_code == 200
 
 
+def test_health_exempt_from_auth(auth_client):
+    # Health checks must work without logging in, even when auth is enabled.
+    assert auth_client.get("/api/health").status_code == 200
+
+
 def test_login_rate_limited_after_repeated_failures(auth_client):
     for _ in range(5):
         assert auth_client.post("/api/auth/login", json={"password": "wrong"}).status_code == 401

@@ -58,3 +58,13 @@ def test_lookup_status(client):
 def test_tracks_listing_empty(client):
     body = client.get("/api/library/tracks").json()
     assert body == {"total": 0, "tracks": []}
+
+
+def test_health(client):
+    body = client.get("/api/health").json()
+    assert body["status"] == "ok"
+    assert "version" in body
+
+
+def test_openapi_available(client):
+    assert client.get("/openapi.json").status_code == 200
