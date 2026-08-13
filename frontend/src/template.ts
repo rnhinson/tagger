@@ -138,17 +138,6 @@ export const APP_HTML = `
       <div class="track-pane-toolbar">
         <div class="toolbar-left">
           <span id="track-count" class="track-count"></span>
-          <div id="bulk-actions" class="bulk-actions" hidden>
-            <span id="selection-count" class="selection-count"></span>
-            <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
-            <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
-            <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
-            <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
-            <button id="organize-btn" class="btn btn-ghost btn-sm" title="Move the selected files on disk using the rename template">Organize files</button>
-            <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
-            <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
-            <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
-          </div>
         </div>
         <div class="toolbar-right">
           <div class="filter-group">
@@ -174,6 +163,17 @@ export const APP_HTML = `
             <button id="view-albums-btn" class="btn btn-ghost btn-sm" title="Album grid">Albums</button>
           </div>
         </div>
+      </div>
+      <div id="bulk-actions" class="bulk-actions" hidden>
+        <span id="selection-count" class="selection-count"></span>
+        <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
+        <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
+        <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
+        <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
+        <button id="organize-btn" class="btn btn-ghost btn-sm" title="Move the selected files on disk using the rename template">Organize files</button>
+        <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
+        <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
+        <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
       </div>
       <div class="table-wrap">
         <table class="track-table">

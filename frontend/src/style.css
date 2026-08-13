@@ -264,7 +264,19 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 .toolbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
-.bulk-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
+/* Bulk-selection actions get their own full-width row below the toolbar so
+   they never collide with the filter/columns/view controls. */
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.06));
+  flex-shrink: 0;
+}
 .bulk-actions[hidden] { display: none; }
 
 .selection-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; }
