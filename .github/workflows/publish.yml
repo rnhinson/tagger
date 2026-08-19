@@ -1,11 +1,20 @@
 name: Publish image
 
-# Build and push a multi-arch image to GHCR when a version tag is pushed
-# (e.g. `git tag v0.2.0 && git push --tags`). Also runnable on demand.
+# Build and push a multi-arch image to GHCR:
+#   - on every push to main (keeps `:latest` current with merged work)
+#   - on a version tag  (e.g. `git tag v0.2.1 && git push --tags`) → adds semver tags
+#   - on demand via the Actions tab
 on:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
+
+# A newer main build supersedes an in-flight one; let tag/release builds run
+# independently so a release is never cancelled by a subsequent main push.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -35,6 +44,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=main-,enable={{is_default_branch}}
             type=raw,value=latest
 
       - name: Build and push
