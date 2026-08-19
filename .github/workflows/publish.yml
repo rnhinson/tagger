@@ -23,6 +23,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Safety net: a healthy multi-arch build finishes in well under 10 min, so
+    # cap the job rather than let a hung build burn the 6-hour default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
