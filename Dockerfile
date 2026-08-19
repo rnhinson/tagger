@@ -16,7 +16,7 @@ RUN npm run build
 
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # fpcalc (chromaprint) for AcoustID fingerprinting; ffmpeg for spectrograms
 RUN apt-get update && apt-get install -y --no-install-recommends \
