@@ -134,6 +134,9 @@ export const APP_HTML = `
       </nav>
     </aside>
 
+    <div class="pane-resizer" data-resize="sidebar" role="separator" aria-orientation="vertical"
+         title="Drag to resize · double-click to reset"></div>
+
     <main class="track-pane">
       <div class="track-pane-toolbar">
         <div class="toolbar-left">
@@ -187,6 +190,9 @@ export const APP_HTML = `
       <div id="pagination" class="pagination" hidden></div>
     </main>
 
+    <div class="pane-resizer" id="editor-resizer" data-resize="editor" role="separator" aria-orientation="vertical"
+         title="Drag to resize · double-click to reset" hidden></div>
+
     <aside id="tag-editor" class="tag-editor" hidden>
       <div class="tag-editor-header">
         <span id="editor-title" class="editor-title"></span>
@@ -219,7 +225,10 @@ export const APP_HTML = `
         <div id="spectro-section" class="spectro-section" hidden>
           <button type="button" id="spectro-btn" class="btn btn-ghost btn-sm">Spectrogram ▾</button>
           <div id="spectro-wrap" class="spectro-wrap" hidden>
-            <img id="spectro-img" class="spectro-img" alt="Frequency spectrogram" />
+            <div class="spectro-frame">
+              <img id="spectro-img" class="spectro-img" alt="Frequency spectrogram" title="Click to open full size" />
+              <button type="button" id="spectro-popout" class="spectro-popout" title="Open full size" aria-label="Open spectrogram full size">⤢</button>
+            </div>
             <div id="spectro-status" class="spectro-status"></div>
           </div>
         </div>

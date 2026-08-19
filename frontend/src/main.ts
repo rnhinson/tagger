@@ -49,6 +49,9 @@ const spectroBtn       = document.getElementById('spectro-btn') as HTMLButtonEle
 const spectroWrap      = document.getElementById('spectro-wrap')!
 const spectroImg       = document.getElementById('spectro-img') as HTMLImageElement
 const spectroStatus    = document.getElementById('spectro-status')!
+const spectroPopout    = document.getElementById('spectro-popout') as HTMLButtonElement
+const sidebarEl        = document.querySelector<HTMLElement>('.sidebar')!
+const editorResizer    = document.getElementById('editor-resizer')!
 let spectrogramAvailable = false
 
 // Rename settings mirrored client-side for the editor's live save-path preview.
@@ -528,8 +531,9 @@ function renderPagination() {
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
 function renderEditor() {
-  if (state.selectedIds.size === 0) { tagEditor.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; editorRenamePreviewEl.hidden = true; return }
+  if (state.selectedIds.size === 0) { tagEditor.hidden = true; editorResizer.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; editorRenamePreviewEl.hidden = true; return }
   tagEditor.hidden = false
+  editorResizer.hidden = false
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
   inferBtn.hidden = state.selectedIds.size !== 1
@@ -550,6 +554,8 @@ function updateSpectro() {
   spectroSection.hidden = !show
   spectroWrap.hidden = true
   spectroImg.removeAttribute('src')
+  spectroImg.style.display = 'none'
+  spectroPopout.style.display = 'none'
   spectroBtn.textContent = 'Spectrogram ▾'
 }
 
@@ -566,10 +572,54 @@ function toggleSpectro() {
   if (spectroImg.getAttribute('src') !== url) {
     spectroStatus.textContent = 'Rendering…'
     spectroImg.style.display = 'none'
-    spectroImg.onload = () => { spectroImg.style.display = 'block'; spectroStatus.textContent = '' }
+    spectroPopout.style.display = 'none'
+    spectroImg.onload = () => {
+      spectroImg.style.display = 'block'
+      spectroPopout.style.display = 'block'
+      spectroStatus.textContent = ''
+    }
     spectroImg.onerror = () => { spectroStatus.textContent = 'Could not render spectrogram' }
     spectroImg.src = url
+  } else if (spectroImg.getAttribute('src')) {
+    spectroPopout.style.display = 'block'
   }
+}
+
+// Open the rendered spectrogram at full size in a dismissible lightbox.
+function openSpectroLightbox() {
+  const src = spectroImg.getAttribute('src')
+  if (!src || spectroImg.style.display === 'none') return
+
+  const overlay = document.createElement('div')
+  overlay.className = 'spectro-lightbox-overlay'
+
+  const box = document.createElement('div')
+  box.className = 'spectro-lightbox'
+
+  const img = document.createElement('img')
+  img.src = src
+  img.alt = 'Frequency spectrogram'
+
+  const cap = document.createElement('div')
+  cap.className = 'spectro-lightbox-cap'
+  cap.textContent = editorTitle.textContent || ''
+
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'spectro-lightbox-close'
+  close.setAttribute('aria-label', 'Close')
+  close.textContent = '✕'
+
+  box.append(img, cap, close)
+  overlay.appendChild(box)
+
+  const dismiss = () => { overlay.remove(); document.removeEventListener('keydown', onKey) }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss() }
+  overlay.addEventListener('click', e => { if (e.target === overlay) dismiss() })
+  close.addEventListener('click', dismiss)
+  document.addEventListener('keydown', onKey)
+
+  document.body.appendChild(overlay)
 }
 
 const updateEditorRenamePreview = debounce(async () => {
@@ -1503,6 +1553,69 @@ document.querySelector('.sidebar')!.addEventListener('click', (e) => {
   }
 })
 
+// ─── Resizable panes ──────────────────────────────────────────────────────────
+// The left nav and the right tag editor can each be widened by dragging the
+// divider beside them; widths persist per-browser and reset on double-click.
+const PANE = {
+  sidebar: { key: 'tagger_sidebar_w', varName: '--sidebar-w', def: 220, min: 160, max: 560, el: sidebarEl },
+  editor:  { key: 'tagger_editor_w',  varName: '--editor-w',  def: 272, min: 240, max: 720, el: tagEditor },
+} as const
+type PaneName = keyof typeof PANE
+
+const clampPane = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+function applyPaneWidth(name: PaneName, px: number) {
+  document.documentElement.style.setProperty(PANE[name].varName, `${Math.round(px)}px`)
+}
+
+function restorePaneWidths() {
+  for (const name of Object.keys(PANE) as PaneName[]) {
+    const p = PANE[name]
+    const saved = parseInt(localStorage.getItem(p.key) || '', 10)
+    if (!Number.isNaN(saved)) applyPaneWidth(name, clampPane(saved, p.min, p.max))
+  }
+}
+
+function beginPaneResize(e: PointerEvent) {
+  if (window.innerWidth <= MOBILE_BP) return   // panes overlay on mobile; no resize
+  const handle = e.currentTarget as HTMLElement
+  const name = handle.dataset.resize as PaneName
+  const p = PANE[name]
+  e.preventDefault()
+  const startX = e.clientX
+  const startW = p.el.getBoundingClientRect().width
+  handle.classList.add('dragging')
+  document.body.classList.add('resizing-pane')
+  handle.setPointerCapture(e.pointerId)
+
+  const onMove = (ev: PointerEvent) => {
+    // Sidebar sits left of its handle (drag right = wider); editor sits right
+    // of its handle (drag left = wider).
+    const delta = name === 'sidebar' ? ev.clientX - startX : startX - ev.clientX
+    applyPaneWidth(name, clampPane(startW + delta, p.min, p.max))
+  }
+  const onUp = () => {
+    handle.releasePointerCapture(e.pointerId)
+    handle.removeEventListener('pointermove', onMove)
+    handle.removeEventListener('pointerup', onUp)
+    handle.classList.remove('dragging')
+    document.body.classList.remove('resizing-pane')
+    localStorage.setItem(p.key, String(Math.round(p.el.getBoundingClientRect().width)))
+  }
+  handle.addEventListener('pointermove', onMove)
+  handle.addEventListener('pointerup', onUp)
+}
+
+for (const handle of document.querySelectorAll<HTMLElement>('.pane-resizer')) {
+  handle.addEventListener('pointerdown', beginPaneResize)
+  handle.addEventListener('dblclick', () => {
+    const name = handle.dataset.resize as PaneName
+    applyPaneWidth(name, PANE[name].def)
+    localStorage.removeItem(PANE[name].key)
+  })
+}
+restorePaneWidths()
+
 // Sidebar tabs
 document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.stab')
@@ -1671,6 +1784,8 @@ trackTbody.addEventListener('click', (e) => {
 // MusicBrainz lookup
 lookupBtn.addEventListener('click', runLookup)
 spectroBtn.addEventListener('click', toggleSpectro)
+spectroPopout.addEventListener('click', openSpectroLightbox)
+spectroImg.addEventListener('click', openSpectroLightbox)
 document.getElementById('lookup-close')!.addEventListener('click', () => { lookupPanel.hidden = true })
 
 // View toggle
