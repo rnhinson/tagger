@@ -1,5 +1,11 @@
 # ── Stage 1: Build frontend ───────────────────────────────────────────────
-FROM node:20-alpine AS frontend-build
+# Pin this stage to the build machine's architecture ($BUILDPLATFORM). The
+# frontend compiles to static JS/CSS/HTML that is identical on every target
+# arch, so there's no reason to run `npm install`/`npm run build` under QEMU
+# emulation for arm64 — doing so is slow and can deadlock (emulated Node has
+# hung `npm install` for hours). The built assets are copied into each arch's
+# runtime image below.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
 
 WORKDIR /build/frontend
 COPY frontend/package.json ./
