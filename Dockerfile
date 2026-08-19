@@ -5,7 +5,7 @@
 # emulation for arm64 — doing so is slow and can deadlock (emulated Node has
 # hung `npm install` for hours). The built assets are copied into each arch's
 # runtime image below.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend-build
 
 WORKDIR /build/frontend
 COPY frontend/package.json ./
