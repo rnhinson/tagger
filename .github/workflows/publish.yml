@@ -27,7 +27,7 @@ jobs:
     # cap the job rather than let a hung build burn the 6-hour default.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-qemu-action@v3      # enables arm64 build via emulation
       - uses: docker/setup-buildx-action@v3
