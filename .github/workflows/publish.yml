@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: docker/setup-qemu-action@v3      # enables arm64 build via emulation
+      - uses: docker/setup-qemu-action@v4      # enables arm64 build via emulation
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
