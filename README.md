@@ -91,6 +91,7 @@ column looks healthier than the genuine lossless tracks around it.
 |---------------------|------------|------------------------------------------|
 | `TAGGER_MUSIC_DIR`  | `/music`   | Root of your music library               |
 | `TAGGER_CONFIG_DIR` | `/config`  | Where `library.db` + `settings.json` live |
+| `TAGGER_LIBRARY_ROOTS` | *(music dirs)* | Colon-separated folders rename templates are relative to; globs allowed (`/music/Shared:/music/Libraries/*`). Overridden by Settings |
 | `TAGGER_PASSWORD`   | *(unset)*  | If set, requires a login                 |
 | `TAGGER_SECURE_COOKIE` | *(unset)* | Mark the session cookie `Secure` (HTTPS) |
 | `ACOUSTID_API_KEY`  | *(unset)*  | Enables AcoustID fingerprint lookup      |

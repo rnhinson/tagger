@@ -7,7 +7,9 @@ export const APP_HTML = `
     </div>
     <div class="topbar-actions">
       <span id="scan-status" class="scan-status"></span>
+      <button id="review-btn" class="btn btn-review btn-sm" title="Review staged changes, then write them to the files" hidden></button>
       <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
+      <button id="history-btn" class="btn btn-ghost btn-sm" title="Change history and undo">History</button>
       <button id="scan-btn" class="btn btn-primary">Scan Library</button>
       <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings" aria-label="Settings">⚙</button>
     </div>
@@ -86,12 +88,28 @@ export const APP_HTML = `
         </label>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Writing Changes</div>
+        <label class="settings-toggle">
+          <input id="setting-stage-changes" type="checkbox" />
+          <span>Review changes before writing</span>
+        </label>
+        <p class="settings-hint">Edits, organizing and lookups are held as staged changes until you write them from <strong>Review</strong>. Off: each edit is written straight away.</p>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Library Roots</div>
+        <p class="settings-hint">Folders the rename template is relative to — each file is organized inside the deepest root that contains it, never outside. One per line; <code>*</code> matches each subfolder (e.g. <code>/music/Libraries/*</code>). Empty uses <span id="library-roots-default"></span>.</p>
+        <label class="field-label">Roots
+          <textarea id="setting-library-roots" rows="3" placeholder="/music/Shared&#10;/music/Libraries/*"></textarea>
+        </label>
+        <div id="library-roots-effective" class="settings-hint"></div>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">File Renaming</div>
         <label class="settings-toggle">
           <input id="setting-rename-on-save" type="checkbox" />
           <span>Rename files on save</span>
         </label>
-        <p class="settings-hint">When enabled, saving a track's tags will also move the audio file to a new path built from the template below, relative to your music root directory.</p>
+        <p class="settings-hint">When enabled, saving a track's tags also plans a move to the path built from the template below, inside the track's library root. <strong>Organize files</strong> uses the same template.</p>
         <label class="field-label" id="rename-template-wrap">Template
           <input id="setting-rename-template" type="text" />
           <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
@@ -173,7 +191,7 @@ export const APP_HTML = `
         <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
         <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
         <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
-        <button id="organize-btn" class="btn btn-ghost btn-sm" title="Move the selected files on disk using the rename template">Organize files</button>
+        <button id="organize-btn" class="btn btn-ghost btn-sm" title="Plan moves for the selected files using the rename template, inside each file's library root">Organize files</button>
         <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
         <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
         <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>

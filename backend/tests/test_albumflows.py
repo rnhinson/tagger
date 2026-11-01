@@ -35,7 +35,9 @@ def test_autonumber_orders_by_filename(client, tmp_path):
         _make_mp3(f)
         ids[name] = _insert(f)
 
-    assert client.post("/api/tags/autonumber", json={"track_ids": list(ids.values())}).json()["numbered"] == 3
+    res = client.post("/api/tags/autonumber", json={"track_ids": list(ids.values())}).json()
+    assert res["numbered"] == 3 and res["staged"] is True
+    assert client.post("/api/staged/apply", json={}).json()["applied"] == 3
 
     by_name = {t["filename"]: t["track_number"] for t in client.get("/api/library/tracks").json()["tracks"]}
     assert by_name["01 a.mp3"] == "1"
@@ -55,6 +57,8 @@ def test_find_replace_writes_db_and_file(client, tmp_path):
     res = client.post("/api/tags/find-replace",
                       json={"track_ids": [tid], "field": "artist", "find": "The ", "replace": ""}).json()
     assert res["changed"] == 1
+    assert read_tags(str(f))["artist"] == "The Beatles"  # staged, not written yet
+    client.post("/api/staged/apply", json={})
     assert client.get(f"/api/library/track/{tid}").json()["artist"] == "Beatles"
     assert read_tags(str(f))["artist"] == "Beatles"  # written to disk too
 
