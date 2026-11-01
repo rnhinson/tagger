@@ -31,6 +31,33 @@ export interface Track {
   mb_album_artist_id: string | null
   scanned_at: number
   tagged_at: number | null
+  // Edits held for review (null when none). The UI overlays these on the
+  // fields above and keeps the on-file values in _orig.
+  staged?: StagedEntry | null
+  _orig?: Record<string, string | null>
+}
+
+export interface StagedEntry {
+  tags: Record<string, string | null>
+  new_path: string | null
+}
+
+export interface StagedTrack {
+  id: number
+  title: string | null
+  filename: string
+  path: string
+  new_path: string | null
+  changes: { field: string; old: string | null; new: string | null }[]
+}
+
+export interface WriteError { id: number; name?: string; error: string }
+
+/** What an editing call did: held for review, or written straight away. */
+export interface EditResult {
+  staged: boolean
+  applied?: number
+  errors?: WriteError[]
 }
 
 export interface TrackList {
@@ -60,7 +87,11 @@ export interface AppSettings {
   music_dirs: string[]
   scan_exclude: string[]
   auto_scan_minutes: number
+  stage_changes: boolean
+  library_roots: string[]
   default_music_dir?: string
+  env_library_roots?: string[]
+  effective_library_roots?: string[]
 }
 
 export interface ChangeLogEntry {
@@ -69,6 +100,7 @@ export interface ChangeLogEntry {
   kind: string
   summary: string
   undone: number
+  count: number | null
 }
 
 export interface ScanJob {
@@ -198,7 +230,7 @@ export const api = {
       return `/api/library/export.m3u${qs ? '?' + qs : ''}`
     },
     history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
-    undo: (id: number) => request<{ restored: number; kind: string }>('POST', `/api/library/history/${id}/undo`),
+    undo: (id: number) => request<{ restored: number; kind: string; errors: WriteError[] }>('POST', `/api/library/history/${id}/undo`),
     dedupeKeepBest: () => request<{ removed: number }>('POST', '/api/library/dedupe/keep-best'),
     trashInfo: () => request<{ count: number; bytes: number }>('GET', '/api/library/trash'),
     emptyTrash: () => request<{ removed: number; bytes: number }>('POST', '/api/library/trash/empty'),
@@ -206,21 +238,32 @@ export const api = {
 
   tags: {
     update: (trackId: number, tags: TagUpdate) =>
-      request<{ ok: boolean }>('PATCH', `/api/tags/${trackId}`, tags),
+      request<EditResult>('PATCH', `/api/tags/${trackId}`, tags),
     bulk: (trackIds: number[], tags: TagUpdate) =>
-      request<{ ok: boolean; errors: unknown[] }>('POST', '/api/tags/bulk', { track_ids: trackIds, tags }),
+      request<EditResult>('POST', '/api/tags/bulk', { track_ids: trackIds, tags }),
     replaygain: (trackIds: number[], albumMode = false) =>
       request<{ ok: boolean; tool: string | null; processed: number; error?: string }>(
         'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
     replaygainStatus: () =>
       request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
     reorganize: (trackIds: number[]) =>
-      request<{ moved: number; errors: unknown[] }>('POST', '/api/tags/reorganize', { track_ids: trackIds }),
+      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
+        'POST', '/api/tags/reorganize', { track_ids: trackIds }),
     autonumber: (trackIds: number[]) =>
-      request<{ numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
+      request<EditResult & { numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
     findReplace: (trackIds: number[], field: string, find: string, replace: string) =>
-      request<{ changed: number }>('POST', '/api/tags/find-replace',
+      request<EditResult & { changed: number }>('POST', '/api/tags/find-replace',
         { track_ids: trackIds, field, find, replace }),
+  },
+
+  staged: {
+    list: () => request<{ count: number; tracks: StagedTrack[] }>('GET', '/api/staged'),
+    count: () => request<{ count: number }>('GET', '/api/staged/count'),
+    apply: (trackIds?: number[]) =>
+      request<{ applied: number; errors: WriteError[]; change_id: number | null }>(
+        'POST', '/api/staged/apply', { track_ids: trackIds ?? null }),
+    discard: (trackIds?: number[]) =>
+      request<{ discarded: number }>('POST', '/api/staged/discard', { track_ids: trackIds ?? null }),
   },
 
   jobs: {
@@ -239,9 +282,9 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
-    renamePreview: (template: string, tags?: Record<string, string>, ext?: string) =>
-      request<{ ok: boolean; preview?: string; error?: string }>(
-        'POST', '/api/config/rename-preview', { template, tags, ext }),
+    renamePreview: (template: string, tags?: Record<string, string>, ext?: string, trackId?: number) =>
+      request<{ ok: boolean; preview?: string; path?: string; error?: string }>(
+        'POST', '/api/config/rename-preview', { template, tags, ext, track_id: trackId }),
   },
 
   lookup: {

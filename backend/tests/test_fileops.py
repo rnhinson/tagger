@@ -46,16 +46,18 @@ def test_delete_to_trash_and_undo(client, tmp_path):
 
 
 @pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
-def test_reorganize_and_undo(client, tmp_path):
+def test_reorganize_and_undo(client, tmp_path, monkeypatch):
     music = tmp_path / "music"
     music.mkdir()
-    settings.music_dir = music
+    monkeypatch.setattr(settings, "music_dir", music)
     f = music / "raw.mp3"
     _make_mp3(f)
     tid = _insert(f, title="Song", artist="Artist", album="Album", track_number="1")
 
     client.patch("/api/config", json={"rename_template": "{artist}/{album}/{track_number:02d} {title}"})
-    assert client.post("/api/tags/reorganize", json={"track_ids": [tid]}).json()["moved"] == 1
+    assert client.post("/api/tags/reorganize", json={"track_ids": [tid]}).json()["planned"] == 1
+    assert f.exists()  # staged only
+    assert client.post("/api/staged/apply", json={}).json()["applied"] == 1
 
     new = music / "Artist" / "Album" / "01 Song.mp3"
     assert new.exists() and not f.exists()
@@ -64,6 +66,7 @@ def test_reorganize_and_undo(client, tmp_path):
     cid = client.get("/api/library/history").json()[0]["id"]
     client.post(f"/api/library/history/{cid}/undo")
     assert f.exists()  # moved back
+    assert not (music / "Artist").exists()  # emptied folders pruned
 
 
 def test_delete_files_requires_ids(client):

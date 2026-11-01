@@ -1,92 +1,32 @@
 from __future__ import annotations
 
-import re
-import shutil
-import time
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from core import staging
 from core.database import db
-from core.history import log_change, snapshot
-from core.tagger import write_tags, TAG_FIELDS
+from core.tagger import TAG_FIELDS
 from core.replaygain import rg_tool, scan as rg_scan
-from api.config import _load as load_settings
-from core.config import settings as core_settings
+from api.config import _load as load_settings, get_library_roots
 
 router = APIRouter()
 
-_UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+def _finish(conn, ids: list[int], summary: str) -> dict:
+    """With staging off, write what was just staged for these tracks."""
+    if load_settings().stage_changes:
+        return {"staged": True}
+    res = staging.apply(conn, ids, summary)
+    return {"staged": False, "applied": res["applied"], "errors": res["errors"]}
 
 
-def _safe(part: str) -> str:
-    """Sanitize a single path component."""
-    part = _UNSAFE.sub('_', part).strip('. ')
-    return part or '_'
-
-
-def render_template(template: str, tags: dict, ext: str) -> str:
-    """
-    Render a rename template into a sanitized path relative to the music root,
-    with the given extension. Raises ValueError/KeyError on a bad template.
-    """
-    fields = {
-        'title':        tags.get('title') or '',
-        'artist':       tags.get('artist') or '',
-        'album':        tags.get('album') or '',
-        'album_artist': tags.get('album_artist') or tags.get('artist') or '',
-        'year':         tags.get('year') or '',
-        'genre':        tags.get('genre') or '',
-        'track_number': tags.get('track_number') or '0',
-        'disc_number':  tags.get('disc_number') or '0',
-    }
-    track_num = int(re.sub(r'\D.*', '', fields['track_number']) or '0')
-    disc_num  = int(re.sub(r'\D.*', '', fields['disc_number'])  or '0')
-    rel = template.format(
-        track_number=track_num,
-        disc_number=disc_num,
-        **{k: fields[k] for k in ('title', 'artist', 'album', 'album_artist', 'year', 'genre')},
-    )
-    parts = [_safe(p) for p in rel.replace('\\', '/').split('/') if p]
-    if not parts:
-        raise ValueError("template produced an empty path")
-    return str(Path(*parts).with_suffix(ext))
-
-
-def _rename_path(old_path: str, merged: dict) -> str | None:
-    """
-    Return the new absolute path for the file after applying the rename template,
-    or None if renaming is not needed / not possible.
-    """
-    app = load_settings()
-    if not app.rename_on_save:
-        return None
-
-    try:
-        rel = render_template(app.rename_template, merged, Path(old_path).suffix)
-    except (KeyError, ValueError, IndexError):
-        return None  # bad template — skip rename
-
-    new_path = str(core_settings.music_dir / rel)
-    if new_path == old_path:
-        return None
-    return new_path
-
-
-def _apply_rename(conn, track_id: int, old_path: str, merged: dict) -> None:
-    """Move the file and update the DB row if rename is needed."""
-    new_path = _rename_path(old_path, merged)
-    if not new_path:
-        return
-    dest = Path(new_path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    Path(old_path).rename(dest)
-    conn.execute(
-        "UPDATE tracks SET path = ?, filename = ?, directory = ? WHERE id = ?",
-        (new_path, dest.name, str(dest.parent), track_id),
-    )
+def _rows(conn, ids: list[int]) -> list:
+    if not ids:
+        return []
+    ph = ",".join("?" * len(ids))
+    return conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", ids).fetchall()
 
 
 class TagUpdate(BaseModel):
@@ -153,23 +93,9 @@ def update_track_tags(track_id: int, update: TagUpdate):
         ).fetchone()
         if not row:
             raise HTTPException(404, "Track not found")
-
-        snap = snapshot(row)
-        write_tags(row["path"], updates)
-
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        conn.execute(
-            f"UPDATE tracks SET {set_clause}, tagged_at = ? WHERE id = ?",
-            [*updates.values(), time.time(), track_id],
-        )
-
-        merged = {**dict(row), **updates}
-        _apply_rename(conn, track_id, row["path"], merged)
-
+        staging.stage_edit(conn, row, updates)
         title = row["title"] or row["filename"]
-        log_change(conn, "tag_edit", f"Edited tags — {title}", [snap])
-
-    return {"ok": True}
+        return {"ok": True, **_finish(conn, [track_id], f"Edited tags — {title}")}
 
 
 class AutoNumber(BaseModel):
@@ -189,22 +115,11 @@ def autonumber(req: AutoNumber):
     if not req.track_ids:
         raise HTTPException(400, "No track IDs provided")
     with db() as conn:
-        placeholders = ",".join("?" * len(req.track_ids))
-        rows = conn.execute(
-            f"SELECT * FROM tracks WHERE id IN ({placeholders})", req.track_ids
-        ).fetchall()
-        rows = sorted(rows, key=lambda r: r["filename"].lower())
-        snaps = []
+        rows = sorted(_rows(conn, req.track_ids), key=lambda r: r["filename"].lower())
         for i, row in enumerate(rows, start=1):
-            snap = snapshot(row)
-            write_tags(row["path"], {"track_number": str(i)})
-            conn.execute(
-                "UPDATE tracks SET track_number = ?, tagged_at = ? WHERE id = ?",
-                (str(i), time.time(), row["id"]),
-            )
-            snaps.append(snap)
-        log_change(conn, "tag_edit", f"Auto-numbered {len(snaps)} tracks", snaps)
-    return {"numbered": len(rows)}
+            staging.stage_edit(conn, row, {"track_number": str(i)})
+        res = _finish(conn, [r["id"] for r in rows], f"Auto-numbered {len(rows)} tracks")
+    return {"numbered": len(rows), **res}
 
 
 @router.post("/find-replace")
@@ -214,30 +129,22 @@ def find_replace(req: FindReplace):
         raise HTTPException(400, "Invalid field")
     if not req.find:
         raise HTTPException(400, "Nothing to find")
-    changed = 0
-    snaps = []
+    changed = []
     with db() as conn:
-        placeholders = ",".join("?" * len(req.track_ids))
-        rows = conn.execute(
-            f"SELECT * FROM tracks WHERE id IN ({placeholders})", req.track_ids
-        ).fetchall()
+        rows = _rows(conn, req.track_ids)
+        pending = staging.load(conn, [r["id"] for r in rows])
         for row in rows:
-            val = row[req.field]
+            # Work on the value as staged, so edits build on each other.
+            val = staging.effective(row, pending.get(row["id"]))[req.field]
             if not val or req.find not in val:
                 continue
             new_val = val.replace(req.find, req.replace)
             if new_val == val:
                 continue
-            snap = snapshot(row)
-            write_tags(row["path"], {req.field: new_val})
-            conn.execute(
-                f"UPDATE tracks SET {req.field} = ?, tagged_at = ? WHERE id = ?",
-                (new_val, time.time(), row["id"]),
-            )
-            snaps.append(snap)
-            changed += 1
-        log_change(conn, "tag_edit", f"Find/replace on {changed} tracks", snaps)
-    return {"changed": changed}
+            staging.stage_edit(conn, row, {req.field: new_val})
+            changed.append(row["id"])
+        res = _finish(conn, changed, f"Find/replace on {len(changed)} tracks")
+    return {"changed": len(changed), **res}
 
 
 class Reorganize(BaseModel):
@@ -247,47 +154,38 @@ class Reorganize(BaseModel):
 @router.post("/reorganize")
 def reorganize(req: Reorganize):
     """
-    Apply the configured rename template to the selected files, moving them on
-    disk regardless of the rename-on-save setting. Undoable (moves files back).
+    Plan a move for each selected file to the rename template, relative to its
+    own library root (core/fileops.py), and stage it -- nothing moves until the
+    staged changes are written. Uses the tags as staged.
     """
     if not req.track_ids:
         raise HTTPException(400, "No track IDs provided")
-    template = load_settings().rename_template
-    moved = 0
+    app = load_settings()
+    roots = get_library_roots()
+    planned: list[int] = []
     errors = []
-    snaps: list[dict] = []
     with db() as conn:
-        for tid in req.track_ids:
-            row = conn.execute("SELECT * FROM tracks WHERE id = ?", (tid,)).fetchone()
-            if not row:
-                errors.append({"id": tid, "error": "not found"})
-                continue
+        rows = _rows(conn, req.track_ids)
+        found = {r["id"] for r in rows}
+        errors += [{"id": t, "error": "not found"} for t in req.track_ids if t not in found]
+        pending = staging.load(conn, list(found))
+        for row in rows:
             try:
-                rel = render_template(template, dict(row), Path(row["path"]).suffix)
-            except (KeyError, ValueError, IndexError) as exc:
-                errors.append({"id": tid, "error": f"bad template: {exc}"})
-                continue
-            new_path = str(core_settings.music_dir / rel)
-            if new_path == row["path"]:
-                continue
-            dest = Path(new_path)
-            if dest.exists():
-                errors.append({"id": tid, "error": "destination already exists"})
-                continue
-            try:
-                snap = snapshot(row)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(row["path"], str(dest))
-                conn.execute(
-                    "UPDATE tracks SET path = ?, filename = ?, directory = ? WHERE id = ?",
-                    (new_path, dest.name, str(dest.parent), tid),
+                dest = staging.plan_path(
+                    row, staging.effective(row, pending.get(row["id"])), app.rename_template, roots,
                 )
-                snaps.append(snap)
-                moved += 1
-            except Exception as exc:
-                errors.append({"id": tid, "error": str(exc)})
-        log_change(conn, "tag_edit", f"Reorganized {moved} files", snaps)
-    return {"moved": moved, "errors": errors}
+            except staging.PlanError as exc:
+                errors.append({"id": row["id"], "error": str(exc)})
+                continue
+            if dest == row["path"]:
+                staging.stage(conn, row, new_path=None)
+                continue
+            staging.stage(conn, row, new_path=dest)
+            planned.append(row["id"])
+        res = _finish(conn, planned, f"Reorganized {len(planned)} files")
+    moved = 0 if res["staged"] else res["applied"]
+    return {"planned": len(planned), "moved": moved, "errors": errors + res.get("errors", []),
+            "staged": res["staged"]}
 
 
 @router.post("/bulk")
@@ -296,30 +194,11 @@ def bulk_update_tags(update: BulkTagUpdate):
     if not updates:
         raise HTTPException(400, "No fields provided")
 
-    errors = []
-    snaps: list[dict] = []
     with db() as conn:
-        for track_id in update.track_ids:
-            row = conn.execute(
-                "SELECT * FROM tracks WHERE id = ?", (track_id,)
-            ).fetchone()
-            if not row:
-                errors.append({"id": track_id, "error": "not found"})
-                continue
-            try:
-                snap = snapshot(row)
-                write_tags(row["path"], updates)
-                set_clause = ", ".join(f"{k} = ?" for k in updates)
-                conn.execute(
-                    f"UPDATE tracks SET {set_clause}, tagged_at = ? WHERE id = ?",
-                    [*updates.values(), time.time(), track_id],
-                )
-                merged = {**dict(row), **updates}
-                _apply_rename(conn, track_id, row["path"], merged)
-                snaps.append(snap)
-            except Exception as exc:
-                errors.append({"id": track_id, "error": str(exc)})
-
-        log_change(conn, "tag_edit", f"Bulk edit — {len(snaps)} tracks", snaps)
-
-    return {"ok": True, "errors": errors}
+        rows = _rows(conn, update.track_ids)
+        found = {r["id"] for r in rows}
+        errors = [{"id": t, "error": "not found"} for t in update.track_ids if t not in found]
+        for row in rows:
+            staging.stage_edit(conn, row, updates)
+        res = _finish(conn, list(found), f"Bulk edit — {len(rows)} tracks")
+    return {"ok": True, **res, "errors": errors + res.get("errors", [])}

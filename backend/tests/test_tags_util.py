@@ -1,6 +1,6 @@
 import pytest
 
-from api.tags import render_template, _safe
+from core.naming import render_template, _safe
 from api.library import _m3u, _fts_query
 from core.tagger import TAG_FIELDS, is_audio_file, _detect_format
 from api.config import ALL_SCAN_TAGS

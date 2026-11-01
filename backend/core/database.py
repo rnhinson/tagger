@@ -134,5 +134,13 @@ def init_db() -> None:
                 data    TEXT NOT NULL,      -- JSON snapshot for undo
                 undone  INTEGER NOT NULL DEFAULT 0
             );
+
+            -- Edits held for review until written (core/staging.py).
+            CREATE TABLE IF NOT EXISTS staged (
+                track_id  INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                tags      TEXT NOT NULL DEFAULT '{}',   -- JSON: field -> new value
+                new_path  TEXT,                         -- planned move, or NULL
+                staged_at REAL NOT NULL
+            );
         """)
         _migrate(conn)

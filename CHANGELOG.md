@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Staged changes (beartums fork)
+- **Review before writing.** Edits, auto-fix, find/replace, auto-number and
+  Organize are held as staged changes; the topbar **Review N changes** button
+  shows a field-by-field diff and planned moves, and writes them as one
+  undoable change (or discards them, all or per track). Settings → *Review
+  changes before writing* turns it off. Cover art and ReplayGain still write
+  immediately.
+- The track list shows staged values in place (amber, with the on-file value
+  on hover); rows with a planned move are marked.
+- **History** dialog: every change, undo any of them newest-first per track.
+
+### Safe moves (beartums fork)
+- **Library roots**: rename templates are relative to the deepest root
+  containing the file (`TAGGER_LIBRARY_ROOTS` or Settings, globs allowed),
+  so Organize keeps files inside their library. Files outside every root are
+  refused. Previously the template was relative to `TAGGER_MUSIC_DIR`, which
+  could place files outside any mounted volume.
+- Moves never overwrite, work across filesystems, handle case-only renames on
+  case-insensitive shares, and prune the folders they empty. A move onto a
+  different filesystem than the source is refused.
+- **Undo of a move works across filesystems** (it used `Path.rename`, which
+  fails with EXDEV), each track is committed on its own, and a partly failed
+  undo stays retryable instead of being marked done.
+- Settings PATCH only changes the fields sent (it used to reset the rest to
+  defaults).
+
 ### Audio quality
 - Per-file **spectrogram** in the tag editor, rendered on demand by ffmpeg and
   cached by track + mtime — a lossy transcode dressed up as lossless shows up

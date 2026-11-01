@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from core.database import db
+from core import staging
 from core.history import log_change, snapshot, list_changes, undo_change
 
 router = APIRouter()
@@ -38,6 +39,12 @@ _ISSUE_CLAUSES: dict[str, str] = {
 
 def _row(row) -> dict:
     return dict(row)
+
+
+def _tracks(conn, rows) -> list[dict]:
+    """Track rows as dicts, each with its staged changes (or null)."""
+    entries = staging.load(conn, [r["id"] for r in rows])
+    return [{**dict(r), "staged": entries.get(r["id"])} for r in rows]
 
 
 def _track_filters(
@@ -239,8 +246,7 @@ def list_tracks(
         total = conn.execute(
             f"SELECT COUNT(*) FROM tracks {where}", params
         ).fetchone()[0]
-
-    return {"total": total, "tracks": [_row(r) for r in rows]}
+        return {"total": total, "tracks": _tracks(conn, rows)}
 
 
 def _m3u(tracks: list[dict]) -> str:
@@ -325,8 +331,7 @@ def search_tracks(
             """,
             (fts_q,),
         ).fetchone()[0]
-
-    return {"total": total, "tracks": [_row(r) for r in rows]}
+        return {"total": total, "tracks": _tracks(conn, rows)}
 
 
 @router.get("/track/{track_id}")
@@ -335,9 +340,9 @@ def get_track(track_id: int):
         row = conn.execute(
             "SELECT * FROM tracks WHERE id = ?", (track_id,)
         ).fetchone()
-    if not row:
-        raise HTTPException(404, "Track not found")
-    return _row(row)
+        if not row:
+            raise HTTPException(404, "Track not found")
+        return _tracks(conn, [row])[0]
 
 
 @router.get("/artists")

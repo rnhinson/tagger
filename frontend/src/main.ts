@@ -9,6 +9,7 @@ import {
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
 } from './quality'
 import { APP_HTML } from './template'
+import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,7 @@ const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectE
 const inferBtn         = document.getElementById('infer-btn') as HTMLButtonElement
 const exportM3uBtn     = document.getElementById('export-m3u-btn') as HTMLButtonElement
 const undoBtn          = document.getElementById('undo-btn') as HTMLButtonElement
+const reviewBtn        = document.getElementById('review-btn') as HTMLButtonElement
 
 // Whether the server has a ReplayGain tool available (set at init)
 let replaygainAvailable = false
@@ -465,6 +467,13 @@ function renderTracks() {
     const tr = document.createElement('tr')
     tr.dataset.id = String(t.id)
     if (selected) tr.classList.add('selected')
+    if (t.staged) {
+      tr.classList.add('row-staged')
+      if (t.staged.new_path) {
+        tr.classList.add('row-moving')
+        tr.title = `Will move to ${shortPath(t.staged.new_path)}`
+      }
+    }
     const q = trackQuality(t)
     const qualityCell = state.visibleCols.has('quality')
       ? `<td class="col-quality"><span class="quality-dot quality-dot-${q}" title="${QUALITY_TITLES[q]}"></span></td>`
@@ -472,7 +481,10 @@ function renderTracks() {
     let cells = `${qualityCell}<td class="col-check"><input type="checkbox"${selected ? ' checked' : ''} /></td>`
     for (const col of visibleCols) {
       if (col.key === 'quality') continue
-      cells += `<td class="${col.cls}">${col.render(t)}</td>`
+      const was = t._orig && col.key in t._orig ? t._orig[col.key] : undefined
+      cells += was === undefined
+        ? `<td class="${col.cls}">${col.render(t)}</td>`
+        : `<td class="${col.cls} cell-staged" title="Staged — on file: ${esc(was || '(empty)')}">${col.render(t)}</td>`
     }
     tr.innerHTML = cells
     tr.querySelectorAll<HTMLElement>('.tag-link').forEach(link => {
@@ -623,8 +635,16 @@ function openSpectroLightbox() {
 }
 
 const updateEditorRenamePreview = debounce(async () => {
-  if (state.selectedIds.size !== 1 || !renameOnSave || !renameTemplate) {
-    editorRenamePreviewEl.hidden = true
+  const one = state.selectedIds.size === 1
+    ? state.tracks.find(t => state.selectedIds.has(t.id)) : undefined
+  if (!one || !renameOnSave || !renameTemplate) {
+    // Still show a move that is already staged (e.g. from Organize files).
+    const staged = one?.staged?.new_path
+    editorRenamePreviewEl.hidden = !staged
+    if (staged) {
+      editorRenamePreviewEl.textContent = 'Will move to: ' + shortPath(staged)
+      editorRenamePreviewEl.classList.remove('rename-preview-error')
+    }
     return
   }
   const tags: Record<string, string> = {}
@@ -635,7 +655,7 @@ const updateEditorRenamePreview = debounce(async () => {
   const track = state.tracks.find(t => state.selectedIds.has(t.id))
   const ext = track ? '.' + (track.filename.split('.').pop() || 'flac') : '.flac'
   try {
-    const res = await api.settings.renamePreview(renameTemplate, tags, ext)
+    const res = await api.settings.renamePreview(renameTemplate, tags, ext, one.id)
     editorRenamePreviewEl.hidden = false
     editorRenamePreviewEl.textContent = res.ok ? 'Saves to: ' + res.preview : (res.error ?? '')
     editorRenamePreviewEl.classList.toggle('rename-preview-error', !res.ok)
@@ -680,6 +700,7 @@ function populateForm(tracks: Track[]) {
     } else {
       el.value = ''; el.placeholder = '(multiple values)'; (el as HTMLElement).dataset.mixed = '1'
     }
+    el.closest('.field-label')?.classList.toggle('field-staged', tracks.some(t => t._orig && field in t._orig))
   }
   // compilation: boolean checkbox; indeterminate = mixed across the selection.
   const comp = tracks.map(t => t.compilation === '1')
@@ -928,10 +949,11 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
 
 async function applyProposals(proposals: FixProposal[]) {
   let saved = 0
+  let last
   for (const p of proposals) {
-    try { await api.tags.update(p.track.id, p.update); saved++ } catch { /* skip */ }
+    try { last = await api.tags.update(p.track.id, p.update); saved++ } catch { /* skip */ }
   }
-  toast(`Saved ${saved} track${saved !== 1 ? 's' : ''}`, 'success')
+  editToast(last, `${saved} track${saved !== 1 ? 's' : ''}`)
   state.qualityIssues = null
   if (state.sidebarMode === 'tags') await loadLibrary()
   await loadTracks()
@@ -1103,7 +1125,7 @@ async function loadTracks() {
       if (state.selectedAlbum  !== null) params.album  = state.selectedAlbum
       result = await api.library.tracks(params)
     }
-    state.tracks = result.tracks
+    state.tracks = result.tracks.map(overlayStaged)
     state.total  = result.total
     renderTracks()
     renderPagination()
@@ -1195,11 +1217,10 @@ async function saveTags(e: Event) {
 
   const ids = [...state.selectedIds]
   try {
-    if (ids.length === 1) {
-      await api.tags.update(ids[0], update)
-    } else {
-      await api.tags.bulk(ids, update)
-    }
+    const res = ids.length === 1
+      ? await api.tags.update(ids[0], update)
+      : await api.tags.bulk(ids, update)
+    const what = ids.length === 1 ? 'tags' : `tags on ${ids.length} tracks`
 
     // Write cover art from Cover Art Archive if one was selected via lookup
     if (state.pendingCoverAlbumId) {
@@ -1211,13 +1232,14 @@ async function saveTags(e: Event) {
         state.coverBust++
         updateCoverPreview()
         if (state.viewMode === 'albums') renderAlbumGrid()
-        toast('Tags and cover art saved', 'success')
+        // Cover art is written straight away; it isn't staged.
+        editToast(res, `${what} (cover art written)`)
       } catch {
-        toast('Tags saved — cover art write failed', 'error')
+        toast('Cover art write failed', 'error')
       }
     } else {
       state.pendingLookupResult = null
-      toast('Tags saved', 'success')
+      editToast(res, what)
     }
 
     state.qualityIssues = null
@@ -1237,7 +1259,7 @@ async function normalizeCaseBulk() {
   const selected = state.tracks.filter(t => state.selectedIds.has(t.id))
   if (!selected.length) return
 
-  const tasks: Array<Promise<unknown>> = []
+  const tasks: Array<Promise<import('./api').EditResult>> = []
   let changeCount = 0
 
   for (const track of selected) {
@@ -1256,8 +1278,8 @@ async function normalizeCaseBulk() {
 
   normalizeCaseBtn.disabled = true
   try {
-    await Promise.all(tasks)
-    toast(`Normalized case on ${changeCount} track${changeCount !== 1 ? 's' : ''}`, 'success')
+    const results = await Promise.all(tasks)
+    editToast(results[0], `case on ${changeCount} track${changeCount !== 1 ? 's' : ''}`)
     state.qualityIssues = null
     if (state.sidebarMode === 'tags') await loadLibrary()
     await loadTracks()
@@ -1326,11 +1348,14 @@ async function organizeFiles() {
   if (!ids.length) return
   organizeBtn.disabled = true
   try {
-    const { moved, errors } = await api.tags.reorganize(ids)
-    if (moved === 0 && errors.length === 0) {
+    const { planned, moved, staged, errors } = await api.tags.reorganize(ids)
+    const errNote = errors.length ? ` — ${errors.length} skipped: ${errors[0].error}` : ''
+    if (planned === 0 && errors.length === 0) {
       toast('Files already match the template', 'info')
+    } else if (staged) {
+      toast(`Planned ${planned} move${planned !== 1 ? 's' : ''} — Review to write${errNote}`,
+            planned ? 'info' : 'error')
     } else {
-      const errNote = errors.length ? `, ${errors.length} skipped` : ''
       toast(`Moved ${moved} file${moved !== 1 ? 's' : ''}${errNote}`, moved ? 'success' : 'error')
     }
     if (state.sidebarMode === 'tags') await loadLibrary()
@@ -1362,8 +1387,8 @@ async function autoNumber() {
   if (!ids.length) return
   autonumberBtn.disabled = true
   try {
-    const { numbered } = await api.tags.autonumber(ids)
-    toast(`Numbered ${numbered} track${numbered !== 1 ? 's' : ''}`, 'success')
+    const res = await api.tags.autonumber(ids)
+    editToast(res, `numbers on ${res.numbered} track${res.numbered !== 1 ? 's' : ''}`)
     await refreshAfterBulk()
   } catch (e) {
     toast(`Auto-number failed: ${e}`, 'error')
@@ -1411,9 +1436,9 @@ function showFindReplace() {
     const replace = overlay.querySelector<HTMLInputElement>('#fr-replace')!.value
     if (!find) { findInput.focus(); return }
     try {
-      const { changed } = await api.tags.findReplace(ids, field, find, replace)
-      toast(changed ? `Replaced in ${changed} track${changed !== 1 ? 's' : ''}` : 'No matches found',
-            changed ? 'success' : 'info')
+      const res = await api.tags.findReplace(ids, field, find, replace)
+      if (res.changed) editToast(res, `replacements in ${res.changed} track${res.changed !== 1 ? 's' : ''}`)
+      else toast('No matches found', 'info')
       close()
       await refreshAfterBulk()
     } catch (err) {
@@ -1494,7 +1519,29 @@ async function scanReplayGain() {
 
 // ─── Undo / history ─────────────────────────────────────────────────────────────
 
+async function refreshReviewButton() {
+  try {
+    const { count } = await api.staged.count()
+    reviewBtn.hidden = count === 0
+    reviewBtn.textContent = `Review ${count} change${count !== 1 ? 's' : ''}`
+  } catch {
+    reviewBtn.hidden = true
+  }
+}
+
+/** Reload everything an edit, write or undo can change. */
+async function refreshAfterWrite() {
+  state.qualityIssues = null
+  if (state.sidebarMode === 'tags') await loadLibrary()
+  if (state.sidebarMode === 'files') await loadTree()
+  await loadTracks()
+  if (state.sidebarMode === 'quality') await renderQualityPanel()
+  renderEditor()
+  await refreshUndoButton()
+}
+
 async function refreshUndoButton() {
+  refreshReviewButton()
   try {
     const history = await api.library.history(10)
     const undoable = history.find(h => !h.undone)
@@ -1512,14 +1559,18 @@ async function undoLast() {
   undoBtn.disabled = true
   try {
     const res = await api.library.undo(Number(id))
-    toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
+    if (res.errors?.length) {
+      toast(`Undo incomplete — ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
+    } else {
+      toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
+    }
     state.qualityIssues = null
     if (state.sidebarMode === 'tags') await loadLibrary()
     await loadTracks()
     if (state.sidebarMode === 'quality') await renderQualityPanel()
     renderEditor()
   } catch (e) {
-    toast(`Undo failed: ${e}`, 'error')
+    toast(`Undo failed: ${errText(e)}`, 'error')
   } finally {
     undoBtn.disabled = false
     await refreshUndoButton()
@@ -1858,6 +1909,8 @@ replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)
 undoBtn.addEventListener('click', undoLast)
+reviewBtn.addEventListener('click', () => openReview(refreshAfterWrite))
+document.getElementById('history-btn')!.addEventListener('click', () => openHistory(refreshAfterWrite))
 
 // Filter selects
 filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; renderTracks() })
@@ -1976,6 +2029,10 @@ const discogsTokenInput = document.getElementById('setting-discogs-token') as HT
 const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTMLTextAreaElement
 const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
+const stageChangesInput = document.getElementById('setting-stage-changes') as HTMLInputElement
+const libraryRootsInput = document.getElementById('setting-library-roots') as HTMLTextAreaElement
+const libraryRootsDefaultEl   = document.getElementById('library-roots-default')!
+const libraryRootsEffectiveEl = document.getElementById('library-roots-effective')!
 const renameTemplateInput = document.getElementById('setting-rename-template') as HTMLInputElement
 const renamePreviewEl   = document.getElementById('rename-preview')!
 const replaygainStatusEl = document.getElementById('replaygain-status')!
@@ -2011,6 +2068,15 @@ async function openSettings() {
     scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
     autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
+    stageChangesInput.checked = s.stage_changes ?? true
+    libraryRootsInput.value   = (s.library_roots ?? []).join('\n')
+    libraryRootsDefaultEl.textContent = s.env_library_roots?.length
+      ? `TAGGER_LIBRARY_ROOTS (${s.env_library_roots.join(', ')})`
+      : 'the music directories'
+    libraryRootsEffectiveEl.textContent = s.effective_library_roots?.length
+      ? `Now: ${s.effective_library_roots.join(' · ')}`
+      : 'No root folder exists yet — organizing is refused.'
+
     renameTemplateInput.value = s.rename_template
     renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
     updateRenamePreview()
@@ -2151,6 +2217,8 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     acoustid_api_key:  acoustidKeyInput.value.trim(),
     discogs_token:     discogsTokenInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
+    stage_changes:     stageChangesInput.checked,
+    library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,
     music_dirs:        localMusicDirs,

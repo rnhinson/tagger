@@ -1,0 +1,290 @@
+"""Staged changes, library-root organize, and safe moves + undo."""
+import errno
+import os
+import shutil
+import subprocess
+
+import pytest
+
+from core import fileops, staging
+from core.config import settings
+from core.database import db
+from core.tagger import read_tags
+from tests.conftest import FFMPEG
+
+needs_ffmpeg = pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
+
+
+def _mp3(path, **tags):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    meta = [a for k, v in tags.items() for a in ("-metadata", f"{k}={v}")]
+    subprocess.run(
+        [FFMPEG, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.3",
+         "-c:a", "libmp3lame", *meta, "-y", str(path)],
+        check=True, capture_output=True,
+    )
+    return path
+
+
+def _insert(path, **extra):
+    cols = {"path": str(path), "filename": path.name, "directory": str(path.parent),
+            "format": "mp3", "scanned_at": 1.0, **extra}
+    with db() as conn:
+        names = ", ".join(cols)
+        ph = ", ".join("?" * len(cols))
+        return conn.execute(f"INSERT INTO tracks ({names}) VALUES ({ph})", list(cols.values())).lastrowid
+
+
+@pytest.fixture()
+def lib(client, tmp_path, monkeypatch):
+    """/music with a Shared root and per-library roots under Libraries/."""
+    music = tmp_path / "music"
+    (music / "Shared").mkdir(parents=True)
+    (music / "Libraries" / "Music - Christmas").mkdir(parents=True)
+    monkeypatch.setattr(settings, "music_dir", music)
+    client.patch("/api/config", json={
+        "library_roots": [str(music / "Shared"), str(music / "Libraries" / "*")],
+        "rename_template": "{album_artist}/{album}/{track_number:02d} {title}",
+    })
+    return music
+
+
+# ── staging ──────────────────────────────────────────────────────────────────
+
+@needs_ffmpeg
+def test_edit_is_staged_until_applied(client, lib):
+    f = _mp3(lib / "Shared" / "a.mp3", title="Old")
+    tid = _insert(f, title="Old")
+
+    assert client.patch(f"/api/tags/{tid}", json={"title": "New"}).json()["staged"] is True
+    assert read_tags(str(f))["title"] == "Old"          # file untouched
+    t = client.get(f"/api/library/track/{tid}").json()
+    assert t["title"] == "Old"                          # DB untouched
+    assert t["staged"]["tags"] == {"title": "New"}      # overlay for the UI
+
+    diff = client.get("/api/staged").json()
+    assert diff["count"] == 1
+    assert diff["tracks"][0]["changes"] == [{"field": "title", "old": "Old", "new": "New"}]
+
+    res = client.post("/api/staged/apply", json={}).json()
+    assert res["applied"] == 1 and res["errors"] == [] and res["change_id"]
+    assert read_tags(str(f))["title"] == "New"
+    assert client.get(f"/api/library/track/{tid}").json()["staged"] is None
+    assert client.get("/api/staged/count").json()["count"] == 0
+
+    client.post(f"/api/library/history/{res['change_id']}/undo")
+    assert read_tags(str(f))["title"] == "Old"
+
+
+def test_staging_the_current_value_is_not_a_change(client, lib):
+    tid = _insert(lib / "Shared" / "a.mp3", title="Same", genre="")
+    client.patch(f"/api/tags/{tid}", json={"title": "Same", "genre": ""})
+    assert client.get("/api/staged/count").json()["count"] == 0
+
+    client.patch(f"/api/tags/{tid}", json={"title": "Other"})
+    client.patch(f"/api/tags/{tid}", json={"title": "Same"})  # edited back
+    assert client.get("/api/staged/count").json()["count"] == 0
+
+
+def test_discard_selected_and_all(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A")
+    b = _insert(lib / "Shared" / "b.mp3", title="B")
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "Soundtrack"}})
+    assert client.get("/api/staged/count").json()["count"] == 2
+    assert client.post("/api/staged/discard", json={"track_ids": [a]}).json()["discarded"] == 1
+    assert client.post("/api/staged/discard", json={}).json()["discarded"] == 1
+
+
+@needs_ffmpeg
+def test_staging_off_writes_immediately(client, lib):
+    f = _mp3(lib / "Shared" / "a.mp3", title="Old")
+    tid = _insert(f, title="Old")
+    client.patch("/api/config", json={"stage_changes": False})
+    res = client.patch(f"/api/tags/{tid}", json={"title": "New"}).json()
+    assert res["staged"] is False and res["applied"] == 1
+    assert read_tags(str(f))["title"] == "New"
+
+
+def test_find_replace_builds_on_staged_value(client, lib):
+    tid = _insert(lib / "Shared" / "a.mp3", artist="The Beatles")
+    client.patch(f"/api/tags/{tid}", json={"artist": "The Beatles (UK)"})
+    client.post("/api/tags/find-replace",
+                json={"track_ids": [tid], "field": "artist", "find": "The ", "replace": ""})
+    assert client.get(f"/api/library/track/{tid}").json()["staged"]["tags"]["artist"] == "Beatles (UK)"
+
+
+def test_settings_patch_keeps_unsent_fields(client):
+    client.patch("/api/config", json={"rename_on_save": True})
+    client.patch("/api/config", json={"discogs_token": "x"})
+    assert client.get("/api/config").json()["rename_on_save"] is True
+
+
+# ── organize ─────────────────────────────────────────────────────────────────
+
+@needs_ffmpeg
+def test_organize_stays_inside_the_tracks_library(client, lib):
+    src = _mp3(lib / "Libraries" / "Music - Christmas" / "loose" / "x.mp3")
+    tid = _insert(src, title="Silent Night", album="Carols", album_artist="Choir", track_number="3")
+
+    res = client.post("/api/tags/reorganize", json={"track_ids": [tid]}).json()
+    assert res["planned"] == 1 and res["staged"] is True
+    dest = lib / "Libraries" / "Music - Christmas" / "Choir" / "Carols" / "03 Silent Night.mp3"
+    assert client.get("/api/staged").json()["tracks"][0]["new_path"] == str(dest)
+    assert src.exists() and not dest.exists()  # nothing moved yet
+
+    assert client.post("/api/staged/apply", json={}).json()["applied"] == 1
+    assert dest.exists() and not src.exists()
+    assert not (lib / "Libraries" / "Music - Christmas" / "loose").exists()  # emptied folder pruned
+    assert (lib / "Libraries" / "Music - Christmas").is_dir()                # root kept
+    assert not (lib / "Choir").exists()  # never the music dir itself
+
+
+def test_organize_refuses_tracks_outside_every_root(client, lib):
+    tid = _insert(lib / "Elsewhere" / "x.mp3", title="T")
+    res = client.post("/api/tags/reorganize", json={"track_ids": [tid]}).json()
+    assert res["planned"] == 0
+    assert "library root" in res["errors"][0]["error"]
+    assert client.get("/api/staged/count").json()["count"] == 0
+
+
+@needs_ffmpeg
+def test_organize_uses_staged_tags(client, lib):
+    src = _mp3(lib / "Shared" / "x.mp3")
+    tid = _insert(src, title="T", album="Old", album_artist="A", track_number="1")
+    client.patch(f"/api/tags/{tid}", json={"album": "New"})
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    client.post("/api/staged/apply", json={})
+    moved = lib / "Shared" / "A" / "New" / "01 T.mp3"
+    assert moved.exists() and read_tags(str(moved))["album"] == "New"
+
+
+@needs_ffmpeg
+def test_rename_on_save_stages_the_move(client, lib):
+    src = _mp3(lib / "Shared" / "x.mp3")
+    tid = _insert(src, title="T", album="Alb", album_artist="A", track_number="2")
+    client.patch("/api/config", json={"rename_on_save": True})
+    client.patch(f"/api/tags/{tid}", json={"title": "U"})
+    staged = client.get(f"/api/library/track/{tid}").json()["staged"]
+    assert staged["new_path"] == str(lib / "Shared" / "A" / "Alb" / "02 U.mp3")
+
+
+@needs_ffmpeg
+def test_apply_refuses_colliding_or_existing_destinations(client, lib):
+    a = _insert(_mp3(lib / "Shared" / "a.mp3"), title="Same", album="Al", album_artist="X", track_number="1")
+    b = _insert(_mp3(lib / "Shared" / "b.mp3"), title="Same", album="Al", album_artist="X", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [a, b]})
+    res = client.post("/api/staged/apply", json={}).json()
+    assert res["applied"] == 0 and len(res["errors"]) == 2
+    assert client.get("/api/staged/count").json()["count"] == 2  # still staged
+
+    client.post("/api/staged/discard", json={"track_ids": [b]})
+    _mp3(lib / "Shared" / "X" / "Al" / "01 Same.mp3")  # occupied
+    res = client.post("/api/staged/apply", json={}).json()
+    assert "already exists" in res["errors"][0]["error"]
+    assert (lib / "Shared" / "a.mp3").exists()
+
+
+@needs_ffmpeg
+def test_apply_refuses_a_move_off_the_filesystem(client, lib, monkeypatch):
+    src = _mp3(lib / "Shared" / "x.mp3")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    monkeypatch.setattr(staging, "same_filesystem", lambda a, b: False)
+    res = client.post("/api/staged/apply", json={}).json()
+    assert res["applied"] == 0 and "different filesystem" in res["errors"][0]["error"]
+    assert src.exists()
+
+
+# ── moves + undo ─────────────────────────────────────────────────────────────
+
+@needs_ffmpeg
+def test_undo_moves_back_across_filesystems(client, lib, monkeypatch):
+    """The 2026-11-01 bug: undo used Path.rename, which fails with EXDEV."""
+    src = _mp3(lib / "Shared" / "orig" / "x.mp3")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    cid = client.post("/api/staged/apply", json={}).json()["change_id"]
+
+    real_rename = os.rename
+
+    def cross_device(a, b, *args, **kw):
+        if os.path.dirname(a) != os.path.dirname(b):
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_rename(a, b, *args, **kw)
+
+    monkeypatch.setattr(os, "rename", cross_device)
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["errors"] == [] and res["restored"] == 1
+    assert src.exists()
+    assert not (lib / "Shared" / "A").exists()
+
+
+@needs_ffmpeg
+def test_failed_undo_is_retryable(client, lib):
+    src = _mp3(lib / "Shared" / "x.mp3")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    cid = client.post("/api/staged/apply", json={}).json()["change_id"]
+
+    blocker = _mp3(src)  # something new now sits at the original path
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["errors"] and "already exists" in res["errors"][0]["error"]
+    assert client.get("/api/library/history").json()[0]["undone"] == 0
+
+    blocker.unlink()
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["errors"] == [] and src.exists()
+
+
+@needs_ffmpeg
+def test_undo_must_go_newest_first_per_track(client, lib):
+    tid = _insert(_mp3(lib / "Shared" / "x.mp3"), title="A")
+    other = _insert(_mp3(lib / "Shared" / "y.mp3"), title="Y")
+    client.patch("/api/config", json={"stage_changes": False})
+    first = client.patch(f"/api/tags/{tid}", json={"title": "B"})
+    client.patch(f"/api/tags/{tid}", json={"title": "C"})
+    client.patch(f"/api/tags/{other}", json={"title": "Z"})
+    assert first.status_code == 200
+    hist = client.get("/api/library/history").json()
+    oldest = hist[-1]["id"]
+    r = client.post(f"/api/library/history/{oldest}/undo")
+    assert r.status_code == 400 and "later change first" in r.json()["detail"]
+    # an unrelated track's change can be undone out of order
+    assert client.post(f"/api/library/history/{hist[0]['id']}/undo").status_code == 200
+    assert hist[0]["count"] == 1
+
+
+# ── move_file ────────────────────────────────────────────────────────────────
+
+def test_move_file_never_overwrites(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.write_text("a")
+    b.write_text("b")
+    with pytest.raises(fileops.MoveError):
+        fileops.move_file(a, b)
+    assert b.read_text() == "b"
+
+
+def test_move_file_case_only_rename(tmp_path):
+    a = tmp_path / "song.mp3"
+    a.write_text("x")
+    fileops.move_file(a, tmp_path / "Song.mp3")
+    assert [p.name for p in tmp_path.iterdir()] == ["Song.mp3"]
+
+
+def test_root_for_picks_the_deepest(tmp_path):
+    (tmp_path / "Libraries" / "Kids").mkdir(parents=True)
+    roots = fileops.expand_roots([str(tmp_path), str(tmp_path / "Libraries" / "*")])
+    assert fileops.root_for(tmp_path / "Libraries" / "Kids" / "a" / "b.mp3", roots) == tmp_path / "Libraries" / "Kids"
+    assert fileops.root_for(tmp_path / "x.mp3", roots) == tmp_path
+    assert fileops.root_for("/nowhere/x.mp3", roots) is None
+
+
+def test_rename_preview_for_a_track_shows_its_root(client, lib):
+    tid = _insert(lib / "Libraries" / "Music - Christmas" / "x.mp3",
+                  title="T", album="Al", album_artist="A", track_number="1")
+    r = client.post("/api/config/rename-preview", json={
+        "template": "{album_artist}/{album}/{track_number:02d} {title}",
+        "track_id": tid, "tags": {"title": "New"},
+    }).json()
+    assert r["ok"] and r["preview"] == "Libraries/Music - Christmas/A/Al/01 New.mp3"
