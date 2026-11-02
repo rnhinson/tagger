@@ -123,7 +123,7 @@ export const APP_HTML = `
           <input id="setting-rename-on-save" type="checkbox" />
           <span>Rename files on save</span>
         </label>
-        <p class="settings-hint">When enabled, saving a track's tags also plans a move to the path built from the template below, inside the track's library root. <strong>Organize files</strong> uses the same template.</p>
+        <p class="settings-hint">When enabled, saving a track's tags also plans a move to the path built from the template below, inside the track's library root.</p>
         <label class="field-label" id="rename-template-wrap">Template
           <input id="setting-rename-template" type="text" />
           <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
@@ -213,7 +213,6 @@ export const APP_HTML = `
         <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
         <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
         <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
-        <button id="organize-btn" class="btn btn-ghost btn-sm" title="Plan moves for the selected files using the rename template, inside each file's library root">Organize files</button>
         <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
         <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
         <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>

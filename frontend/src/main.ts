@@ -114,7 +114,6 @@ const autonumberBtn     = document.getElementById('autonumber-btn') as HTMLButto
 const findReplaceBtn    = document.getElementById('find-replace-btn') as HTMLButtonElement
 const removeTracksBtn   = document.getElementById('remove-tracks-btn') as HTMLButtonElement
 const deleteFilesBtn    = document.getElementById('delete-files-btn') as HTMLButtonElement
-const organizeBtn       = document.getElementById('organize-btn') as HTMLButtonElement
 const replaygainBtn     = document.getElementById('replaygain-btn') as HTMLButtonElement
 const filterQualityEl  = document.getElementById('filter-quality') as HTMLSelectElement
 const filterFormatEl   = document.getElementById('filter-format') as HTMLSelectElement
@@ -837,7 +836,7 @@ const updateEditorRenamePreview = debounce(async () => {
   const one = state.selectedIds.size === 1
     ? state.tracks.find(t => state.selectedIds.has(t.id)) : undefined
   if (!one || !renameOnSave || !renameTemplate) {
-    // Still show a move that is already staged (e.g. from Organize files).
+    // Still show a move that is already staged (e.g. from a folder drag or Rename files).
     const staged = one?.staged?.new_path
     editorRenamePreviewEl.hidden = !staged
     if (staged) {
@@ -1588,7 +1587,7 @@ async function removeFromLibrary() {
   }
 }
 
-// ─── Delete files / reorganize ────────────────────────────────────────────────────
+// ─── Delete files ─────────────────────────────────────────────────────────────────
 
 async function deleteFiles() {
   const ids = [...state.selectedIds]
@@ -1615,32 +1614,6 @@ async function deleteFiles() {
   }
 }
 
-async function organizeFiles() {
-  const ids = [...state.selectedIds]
-  if (!ids.length) return
-  organizeBtn.disabled = true
-  try {
-    const { planned, moved, staged, errors } = await api.tags.reorganize(ids)
-    const errNote = errors.length ? ` — ${errors.length} skipped: ${errors[0].error}` : ''
-    if (planned === 0 && errors.length === 0) {
-      toast('Files already match the template', 'info')
-    } else if (staged) {
-      toast(`Planned ${planned} move${planned !== 1 ? 's' : ''} — Review to write${errNote}`,
-            planned ? 'info' : 'error')
-    } else {
-      toast(`Moved ${moved} file${moved !== 1 ? 's' : ''}${errNote}`, moved ? 'success' : 'error')
-    }
-    if (state.sidebarMode === 'tags') await loadLibrary()
-    if (state.sidebarMode === 'files') await loadTree()
-    await loadTracks()
-    renderEditor()
-    await refreshUndoButton()
-  } catch (e) {
-    toast(`Organize failed: ${e}`, 'error')
-  } finally {
-    organizeBtn.disabled = false
-  }
-}
 
 // ─── Folder move / rename ───────────────────────────────────────────────────────
 
@@ -2472,7 +2445,6 @@ document.getElementById('clear-selection')!.addEventListener('click', () => {
 normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
 deleteFilesBtn.addEventListener('click', deleteFiles)
-organizeBtn.addEventListener('click', organizeFiles)
 autonumberBtn.addEventListener('click', autoNumber)
 findReplaceBtn.addEventListener('click', showFindReplace)
 document.getElementById('cleanup-btn')!.addEventListener('click', () =>

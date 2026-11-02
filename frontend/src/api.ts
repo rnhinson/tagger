@@ -396,9 +396,6 @@ export const api = {
         'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
     replaygainStatus: () =>
       request<{ available: boolean; tool: string | null }>('GET', '/api/tags/replaygain/status'),
-    reorganize: (trackIds: number[]) =>
-      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
-        'POST', '/api/tags/reorganize', { track_ids: trackIds }),
     renamePreview: (req: BulkRenameRequest) =>
       request<{ items: RenameItem[]; counts: Record<string, number> }>('POST', '/api/tags/rename-preview', req),
     rename: (req: BulkRenameRequest & { exclude: number[] }) =>
