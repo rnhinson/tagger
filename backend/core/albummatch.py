@@ -64,6 +64,19 @@ def match(local: list[dict], release_tracks: list[dict]) -> dict[int, tuple[str 
     return out
 
 
+def quality(local: list[dict], release_tracks: list[dict]) -> dict:
+    """
+    How well a release fits the selection: the mean best-pair score over YOUR
+    tracks (an unmatched track counts 0), so a release missing half the
+    album ranks low even if the half it has fits perfectly.
+    """
+    pairs = match(local, release_tracks)
+    matched = sum(1 for k, _ in pairs.values() if k)
+    q = sum(sc for _, sc in pairs.values()) / len(local) if local else 0.0
+    return {"quality": round(q, 3), "matched": matched, "local": len(local),
+            "release_tracks": len(release_tracks), "pairs": pairs}
+
+
 FIELDS = ("title", "artist", "album", "album_artist", "year", "track_number", "disc_number",
           "mb_track_id", "mb_artist_id", "mb_album_id", "mb_album_artist_id")
 

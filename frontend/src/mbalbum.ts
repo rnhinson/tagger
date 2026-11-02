@@ -46,7 +46,6 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
         </div>
       </div>
       <div class="fix-confirm-footer">
-        <button class="btn btn-ghost" id="mb-back" hidden>← Other releases</button>
         <span class="pr-summary" id="mb-summary"></span>
         <button class="btn btn-ghost" id="mb-cancel">Cancel</button>
         <button class="btn btn-primary" id="mb-apply" disabled>Stage</button>
@@ -57,8 +56,10 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   const $ = <T extends HTMLElement>(sel: string) => overlay.querySelector<T>(sel)!
   const albumEl = $<HTMLInputElement>('#mb-album'), artistEl = $<HTMLInputElement>('#mb-artist')
   const candEl = $('#mb-candidates'), matchEl = $('#mb-match'), rowsEl = $('#mb-rows')
-  const errEl = $('#mb-error'), sumEl = $('#mb-summary'), goBtn = $<HTMLButtonElement>('#mb-apply'), backBtn = $('#mb-back')
+  const errEl = $('#mb-error'), sumEl = $('#mb-summary'), goBtn = $<HTMLButtonElement>('#mb-apply')
   let localCount = ids.length, match: MbMatch | null = null
+  let cands: MbCandidate[] = [], openId: string | null = null, searchToken = 0
+  const quality = new Map<string, { quality: number; matched: number; local: number }>()
   const chosen = new Map<number, string | null>()     // track id -> release track key
   const skip = new Set<number>()
 
@@ -71,42 +72,88 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   const fail = (e: unknown) => { errEl.textContent = errText(e); errEl.hidden = false }
 
   async function search(first = false) {
-    errEl.hidden = true; candEl.hidden = false; matchEl.hidden = true; backBtn.hidden = true
+    const t = ++searchToken
+    errEl.hidden = true; parkMatch(); openId = null; quality.clear()
     goBtn.disabled = true; sumEl.textContent = ''
     candEl.textContent = 'Searching MusicBrainz…'
     try {
       const r = await api.lookup.albumSearch(ids, first ? undefined : albumEl.value, first ? undefined : artistEl.value)
+      if (t !== searchToken) return
       albumEl.value = r.album ?? ''; artistEl.value = r.artist ?? ''; localCount = r.local_tracks
-      renderCandidates(r.candidates)
+      cands = r.candidates
+      renderCandidates()
+      scoreAll(t)
     } catch (e) { candEl.textContent = ''; fail(e) }
   }
 
-  function renderCandidates(cands: MbCandidate[]) {
-    if (!cands.length) { candEl.innerHTML = '<div class="cleanup-none">No releases found — adjust the album or artist and search again.</div>'; return }
-    candEl.innerHTML = cands.map(c => `
-      <button type="button" class="mb-cand" data-id="${esc(c.mb_album_id)}">
-        <span class="mb-cand-title">${esc(c.album)} <span class="ma-dim">· ${esc(c.artist ?? '')}</span>
-          ${c.tagged ? '<span class="mb-badge">tagged</span>' : ''}</span>
-        <span class="ma-dim">${[c.date, c.country, (c.formats ?? []).join(', '), c.type, c.discs && c.discs > 1 ? `${c.discs} discs` : '']
-          .filter(Boolean).map(x => esc(String(x))).join(' · ')}</span>
-        <span class="mb-cand-tracks ${c.tracks === localCount ? 'mb-fit' : ''}">${c.tracks ?? '?'} tracks${c.tracks === localCount ? ' ✓' : ''}</span>
-      </button>`).join('')
+  /** Score the top candidates one at a time (MusicBrainz allows ~1 request/s), re-sorting as each lands. */
+  async function scoreAll(t: number) {
+    for (const c of cands.slice(0, 12)) {
+      if (t !== searchToken) return
+      try {
+        const q = await api.lookup.albumScore(ids, c.mb_album_id)
+        if (t !== searchToken) return
+        quality.set(c.mb_album_id, q)
+      } catch { quality.set(c.mb_album_id, { quality: -1, matched: 0, local: localCount }) }
+      renderCandidates()
+    }
   }
+
+  const rank = (c: MbCandidate) => quality.get(c.mb_album_id)?.quality ?? -2
+
+  function badge(c: MbCandidate): string {
+    const q = quality.get(c.mb_album_id)
+    if (!q) return cands.indexOf(c) < 12 ? '<span class="mb-score mb-none">scoring…</span>' : ''
+    if (q.quality < 0) return '<span class="mb-score mb-bad">failed</span>'
+    const cls = q.quality >= 0.75 ? 'mb-good' : q.quality >= 0.5 ? 'mb-ok' : 'mb-bad'
+    return `<span class="mb-score ${cls}" title="Average match over your ${q.local} tracks">${Math.round(q.quality * 100)}% · ${q.matched}/${q.local} matched</span>`
+  }
+
+  function renderCandidates() {
+    if (!cands.length) { candEl.innerHTML = '<div class="cleanup-none">No releases found — adjust the album or artist and search again.</div>'; return }
+    parkMatch()
+    // Best first; unscored keep MusicBrainz's order after the scored ones.
+    // Ties (common: every edition fits a few tracks equally): the edition whose
+    // track count is closest to yours, then MusicBrainz's order.
+    const gap = (c: MbCandidate) => Math.abs((c.tracks ?? 999) - localCount)
+    const sorted = [...cands].sort((a, b) => rank(b) - rank(a) || gap(a) - gap(b) || cands.indexOf(a) - cands.indexOf(b))
+    candEl.innerHTML = sorted.map(c => `
+      <div class="mb-cand-wrap${c.mb_album_id === openId ? ' mb-open' : ''}" data-id="${esc(c.mb_album_id)}">
+        <button type="button" class="mb-cand${c.mb_album_id === openId ? ' mb-picked' : ''}" data-id="${esc(c.mb_album_id)}">
+          <span class="mb-cand-title">${c.mb_album_id === openId ? '▾' : '▸'} ${esc(c.album)} <span class="ma-dim">· ${esc(c.artist ?? '')}</span>
+            ${c.tagged ? '<span class="mb-badge">tagged</span>' : ''}</span>
+          <span class="ma-dim">${[c.date, c.country, (c.formats ?? []).join(', '), c.type, c.discs && c.discs > 1 ? `${c.discs} discs` : '']
+            .filter(Boolean).map(x => esc(String(x))).join(' · ')}</span>
+          <span class="mb-cand-tracks">${badge(c)}<span class="${c.tracks === localCount ? 'mb-fit' : ''}">${c.tracks ?? '?'} tracks</span></span>
+        </button>
+        <div class="mb-cand-detail"></div>
+      </div>`).join('')
+    if (openId) candEl.querySelector(`.mb-cand-wrap[data-id="${CSS.escape(openId)}"] .mb-cand-detail`)?.appendChild(matchEl)
+    matchEl.hidden = !openId || !match
+  }
+
+  /** Keep the match panel alive across list re-renders (it holds the field ticks). */
+  function parkMatch() { if (matchEl.parentElement !== overlay.querySelector('.pr-body')) overlay.querySelector('.pr-body')!.appendChild(matchEl); matchEl.hidden = true }
 
   candEl.addEventListener('click', async (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('.mb-cand')
     if (!b) return
-    candEl.querySelectorAll('.mb-cand').forEach(x => x.classList.toggle('mb-picked', x === b))
+    const id = b.dataset.id!
     errEl.hidden = true
+    if (openId === id) { openId = null; match = null; goBtn.disabled = true; sumEl.textContent = ''; renderCandidates(); return }
+    openId = id; match = null; renderCandidates()
+    const detail = candEl.querySelector(`.mb-cand-wrap[data-id="${CSS.escape(id)}"] .mb-cand-detail`)
+    if (detail) detail.innerHTML = '<div class="cleanup-none">Matching track by track…</div>'
     try {
-      match = await api.lookup.albumMatch(ids, b.dataset.id!)
+      const m = await api.lookup.albumMatch(ids, id)
+      if (openId !== id) return
+      match = m
       chosen.clear(); skip.clear()
-      for (const it of match.items) chosen.set(it.id, it.key)
-      candEl.hidden = true; matchEl.hidden = false; backBtn.hidden = false
+      for (const it of m.items) chosen.set(it.id, it.key)
+      renderCandidates()
       renderMatch()
-    } catch (err) { fail(err) }
+    } catch (err) { fail(err); openId = null; renderCandidates() }
   })
-  backBtn.addEventListener('click', () => { candEl.hidden = false; matchEl.hidden = true; backBtn.hidden = true; goBtn.disabled = true; sumEl.textContent = '' })
 
   function renderMatch() {
     if (!match) return
