@@ -1254,3 +1254,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
   background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--text);
 }
+
+/* ── Column reordering + read-only rows ───────────────────────────────────── */
+.track-table th[draggable=true] { cursor: grab; }
+.track-table th.col-dragging { opacity: .4; }
+.track-table th.col-drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.track-table th.col-drop-after  { box-shadow: inset -3px 0 0 var(--accent); }
+.ro-lock { font-size: 11px; opacity: .8; }
+.row-readonly td { color: var(--text-muted); }
+.tag-form.form-readonly input:disabled, .tag-form.form-readonly textarea:disabled { opacity: .75; cursor: default; }

@@ -47,5 +47,8 @@ def test_read_only_tracks_are_flagged(client, lib):
             return
         assert client.get(f"/api/library/track/{t}").json()["read_only"] is True
         assert client.post("/api/library/summary", json={"track_ids": [t]}).json()["read_only"] == 1
+        other = _insert(lib / "Shared" / "RW" / "1.mp3")
+        (lib / "Shared" / "RW").mkdir()
+        assert client.get("/api/library/track-ids").json()["ids"] == [other]   # select-all skips read-only
     finally:
         os.chmod(ro, stat.S_IRWXU)

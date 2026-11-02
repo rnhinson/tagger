@@ -2,8 +2,8 @@ import './style.css'
 import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths } from './state'
-import { COL_DEFS } from './columns'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
+import { COL_DEFS, orderedCols } from './columns'
 import {
   trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
@@ -42,10 +42,16 @@ tagForm.prepend(readOnlyNote)
 const saveBtn = tagForm.querySelector<HTMLButtonElement>('button[type=submit]')!
 function setReadOnly(n: number, of: number) {
   readOnlyNote.hidden = n === 0
+  tagForm.classList.toggle('form-readonly', n > 0)
+  for (const el of tagForm.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLSelectElement>(
+    'input, textarea, select, button')) {
+    if (el.closest('.spectro-section') || el.id === 'spectro-btn') continue   // viewing aids stay usable
+    el.disabled = n > 0
+  }
   readOnlyNote.textContent = n === of
     ? `🔒 Read-only — ${of === 1 ? 'this file is' : `these ${of.toLocaleString()} files are`} on a read-only folder and can't be changed.`
     : `🔒 ${n.toLocaleString()} of ${of.toLocaleString()} selected tracks are read-only and can't be changed. Deselect them to save.`
-  saveBtn.disabled = n > 0
+  saveBtn.hidden = n > 0
 }
 
 const genreChips = new ValueChips('genres')
@@ -385,7 +391,7 @@ function renderViewMode() {
 
 function renderColPicker() {
   colPickerEl.innerHTML = ''
-  for (const col of COL_DEFS) {
+  for (const col of orderedCols()) {
     const label = document.createElement('label')
     label.className = 'col-picker-item'
     const cb = document.createElement('input')
@@ -451,7 +457,7 @@ function navigateTrack(dir: 1 | -1) {
 function renderColHeaders() {
   const qualityTh = state.visibleCols.has('quality') ? '<th class="col-quality"></th>' : ''
   trackTheadRow.innerHTML = `${qualityTh}<th class="col-check"><input type="checkbox" id="select-all" /></th>`
-  for (const col of COL_DEFS) {
+  for (const col of orderedCols()) {
     if (col.key === 'quality') continue
     if (!state.visibleCols.has(col.key)) continue
     const th = document.createElement('th')
@@ -464,6 +470,7 @@ function renderColHeaders() {
     }
     th.textContent = label
     th.dataset.col = col.key
+    th.draggable = true
     const grip = document.createElement('span')
     grip.className = 'col-resizer'
     grip.title = 'Drag to resize · double-click to reset all widths'
@@ -485,6 +492,51 @@ function renderColHeaders() {
   selectAll()?.addEventListener('change', onSelectAll)
   applyColWidths()
 }
+
+// ─── Column reordering ────────────────────────────────────────────────────────
+// Drag a header onto another: it lands before or after it (whichever half of
+// the target the pointer is over). The order persists and the Columns menu
+// follows it.
+
+let draggingCol: string | null = null
+
+trackTheadRow.addEventListener('dragstart', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!th) return
+  draggingCol = th.dataset.col!
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', draggingCol)
+  th.classList.add('col-dragging')
+})
+
+trackTheadRow.addEventListener('dragover', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!draggingCol || !th || th.dataset.col === draggingCol) return
+  e.preventDefault()
+  const r = th.getBoundingClientRect()
+  const after = e.clientX > r.left + r.width / 2
+  trackTheadRow.querySelectorAll('.col-drop-before, .col-drop-after').forEach(x => x.classList.remove('col-drop-before', 'col-drop-after'))
+  th.classList.add(after ? 'col-drop-after' : 'col-drop-before')
+})
+
+trackTheadRow.addEventListener('drop', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!draggingCol || !th || th.dataset.col === draggingCol) return
+  e.preventDefault()
+  const after = th.classList.contains('col-drop-after')
+  const keys = orderedCols().map(c => c.key).filter(k => k !== draggingCol)
+  keys.splice(keys.indexOf(th.dataset.col!) + (after ? 1 : 0), 0, draggingCol)
+  saveColOrder(keys)
+  renderColHeaders()
+  renderTracks()
+  if (state.colPickerOpen) renderColPicker()
+})
+
+trackTheadRow.addEventListener('dragend', () => {
+  draggingCol = null
+  trackTheadRow.querySelectorAll('.col-dragging, .col-drop-before, .col-drop-after')
+    .forEach(x => x.classList.remove('col-dragging', 'col-drop-before', 'col-drop-after'))
+})
 
 // ─── Column resizing ──────────────────────────────────────────────────────────
 // Dragging a header's right edge sets that column's width in px. The first
@@ -575,7 +627,7 @@ function renderTracks() {
   trackCount.textContent = `${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
     + (state.filterFormat || state.filterQuality ? ' (filtered)' : '')
 
-  const visibleCols = COL_DEFS.filter(c => state.visibleCols.has(c.key))
+  const visibleCols = orderedCols().filter(c => state.visibleCols.has(c.key))
 
   for (const t of displayedTracks) {
     const selected = state.selectedIds.has(t.id)
@@ -594,7 +646,11 @@ function renderTracks() {
     const qualityCell = state.visibleCols.has('quality')
       ? `<td class="col-quality"><span class="quality-dot quality-dot-${q}" title="${QUALITY_TITLES[q]}"></span></td>`
       : ''
-    let cells = `${qualityCell}<td class="col-check"><input type="checkbox"${selected ? ' checked' : ''} /></td>`
+    // Read-only: no checkbox -- it can be opened (view only), never bulk-selected.
+    const check = t.read_only ? '<span class="ro-lock" title="Read-only — view only">🔒</span>'
+      : `<input type="checkbox"${selected ? ' checked' : ''} />`
+    let cells = `${qualityCell}<td class="col-check">${check}</td>`
+    if (t.read_only) tr.classList.add('row-readonly')
     for (const col of visibleCols) {
       if (col.key === 'quality') continue
       const was = t._orig && col.key in t._orig ? t._orig[col.key] : undefined
@@ -625,13 +681,15 @@ function renderTracks() {
 
 function updateBulkBar() {
   const n = state.selectedIds.size
-  bulkActions.hidden = n === 0
+  // A read-only track is only ever selected alone, to view: no bulk actions.
+  bulkActions.hidden = n === 0 || state.tracks.some(t => t.read_only && state.selectedIds.has(t.id))
   const offPage = n - state.tracks.filter(t => state.selectedIds.has(t.id)).length
   selectionCount.textContent = offPage > 0
     ? `${n.toLocaleString()} selected (${offPage.toLocaleString()} on other pages)`
     : `${n.toLocaleString()} selected`
   // Whole page selected but the view is bigger: offer the rest.
-  const pageAll = state.tracks.length > 0 && state.tracks.every(t => state.selectedIds.has(t.id))
+  const pageAll = state.tracks.some(t => !t.read_only)
+    && state.tracks.every(t => t.read_only || state.selectedIds.has(t.id))
   selectViewBtn.hidden = !(pageAll && state.total > n)
   selectViewBtn.textContent = `Select all ${state.total.toLocaleString()} in this view`
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
@@ -2017,7 +2075,9 @@ async function undoLast() {
 function onSelectAll() {
   const sa = selectAll()
   if (!sa) return
-  state.tracks.forEach(t => sa.checked ? state.selectedIds.add(t.id) : state.selectedIds.delete(t.id))
+  state.tracks.forEach(t => {
+    if (sa.checked && !t.read_only) state.selectedIds.add(t.id); else state.selectedIds.delete(t.id)
+  })
   renderTracks()
   renderEditor()
 }
@@ -2272,17 +2332,25 @@ trackTbody.addEventListener('click', (e) => {
   if (!tr) return
   const id = parseInt(tr.dataset.id!, 10)
   const isCheckbox = (e.target as HTMLElement).matches('input[type=checkbox]')
-  const cb = tr.querySelector<HTMLInputElement>('input[type=checkbox]')!
+  const cb = tr.querySelector<HTMLInputElement>('input[type=checkbox]')
+  const readOnly = new Set(state.tracks.filter(t => t.read_only).map(t => t.id))
 
-  if (e.shiftKey && state.selectedIds.size > 0) {
+  if (readOnly.has(id) && !isCheckbox) {
+    // View only, and only on its own.
+    const only = state.selectedIds.size === 1 && state.selectedIds.has(id)
+    state.selectedIds.clear()
+    if (!only) state.selectedIds.add(id)
+  } else if (e.shiftKey && state.selectedIds.size > 0) {
     const rows  = [...trackTbody.querySelectorAll<HTMLTableRowElement>('tr')]
     const ids   = rows.map(r => parseInt(r.dataset.id!, 10))
     const idArr = [...state.selectedIds]
     const last  = idArr[idArr.length - 1]
     const from = ids.indexOf(last), to = ids.indexOf(id)
     const [lo, hi] = from < to ? [from, to] : [to, from]
-    ids.slice(lo, hi + 1).forEach(i => state.selectedIds.add(i))
-  } else if (isCheckbox) {
+    ids.slice(lo, hi + 1).forEach(i => { if (!readOnly.has(i)) state.selectedIds.add(i) })
+    for (const i of readOnly) state.selectedIds.delete(i)
+  } else if (isCheckbox && cb) {
+    for (const i of readOnly) state.selectedIds.delete(i)
     cb.checked ? state.selectedIds.add(id) : state.selectedIds.delete(id)
   } else {
     if (state.selectedIds.has(id) && state.selectedIds.size === 1) {

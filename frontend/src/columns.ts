@@ -1,5 +1,5 @@
 import { Track } from './api'
-import { state } from './state'
+import { state, loadColOrder } from './state'
 import { esc, fmtDuration, fmtBitrate, fmtSampleRate, fmtChannels } from './util'
 
 export interface ColDef {
@@ -45,4 +45,11 @@ export function sourcePath(dir: string): string {
   const base = best ? best.slice(0, best.lastIndexOf('/'))
     : state.musicDirs.find(d => dir === d || dir.startsWith(d + '/')) ?? ''
   return base && dir.startsWith(base + '/') ? dir.slice(base.length + 1) : dir
+}
+
+/** COL_DEFS in the user's order (dragged headers); new columns keep their default spot at the end. */
+export function orderedCols(): ColDef[] {
+  const order = loadColOrder()
+  const pos = (k: string) => { const i = order.indexOf(k); return i < 0 ? order.length + COL_DEFS.findIndex(c => c.key === k) : i }
+  return [...COL_DEFS].sort((a, b) => pos(a.key) - pos(b.key))
 }

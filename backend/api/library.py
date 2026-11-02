@@ -330,11 +330,14 @@ def list_tracks(
 
 @router.get("/track-ids")
 def list_track_ids(view: View = Depends(), limit: int = Query(20000, le=100000)):
-    """Every track id in the view, in view order -- 'select all N' across pages."""
+    """Every writable track id in the view, in view order -- 'select all N' across pages."""
     where, params, order = _track_filters(view)
     with db() as conn:
-        rows = conn.execute(f"SELECT id FROM tracks {where} {order} LIMIT ?", [*params, limit]).fetchall()
-    return {"ids": [r["id"] for r in rows]}
+        rows = conn.execute(f"SELECT id, directory FROM tracks {where} {order} LIMIT ?", [*params, limit]).fetchall()
+    # Read-only tracks can't be edited, so they never join a bulk selection.
+    import os
+    writable = {d: os.access(d, os.W_OK) for d in {r["directory"] for r in rows}}
+    return {"ids": [r["id"] for r in rows if writable[r["directory"]]]}
 
 
 @router.get("/formats")
