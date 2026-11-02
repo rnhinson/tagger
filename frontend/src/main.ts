@@ -10,8 +10,11 @@ import {
 } from './quality'
 import { APP_HTML } from './template'
 import { ValueChips } from './chips'
+import { openCleanup } from './cleanup'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
+import { openParseNames } from './parsenames'
+import { openMergeAlbums } from './mergealbums'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1575,6 +1578,14 @@ function showRenameFolder() {
 moveFolderBtn.addEventListener('click', showMoveFolder)
 
 // Bulk rename: list order = the view's order (counters number in that order).
+document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openMergeAlbums(ids, refreshAfterBulk)
+})
+document.getElementById('parse-names-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openParseNames(ids, refreshAfterBulk)
+})
 document.getElementById('bulk-rename-btn')!.addEventListener('click', () => {
   const onPage = state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.id)
   const ids = onPage.length === state.selectedIds.size ? onPage : [...state.selectedIds]
@@ -2268,6 +2279,8 @@ deleteFilesBtn.addEventListener('click', deleteFiles)
 organizeBtn.addEventListener('click', organizeFiles)
 autonumberBtn.addEventListener('click', autoNumber)
 findReplaceBtn.addEventListener('click', showFindReplace)
+document.getElementById('cleanup-btn')!.addEventListener('click', () =>
+  openCleanup([...state.selectedIds], async () => { state.tagValues = new Map(); await refreshAfterBulk() }))
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)

@@ -9,6 +9,7 @@ export const APP_HTML = `
       <span id="scan-status" class="scan-status"></span>
       <button id="review-btn" class="btn btn-review btn-sm" title="Review staged changes, then write them to the files" hidden></button>
       <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
+      <button id="cleanup-btn" class="btn btn-ghost btn-sm" title="Standardize tag separators (Folk/Celtic → Folk; Celtic)">Clean up</button>
       <button id="history-btn" class="btn btn-ghost btn-sm" title="Change history and undo">History</button>
       <button id="scan-btn" class="btn btn-primary">Scan Library</button>
       <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings" aria-label="Settings">⚙</button>
@@ -194,6 +195,8 @@ export const APP_HTML = `
         <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
         <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
         <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
+        <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
+        <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
         <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
         <button id="organize-btn" class="btn btn-ghost btn-sm" title="Plan moves for the selected files using the rename template, inside each file's library root">Organize files</button>
         <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>

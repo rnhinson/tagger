@@ -9,6 +9,8 @@ from core import staging
 from core.database import db
 from core.tagger import TAG_FIELDS
 from core.multivalue import MULTI_FIELDS, edit_values
+from core.cleanup import SEPARATORS, found_separators, standardize
+from core.nameparse import PatternError, compile_pattern, parse_path
 from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings, get_library_roots
 
@@ -414,3 +416,230 @@ def edit_tag_values(req: ValueEdit):
             staging.stage_edit(conn, row, {req.field: new}, step)
         res = _finish(conn, step, [r["id"] for r, _ in todo])
     return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}
+
+
+class CleanupScope(BaseModel):
+    field: str
+    track_ids: Optional[list[int]] = None   # None = the whole library
+
+
+class Standardize(CleanupScope):
+    separators: list[str]
+    keep: list[str] = []
+    preview: bool = True
+
+
+def _scope(conn, req: CleanupScope) -> list[tuple]:
+    """(row, effective value) for every track in scope (as staged)."""
+    if req.field not in MULTI_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    rows = (_rows(conn, req.track_ids) if req.track_ids is not None
+            else conn.execute("SELECT * FROM tracks").fetchall())
+    entries = staging.load(conn, [r["id"] for r in rows])
+    return [(r, staging.effective(r, entries.get(r["id"])).get(req.field) or "") for r in rows]
+
+
+@router.post("/separators")
+def find_separators(req: CleanupScope):
+    """Which separators other than ';' the field's values use, with counts."""
+    with db() as conn:
+        counts: dict[str, int] = {}
+        for _row, value in _scope(conn, req):
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+    return {"separators": found_separators(counts)}
+
+
+@router.post("/standardize")
+def standardize_separators(req: Standardize):
+    """Rewrite the chosen separators as ';' -- preview, or stage as one step."""
+    seps = [s for s in req.separators if s in SEPARATORS]
+    if not seps:
+        raise HTTPException(400, "No separators chosen")
+    keep = set(req.keep)
+    with db() as conn:
+        todo, changes = [], {}
+        for row, old in _scope(conn, req):
+            new = standardize(old, seps, keep)
+            if new != old:
+                todo.append((row, new))
+                c = changes.setdefault(old, {"old": old, "new": new, "tracks": 0})
+                c["tracks"] += 1
+        listed = sorted(changes.values(), key=lambda c: (-c["tracks"], c["old"].casefold()))
+        if req.preview or not todo:
+            return {"tracks": len(todo), "changes": listed}
+        label = req.field.replace("_", " ")
+        step = staging.Step(conn, f"Standardize {label} separators ({' '.join(seps)}) on {len(todo)} tracks")
+        for row, new in todo:
+            staging.stage_edit(conn, row, {req.field: new}, step)
+        res = _finish(conn, step, [r["id"] for r, _ in todo])
+    return {"tracks": len(todo), "changes": listed, **res, "errors": res.get("errors", [])}
+class NameParse(BaseModel):
+    track_ids: list[int]
+    pattern: str
+    exclude: list[int] = []     # opted out in the preview
+
+
+def _parse_names(conn, req: NameParse) -> tuple[list, list[dict]]:
+    try:
+        compiled = compile_pattern(req.pattern)
+    except PatternError as exc:
+        raise HTTPException(400, str(exc))
+    rows = sorted(_rows(conn, req.track_ids), key=lambda r: r["path"])
+    entries = staging.load(conn, [r["id"] for r in rows])
+    out = []
+    for row in rows:
+        eff = staging.effective(row, entries.get(row["id"]))
+        tags = parse_path(row["path"], compiled)
+        changes = {k: v for k, v in (tags or {}).items() if (eff.get(k) or "") != v}
+        out.append({"id": row["id"], "path": row["path"], "matched": tags is not None,
+                    "tags": tags or {}, "changes": changes})
+    return rows, out
+
+
+@router.post("/parse-preview")
+def parse_names_preview(req: NameParse):
+    """What a file-name pattern would set on each track (current values alongside)."""
+    with db() as conn:
+        _rows_, items = _parse_names(conn, req)
+    return {"items": items[:1000], "total": len(items),
+            "matched": sum(i["matched"] for i in items),
+            "changing": sum(bool(i["changes"]) for i in items)}
+
+
+@router.post("/parse")
+def parse_names(req: NameParse):
+    """Stage the tags a file-name pattern reads, as one step."""
+    skip = set(req.exclude)
+    with db() as conn:
+        rows, items = _parse_names(conn, req)
+        by_id = {r["id"]: r for r in rows}
+        todo = [i for i in items if i["changes"] and i["id"] not in skip]
+        if not todo:
+            return {"ok": True, "changed": 0, "staged": load_settings().stage_changes, "errors": []}
+        step = staging.Step(conn, f"Tags from file names ({req.pattern.strip()}) on {len(todo)} tracks")
+        for i in todo:
+            staging.stage_edit(conn, by_id[i["id"]], i["changes"], step)
+        res = _finish(conn, step, [i["id"] for i in todo])
+    return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}
+
+
+class AlbumMerge(BaseModel):
+    track_ids: list[int]
+    target: Optional[str] = None        # group key whose folder files move into (default: the biggest)
+    order: list[str] = []               # group keys in disc order (default: as listed)
+    album: Optional[str] = None         # the merged album's tags; None/"" = leave as is
+    album_artist: Optional[str] = None
+    year: Optional[str] = None
+    discs: str = "keep"                 # keep | per_album
+    move: bool = False
+    preview: bool = True
+
+
+def _merge_plan(conn, req: AlbumMerge) -> dict:
+    """Group the selection into albums and plan each track's tags and path."""
+    import os
+
+    rows = _rows(conn, req.track_ids)
+    entries = staging.load(conn, [r["id"] for r in rows])
+    staged_dirs = staging.load_dirs(conn)
+    groups: dict[str, dict] = {}
+    for row in rows:
+        eff = staging.effective(row, entries.get(row["id"]))
+        album, aa = eff.get("album") or "", eff.get("album_artist") or ""
+        key = "\n".join((row["directory"], album, aa))
+        g = groups.setdefault(key, {"key": key, "directory": row["directory"], "album": album,
+                                    "album_artist": aa, "artists": set(), "years": set(),
+                                    "discs": set(), "rows": []})
+        g["artists"].add(eff.get("artist") or "")
+        g["years"].add(eff.get("year") or "")
+        g["discs"].add(_disc(eff.get("disc_number")))
+        g["rows"].append((row, eff))
+    listed = sorted(groups.values(), key=lambda g: (g["directory"].casefold(), g["album"].casefold()))
+    order = [groups[k] for k in req.order if k in groups] + [g for g in listed if g["key"] not in req.order]
+    if len(order) < 2:
+        raise HTTPException(400, "Select tracks from at least two albums")
+    # Default target: the album with the most tracks (ties: the first listed).
+    target = groups.get(req.target) or max(order, key=lambda g: len(g["rows"]))
+
+    disc_map, nxt = {}, 1
+    for g in order:
+        for d in sorted(g["discs"]):
+            disc_map[(g["key"], d)] = str(nxt)
+            nxt += 1
+
+    tags_set = {k: v.strip() for k, v in (("album", req.album), ("album_artist", req.album_artist),
+                                          ("year", req.year)) if v and v.strip()}
+    plan, clashes, taken = [], [], set()
+    for g in order:
+        for row, eff in sorted(g["rows"], key=lambda re_: (_disc(re_[1].get("disc_number")),
+                                                          _num(re_[1].get("track_number")), re_[0]["filename"])):
+            tags = {k: v for k, v in tags_set.items() if (eff.get(k) or "") != v}
+            if req.discs == "per_album":
+                d = disc_map[(g["key"], _disc(eff.get("disc_number")))]
+                if (eff.get("disc_number") or "") != d:
+                    tags["disc_number"] = d
+            new_path = None
+            if req.move and g["directory"] != target["directory"]:
+                dest = os.path.join(target["directory"], row["filename"])
+                why = None
+                if staged_dirs and staging.moved_path(row["path"], staged_dirs):
+                    why = "its folder is staged to move"
+                elif dest in taken or (os.path.exists(dest) and not _samefile(dest, row["path"])):
+                    why = "a file with this name is already there"
+                if why:
+                    clashes.append({"id": row["id"], "filename": row["filename"], "error": why})
+                else:
+                    new_path = dest
+                    taken.add(dest)
+            if tags or new_path:
+                plan.append({"row": row, "tags": tags, "new_path": new_path, "group": g["key"]})
+
+    def summary(g):
+        return {"key": g["key"], "directory": g["directory"], "album": g["album"],
+                "album_artist": g["album_artist"], "tracks": len(g["rows"]),
+                "artists": sorted(a for a in g["artists"] if a)[:5],
+                "year": next((y for y in sorted(g["years"]) if y), ""),
+                "discs": sorted(g["discs"]),
+                "new_discs": [disc_map[(g["key"], d)] for d in sorted(g["discs"])]}
+    return {"groups": [summary(g) for g in order], "target": target["key"], "plan": plan,
+            "clashes": clashes}
+
+
+def _disc(v) -> int:
+    n = _num(v)
+    return n if n > 0 else 1
+
+
+def _num(v) -> int:
+    try:
+        return int(str(v or "").split("/")[0])
+    except ValueError:
+        return 0
+
+
+@router.post("/merge-albums")
+def merge_albums(req: AlbumMerge):
+    """
+    Make the selected tracks one album: the chosen album / album artist / year
+    on every track, discs optionally renumbered album by album (1..n in the
+    order given), files optionally moved into the target album's folder.
+    Preview, or stage it all as one step.
+    """
+    if req.discs not in ("keep", "per_album"):
+        raise HTTPException(400, "discs must be keep or per_album")
+    with db() as conn:
+        p = _merge_plan(conn, req)
+        out = {"groups": p["groups"], "target": p["target"], "clashes": p["clashes"],
+               "tracks": len(p["plan"]), "moves": sum(1 for x in p["plan"] if x["new_path"])}
+        if req.preview or not p["plan"]:
+            return out
+        name = (req.album or "").strip() or next(g["album"] for g in p["groups"] if g["key"] == p["target"])
+        step = staging.Step(conn, f"Merge {len(p['groups'])} albums into {name or '(no album)'} ({len(p['plan'])} tracks)")
+        for x in p["plan"]:
+            if x["tags"]:
+                staging.stage_edit(conn, x["row"], x["tags"], step)
+            if x["new_path"]:
+                staging.stage(conn, x["row"], new_path=x["new_path"], step=step)
+        res = _finish(conn, step, [x["row"]["id"] for x in p["plan"]])
+    return {**out, **res, "errors": res.get("errors", [])}

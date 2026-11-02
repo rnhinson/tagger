@@ -215,6 +215,16 @@ export interface TreeEntry {
   has_dirs?: boolean
 }
 
+export interface MergeGroup {
+  key: string; directory: string; album: string; album_artist: string; tracks: number
+  artists: string[]; year: string; discs: number[]; new_discs: string[]
+}
+
+export interface MergeAlbumsRequest {
+  track_ids: number[]; target: string | null; order: string[]; preview: boolean
+  album: string; album_artist: string; year: string; discs: 'keep' | 'per_album'; move: boolean
+}
+
 export interface TagValue {
   value: string
   track_count: number
@@ -306,6 +316,22 @@ export const api = {
       request<EditResult>('PATCH', `/api/tags/${trackId}`, tags),
     bulk: (trackIds: number[], tags: TagUpdate) =>
       request<EditResult>('POST', '/api/tags/bulk', { track_ids: trackIds, tags }),
+    separators: (field: string, trackIds: number[] | null) =>
+      request<{ separators: { sep: string; tracks: number; values: { value: string; tracks: number }[] }[] }>(
+        'POST', '/api/tags/separators', { field, track_ids: trackIds }),
+    standardize: (body: { field: string; track_ids: number[] | null; separators: string[]; keep: string[]; preview: boolean }) =>
+      request<EditResult & { tracks: number; changes: { old: string; new: string; tracks: number }[] }>(
+        'POST', '/api/tags/standardize', body),
+    parsePreview: (trackIds: number[], pattern: string) =>
+      request<{ total: number; matched: number; changing: number;
+                items: { id: number; path: string; matched: boolean; tags: Record<string, string>; changes: Record<string, string> }[] }>(
+        'POST', '/api/tags/parse-preview', { track_ids: trackIds, pattern }),
+    parseNames: (trackIds: number[], pattern: string, exclude: number[]) =>
+      request<EditResult & { changed: number }>('POST', '/api/tags/parse', { track_ids: trackIds, pattern, exclude }),
+    mergeAlbums: (body: MergeAlbumsRequest) =>
+      request<EditResult & { groups: MergeGroup[]; target: string; tracks: number; moves: number;
+                             clashes: { id: number; filename: string; error: string }[] }>(
+        'POST', '/api/tags/merge-albums', body),
     editValues: (trackIds: number[], field: string, add: string[], remove: string[]) =>
       request<EditResult & { changed: number }>('POST', '/api/tags/values', { track_ids: trackIds, field, add, remove }),
     replaygain: (trackIds: number[], albumMode = false) =>
