@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from core import staging
 from core.database import db
 from core.tagger import TAG_FIELDS
+from core.multivalue import MULTI_FIELDS, edit_values
 from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings, get_library_roots
 
@@ -25,10 +26,12 @@ def _finish(conn, step: staging.Step, ids: list[int]) -> dict:
 
 
 def _rows(conn, ids: list[int]) -> list:
-    if not ids:
-        return []
-    ph = ",".join("?" * len(ids))
-    return conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", ids).fetchall()
+    rows = []
+    for i in range(0, len(ids), 900):  # SQLite caps bound parameters
+        chunk = ids[i:i + 900]
+        ph = ",".join("?" * len(chunk))
+        rows += conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", chunk).fetchall()
+    return rows
 
 
 class TagUpdate(BaseModel):
@@ -371,3 +374,43 @@ def bulk_update_tags(update: BulkTagUpdate):
             staging.stage_edit(conn, row, updates, step)
         res = _finish(conn, step, list(found))
     return {"ok": True, **res, "errors": errors + res.get("errors", [])}
+
+
+class ValueEdit(BaseModel):
+    track_ids: list[int]
+    field: str
+    add: list[str] = []
+    remove: list[str] = []
+
+
+@router.post("/values")
+def edit_tag_values(req: ValueEdit):
+    """
+    Add/remove values of a multi-value tag ("Folk; Celtic") per track, from
+    each track's own (staged) value: adding puts it on every track that lacks
+    it, removing takes it off wherever it is. Other values are kept.
+    """
+    if req.field not in MULTI_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    add = [a.strip() for a in req.add if a.strip()]
+    remove = [r.strip() for r in req.remove if r.strip()]
+    if not add and not remove:
+        raise HTTPException(400, "Nothing to add or remove")
+    label = req.field.replace("_", " ").capitalize()
+    changes = ", ".join([f"+{a}" for a in add] + [f"\u2212{r}" for r in remove])
+    with db() as conn:
+        rows = _rows(conn, req.track_ids)
+        entries = staging.load(conn, [r["id"] for r in rows])
+        todo = []
+        for row in rows:
+            old = staging.effective(row, entries.get(row["id"])).get(req.field) or ""
+            new = edit_values(old, add, remove)
+            if new != old:
+                todo.append((row, new))
+        if not todo:
+            return {"ok": True, "changed": 0, "staged": load_settings().stage_changes, "errors": []}
+        step = staging.Step(conn, f"{label} {changes} on {len(todo)} tracks")
+        for row, new in todo:
+            staging.stage_edit(conn, row, {req.field: new}, step)
+        res = _finish(conn, step, [r["id"] for r, _ in todo])
+    return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}

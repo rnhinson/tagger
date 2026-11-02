@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 from core.config import settings
+from core.multivalue import has_value_sql
 
 
 def get_conn() -> sqlite3.Connection:
@@ -12,6 +13,8 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
+    # has_value(column, v): v is one of the ';'-separated values in column.
+    conn.create_function("has_value", 2, has_value_sql, deterministic=True)
     return conn
 
 
