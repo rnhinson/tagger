@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from core.config import settings
 from core.database import db
 from core import staging
+from core.multivalue import MULTI_FIELDS, split_values
 from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_change
 
 router = APIRouter()
@@ -114,8 +115,8 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         # `tag` is whitelisted, so it is safe to interpolate.
         if v.value == "":
             clauses.append(_blank(v.tag))
-        else:
-            clauses.append(f"{v.tag} = ?")
+        else:  # one of its ';'-separated values (core/multivalue.py)
+            clauses.append(f"has_value({v.tag}, ?)")
             params.append(v.value)
     if v.directory:
         clauses.append("(directory = ? OR substr(directory, 1, ?) = ?)")
@@ -124,7 +125,7 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         if v.artist == "":
             clauses.append(_blank("artist"))
         else:
-            clauses.append("artist = ?")
+            clauses.append("has_value(artist, ?)")
             params.append(v.artist)
     if v.album:
         clauses.append("album = ?")
@@ -341,6 +342,16 @@ class Selection(BaseModel):
     track_ids: list[int]
 
 
+def _rows_chunked(conn, ids: list[int]) -> list:
+    """SELECT * for any number of ids (SQLite caps bound parameters)."""
+    rows = []
+    for i in range(0, len(ids), 900):
+        chunk = ids[i:i + 900]
+        ph = ",".join("?" * len(chunk))
+        rows += conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", chunk).fetchall()
+    return rows
+
+
 @router.post("/summary")
 def selection_summary(sel: Selection):
     """
@@ -350,11 +361,7 @@ def selection_summary(sel: Selection):
     values: dict[str, Optional[str]] = {}
     mixed: list[str] = []
     with db() as conn:
-        rows = []
-        for i in range(0, len(sel.track_ids), 900):
-            chunk = sel.track_ids[i:i + 900]
-            ph = ",".join("?" * len(chunk))
-            rows += conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", chunk).fetchall()
+        rows = _rows_chunked(conn, sel.track_ids)
         entries = staging.load(conn, [r["id"] for r in rows])
     eff = [staging.effective(r, entries.get(r["id"])) for r in rows]
     for f in STAGEABLE:
@@ -446,18 +453,45 @@ def get_track(track_id: int):
 
 @router.get("/tag-values")
 def tag_values(field: str):
-    """Distinct values of one tag with track counts; '' = tracks without it."""
+    """
+    Values of one tag with track counts; '' = tracks without it. A tag holding
+    several ';'-separated values counts under each, so an album tagged
+    "Folk; Celtic" is listed under both.
+    """
     if field not in BROWSE_FIELDS:
         raise HTTPException(400, "Invalid field")
-    order = "value DESC" if field == "year" else "value COLLATE NOCASE"
     with db() as conn:
         rows = conn.execute(
-            f"""
-            SELECT COALESCE({field}, '') AS value, COUNT(*) AS track_count
-            FROM tracks GROUP BY COALESCE({field}, '') ORDER BY {order}
-            """
+            f"SELECT {field} AS value, COUNT(*) AS n FROM tracks GROUP BY {field}"
         ).fetchall()
-    return [_row(r) for r in rows]
+    counts: dict[str, int] = {}
+    for r in rows:
+        for v in split_values(r["value"]) or [""]:
+            counts[v] = counts.get(v, 0) + r["n"]
+    key = (lambda v: v) if field == "year" else (lambda v: v.casefold())
+    return [{"value": v, "track_count": n}
+            for v, n in sorted(counts.items(), key=lambda kv: key(kv[0]), reverse=field == "year")]
+
+
+class ValueCounts(BaseModel):
+    track_ids: list[int]
+    field: str
+
+
+@router.post("/value-counts")
+def value_counts(req: ValueCounts):
+    """How many of these tracks carry each value of a multi-value tag (as staged)."""
+    if req.field not in MULTI_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    with db() as conn:
+        rows = _rows_chunked(conn, req.track_ids)
+        entries = staging.load(conn, [r["id"] for r in rows])
+    counts: dict[str, int] = {}
+    for r in rows:
+        for v in split_values(staging.effective(r, entries.get(r["id"])).get(req.field)):
+            counts[v] = counts.get(v, 0) + 1
+    return {"count": len(rows),
+            "values": [{"value": v, "tracks": n} for v, n in sorted(counts.items(), key=lambda kv: kv[0].casefold())]}
 
 
 @router.get("/artists")
@@ -482,7 +516,7 @@ def list_albums(artist: Optional[str] = None):
         if artist == "":
             clauses.append("(artist IS NULL OR artist = '')")
         else:
-            clauses.append("artist = ?")
+            clauses.append("has_value(artist, ?)")
             params.append(artist)
     where = "WHERE " + " AND ".join(clauses)
 

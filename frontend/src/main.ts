@@ -9,6 +9,7 @@ import {
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
 } from './quality'
 import { APP_HTML } from './template'
+import { ValueChips } from './chips'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
 
@@ -28,6 +29,11 @@ const trackLoading   = document.getElementById('track-loading')!
 const trackCount     = document.getElementById('track-count')!
 const tagEditor      = document.getElementById('tag-editor')!
 const tagForm        = document.getElementById('tag-form') as HTMLFormElement
+// Genre on a multi-track selection: chips (add/remove values per track)
+// instead of one string that would overwrite every track's genres.
+const genreChips = new ValueChips('genres')
+const genreInput = tagForm.elements.namedItem('genre') as HTMLInputElement
+genreInput.closest('.field-label')!.after(genreChips.el)
 const editorTitle    = document.getElementById('editor-title')!
 const bulkActions    = document.getElementById('bulk-actions')!
 const selectionCount = document.getElementById('selection-count')!
@@ -741,6 +747,24 @@ async function fillEditorForm() {
   }
 }
 
+/** Several tracks: genre is edited as chips; one track: as plain text. */
+let chipsToken = 0
+function setGenreMode() {
+  const multi = state.selectedIds.size > 1
+  genreInput.hidden = multi
+  genreChips.el.hidden = !multi
+  if (!multi) return
+  const ids = [...state.selectedIds]
+  const token = ++chipsToken
+  genreChips.load(ids.length, [], state.tagValues.get('genre') ?? [])
+  Promise.all([
+    api.library.valueCounts(ids, 'genre'),
+    state.tagValues.has('genre') ? Promise.resolve() : loadTagValues('genre'),
+  ]).then(([counts]) => {
+    if (token === chipsToken) genreChips.load(counts.count, counts.values, state.tagValues.get('genre') ?? [])
+  }).catch(e => toast(`Failed to load genres: ${e}`, 'error'))
+}
+
 function populateForm(tracks: Track[]) {
   for (const field of TAG_FIELDS) {
     const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
@@ -755,6 +779,7 @@ function populateForm(tracks: Track[]) {
     el.closest('.field-label')?.classList.toggle('field-staged', tracks.some(t => t._orig && field in t._orig))
     delete (el as HTMLElement).dataset.dirty
   }
+  setGenreMode()
   // compilation: boolean checkbox; indeterminate = mixed across the selection.
   const comp = tracks.map(t => t.compilation === '1')
   const compSame = comp.every(v => v === comp[0])
@@ -1272,13 +1297,22 @@ async function saveTags(e: Event) {
     if (r.mb_album_artist_id) update.mb_album_artist_id = r.mb_album_artist_id
   }
 
-  if (Object.keys(update).length === 0) { toast('No changes to save', 'info'); return }
+  const chips = state.selectedIds.size > 1 && genreChips.dirty
+  if (Object.keys(update).length === 0 && !chips) { toast('No changes to save', 'info'); return }
 
   const ids = [...state.selectedIds]
   try {
-    const res = ids.length === 1
-      ? await api.tags.update(ids[0], update)
-      : await api.tags.bulk(ids, update)
+    let res: import('./api').EditResult | undefined
+    if (Object.keys(update).length) {
+      res = ids.length === 1
+        ? await api.tags.update(ids[0], update)
+        : await api.tags.bulk(ids, update)
+    }
+    if (chips) {
+      const r = await api.tags.editValues(ids, 'genre', genreChips.add, genreChips.remove)
+      if (r.changed || !res) res = r
+      state.tagValues.delete('genre')
+    }
     const what = ids.length === 1 ? 'tags' : `tags on ${ids.length} tracks`
 
     // Write cover art from Cover Art Archive if one was selected via lookup

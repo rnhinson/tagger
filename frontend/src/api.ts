@@ -283,6 +283,9 @@ export const api = {
     removeTracks: (ids: number[]) => request<{ removed: number }>('POST', '/api/library/remove', ids),
     deleteFiles: (ids: number[]) => request<{ deleted: number }>('POST', '/api/library/delete-files', ids),
     artists: () => request<Artist[]>('GET', '/api/library/artists'),
+    valueCounts: (ids: number[], field: string) =>
+      request<{ count: number; values: { value: string; tracks: number }[] }>(
+        'POST', '/api/library/value-counts', { track_ids: ids, field }),
     tagValues: (field: string) =>
       request<TagValue[]>('GET', `/api/library/tag-values?field=${encodeURIComponent(field)}`),
     albums: (artist?: string) =>
@@ -303,6 +306,8 @@ export const api = {
       request<EditResult>('PATCH', `/api/tags/${trackId}`, tags),
     bulk: (trackIds: number[], tags: TagUpdate) =>
       request<EditResult>('POST', '/api/tags/bulk', { track_ids: trackIds, tags }),
+    editValues: (trackIds: number[], field: string, add: string[], remove: string[]) =>
+      request<EditResult & { changed: number }>('POST', '/api/tags/values', { track_ids: trackIds, field, add, remove }),
     replaygain: (trackIds: number[], albumMode = false) =>
       request<{ ok: boolean; tool: string | null; processed: number; error?: string }>(
         'POST', '/api/tags/replaygain', { track_ids: trackIds, album_mode: albumMode }),
