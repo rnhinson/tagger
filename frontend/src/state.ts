@@ -89,8 +89,9 @@ export interface State {
   // filters
   filterFormat:      string
   filterQuality:     string
-  // configured music dirs (for source column)
+  // configured music dirs (for source column) and library roots (folder moves)
   musicDirs:         string[]
+  libraryRoots:      string[]
   // pagination
   page:              number
 }
@@ -126,5 +127,6 @@ export const state: State = {
   filterFormat:      '',
   filterQuality:     '',
   musicDirs:         [],
+  libraryRoots:      [],
   page:              0,
 }

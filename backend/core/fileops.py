@@ -51,6 +51,22 @@ def move_file(src: str | Path, dst: str | Path) -> None:
     shutil.move(str(src), str(dst))
 
 
+def move_dir(src: str | Path, dst: str | Path) -> None:
+    """Move a whole folder (cover art and all). Never merges or overwrites."""
+    src, dst = Path(src), Path(dst)
+    if not src.is_dir():
+        raise MoveError(f"folder missing: {src}")
+    if dst.exists():
+        if not _same_file(src, dst):
+            raise MoveError(f"destination already exists: {dst}")
+        tmp = src.with_name(f".tagger-{uuid.uuid4().hex}")  # case-only rename
+        os.rename(src, tmp)
+        os.rename(tmp, dst)
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+
+
 def prune_empty_dirs(start: str | Path, stop: str | Path) -> None:
     """Remove start and its empty ancestors, never stop itself or above it."""
     d, stop = Path(start), Path(stop)

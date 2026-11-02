@@ -143,6 +143,13 @@ def init_db() -> None:
                 staged_at REAL NOT NULL
             );
 
+            -- Folder moves/renames held for review (core/staging.py).
+            CREATE TABLE IF NOT EXISTS staged_dirs (
+                src       TEXT PRIMARY KEY,
+                dst       TEXT NOT NULL,
+                staged_at REAL NOT NULL
+            );
+
             -- Undo stack for staging: what each staging action replaced.
             CREATE TABLE IF NOT EXISTS staged_steps (
                 id      INTEGER PRIMARY KEY AUTOINCREMENT,

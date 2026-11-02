@@ -85,11 +85,12 @@ function fmtVal(v: string | null): string {
 export async function openReview(onChanged: () => Promise<void>) {
   const m = modalShell('Review changes')
   let failures = new Map<number, string>()
+  let dirFailures = new Map<string, string>()
 
   const render = async () => {
-    const [{ count, tracks }, st] = await Promise.all([api.staged.list(), api.staged.count()])
+    const [{ count, tracks, dirs }, st] = await Promise.all([api.staged.list(), api.staged.count()])
     m.titleEl.textContent = count
-      ? `Review changes — ${count} track${count !== 1 ? 's' : ''}`
+      ? `Review changes — ${count} change${count !== 1 ? 's' : ''}`
       : 'Review changes'
     m.body.innerHTML = ''
     m.footer.innerHTML = ''
@@ -123,6 +124,35 @@ export async function openReview(onChanged: () => Promise<void>) {
       m.footer.append(ok)
       return
     }
+    for (const d of dirs) {
+      const err = dirFailures.get(d.src)
+      const fromShared = /\/Shared(\/|$)/.test(d.src) && !/\/Shared(\/|$)/.test(d.dst)
+      const section = document.createElement('div')
+      section.className = 'fix-confirm-track'
+      section.innerHTML = `
+        <div class="fix-confirm-track-header">
+          <span class="fix-confirm-track-name">📁 ${esc(d.src.split('/').pop() ?? d.src)}
+            <span class="fix-confirm-source">${d.tracks} track${d.tracks !== 1 ? 's' : ''} + everything else in it</span></span>
+          <button class="btn btn-ghost btn-sm review-discard-dir" data-src="${esc(d.src)}">Discard</button>
+        </div>
+        ${err ? `<div class="review-error">⚠ ${esc(err)}</div>` : ''}
+        ${fromShared ? '<div class="review-warn">Leaving Shared: unmonitor this album in Lidarr first, or Lidarr will try to download it again.</div>' : ''}
+        <table class="fix-confirm-table"><tbody><tr>
+          <td class="fix-col-field">Folder</td>
+          <td class="fix-col-current review-path">${esc(shortPath(d.src))}</td>
+          <td class="fix-col-arrow">→</td>
+          <td class="fix-col-proposed review-path">${esc(shortPath(d.dst))}</td>
+        </tr></tbody></table>`
+      m.body.appendChild(section)
+    }
+    m.body.querySelectorAll<HTMLButtonElement>('.review-discard-dir').forEach(b => {
+      b.addEventListener('click', async () => {
+        b.disabled = true
+        await api.staged.discard([], [b.dataset.src!])
+        await onChanged()
+        await render()
+      })
+    })
     for (const t of tracks) {
       const rows = t.changes.map(c => `<tr>
           <td class="fix-col-field">${esc(FIELD_LABELS[c.field] ?? c.field)}</td>
@@ -169,7 +199,7 @@ export async function openReview(onChanged: () => Promise<void>) {
     })
     const write = document.createElement('button')
     write.className = 'btn btn-primary'
-    write.textContent = `Write ${count} track${count !== 1 ? 's' : ''}`
+    write.textContent = `Write ${count} change${count !== 1 ? 's' : ''}`
     write.addEventListener('click', async () => {
       write.disabled = discardAll.disabled = true
       write.textContent = 'Writing…'
@@ -177,17 +207,21 @@ export async function openReview(onChanged: () => Promise<void>) {
         const res = await api.staged.apply()
         await onChanged()
         if (res.errors.length) {
-          failures = new Map(res.errors.map((e: WriteError) => [e.id, e.error]))
+          failures = new Map(res.errors.filter((e: WriteError) => e.id !== undefined)
+            .map((e: WriteError) => [e.id!, e.error]))
+          dirFailures = new Map(res.errors.filter((e: WriteError) => e.dir)
+            .map((e: WriteError) => [e.dir!, e.error]))
           toast(`Wrote ${res.applied}; ${res.errors.length} need attention`, 'error')
           await render()
         } else {
-          toast(`Wrote ${res.applied} track${res.applied !== 1 ? 's' : ''}`, 'success')
+          toast(`Wrote ${res.applied} track${res.applied !== 1 ? 's' : ''}`
+            + (res.folders ? ` · moved ${res.folders} folder${res.folders !== 1 ? 's' : ''}` : ''), 'success')
           m.close()
         }
       } catch (e) {
         toast(`Write failed: ${e}`, 'error')
         write.disabled = discardAll.disabled = false
-        write.textContent = `Write ${count} tracks`
+        write.textContent = `Write ${count} changes`
       }
     })
     m.footer.append(discardAll, write)

@@ -13,8 +13,9 @@ router = APIRouter()
 
 
 class Selection(BaseModel):
-    # None = every staged track
+    # Both None = everything staged; otherwise just these tracks / folders.
     track_ids: Optional[list[int]] = None
+    dirs: Optional[list[str]] = None
 
 
 @router.get("")
@@ -22,8 +23,17 @@ def list_staged():
     """Every staged track with a field-by-field diff (current -> staged)."""
     with db() as conn:
         entries = staging.load(conn)
+        dirs = staging.load_dirs(conn)
+        folders = []
+        for src, dst in dirs.items():
+            n = len(src) + 1
+            count = conn.execute(
+                "SELECT COUNT(*) FROM tracks WHERE directory = ? OR substr(directory, 1, ?) = ?",
+                (src, n, src + "/"),
+            ).fetchone()[0]
+            folders.append({"src": src, "dst": dst, "tracks": count})
         if not entries:
-            return {"count": 0, "tracks": []}
+            return {"count": len(folders), "tracks": [], "dirs": folders}
         ph = ",".join("?" * len(entries))
         rows = conn.execute(
             f"SELECT * FROM tracks WHERE id IN ({ph}) ORDER BY directory, disc_number, track_number, filename",
@@ -40,7 +50,7 @@ def list_staged():
             "new_path": e["new_path"],
             "changes": [{"field": k, "old": r[k], "new": v} for k, v in e["tags"].items()],
         })
-    return {"count": len(tracks), "tracks": tracks}
+    return {"count": len(tracks) + len(folders), "tracks": tracks, "dirs": folders}
 
 
 @router.get("/count")
@@ -67,10 +77,10 @@ def undo_staged_step():
 @router.post("/apply")
 def apply_staged(sel: Selection):
     with db() as conn:
-        return staging.apply(conn, sel.track_ids)
+        return staging.apply(conn, sel.track_ids, dirs=sel.dirs)
 
 
 @router.post("/discard")
 def discard_staged(sel: Selection):
     with db() as conn:
-        return {"discarded": staging.discard(conn, sel.track_ids)}
+        return {"discarded": staging.discard(conn, sel.track_ids, sel.dirs)}

@@ -75,6 +75,9 @@ const inferBtn         = document.getElementById('infer-btn') as HTMLButtonEleme
 const exportM3uBtn     = document.getElementById('export-m3u-btn') as HTMLButtonElement
 const undoBtn          = document.getElementById('undo-btn') as HTMLButtonElement
 const reviewBtn        = document.getElementById('review-btn') as HTMLButtonElement
+const selectViewBtn    = document.getElementById('select-view-btn') as HTMLButtonElement
+const moveFolderBtn    = document.getElementById('move-folder-btn') as HTMLButtonElement
+const renameFolderBtn  = document.getElementById('rename-folder-btn') as HTMLButtonElement
 
 // Whether the server has a ReplayGain tool available (set at init)
 let replaygainAvailable = false
@@ -372,34 +375,24 @@ function renderColPicker() {
 
 // ─── Sorting and filtering ─────────────────────────────────────────────────────
 
+// Sorting and the Quality/Format filters run on the server over the whole
+// view (every page), so this is just the page as delivered.
 function getSortedFilteredTracks(): Track[] {
-  let result = [...state.tracks]
-
-  if (state.filterFormat) {
-    result = result.filter(t => t.format === state.filterFormat)
-  }
-  if (state.filterQuality) {
-    result = result.filter(t => trackQuality(t) === state.filterQuality)
-  }
-
-  if (state.sortKey) {
-    const key = state.sortKey
-    const dir = state.sortDir === 'asc' ? 1 : -1
-    result.sort((a, b) => {
-      const av = (a[key as keyof Track] as string | null | undefined) ?? null
-      const bv = (b[key as keyof Track] as string | null | undefined) ?? null
-      if (av === null && bv === null) return 0
-      if (av === null) return 1
-      if (bv === null) return -1
-      return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir
-    })
-  }
-
-  return result
+  return state.tracks
 }
 
-function renderFormatOptions() {
-  const formats = [...new Set(state.tracks.map(t => t.format))].sort()
+/** Filters + sort for the current view, for /tracks, select-all and export. */
+function viewParams(): Record<string, string | number> {
+  const p = currentViewParams()
+  if (state.filterFormat)  p.format = state.filterFormat
+  if (state.filterQuality) p.quality = state.filterQuality
+  if (state.sortKey) { p.sort = state.sortKey; p.sort_dir = state.sortDir }
+  return p
+}
+
+async function renderFormatOptions() {
+  let formats: string[] = []
+  try { formats = await api.library.formats() } catch { return }
   const current = filterFormatEl.value
   filterFormatEl.innerHTML = '<option value="">Format</option>'
   for (const fmt of formats) {
@@ -453,7 +446,8 @@ function renderColHeaders() {
         state.sortDir = 'asc'
       }
       renderColHeaders()
-      renderTracks()
+      state.page = 0
+      loadTracks()
     })
     trackTheadRow.appendChild(th)
   }
@@ -481,12 +475,8 @@ function renderTracks() {
   trackLoading.hidden = true
 
   const displayedTracks = getSortedFilteredTracks()
-  const filtersActive = !!(state.filterFormat || state.filterQuality)
-  if (filtersActive) {
-    trackCount.textContent = `${displayedTracks.length.toLocaleString()} of ${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
-  } else {
-    trackCount.textContent = `${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
-  }
+  trackCount.textContent = `${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
+    + (state.filterFormat || state.filterQuality ? ' (filtered)' : '')
 
   const visibleCols = COL_DEFS.filter(c => state.visibleCols.has(c.key))
 
@@ -538,7 +528,14 @@ function renderTracks() {
 function updateBulkBar() {
   const n = state.selectedIds.size
   bulkActions.hidden = n === 0
-  selectionCount.textContent = `${n} selected`
+  const offPage = n - state.tracks.filter(t => state.selectedIds.has(t.id)).length
+  selectionCount.textContent = offPage > 0
+    ? `${n.toLocaleString()} selected (${offPage.toLocaleString()} on other pages)`
+    : `${n.toLocaleString()} selected`
+  // Whole page selected but the view is bigger: offer the rest.
+  const pageAll = state.tracks.length > 0 && state.tracks.every(t => state.selectedIds.has(t.id))
+  selectViewBtn.hidden = !(pageAll && state.total > n)
+  selectViewBtn.textContent = `Select all ${state.total.toLocaleString()} in this view`
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
   replaygainBtn.hidden = !(n > 0 && replaygainAvailable)
 }
@@ -580,8 +577,9 @@ function renderEditor() {
   autoFixBtn.hidden = state.selectedIds.size === 0
   if (state.selectedIds.size !== 1) lookupPanel.hidden = true
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
-  editorTitle.textContent = sel.length === 1 ? (sel[0].title || sel[0].filename) : `${sel.length} tracks`
-  populateForm(sel)
+  const n = state.selectedIds.size
+  editorTitle.textContent = n === 1 && sel.length === 1 ? (sel[0].title || sel[0].filename) : `${n.toLocaleString()} tracks`
+  fillEditorForm()
   updateCoverPreview()
   updatePlayer()
   updateEditorRenamePreview()
@@ -717,6 +715,29 @@ function updateCoverPreview() {
 
 const compilationCheckbox = () => tagForm.elements.namedItem('compilation') as HTMLInputElement
 
+/**
+ * Fill the editor for the selection. Part of it on other pages: ask the
+ * server which values the whole selection shares (as staged).
+ */
+let formToken = 0
+async function fillEditorForm() {
+  const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
+  if (sel.length === state.selectedIds.size) { populateForm(sel); return }
+  const token = ++formToken
+  try {
+    const sum = await api.library.summary([...state.selectedIds])
+    if (token !== formToken) return
+    const fake = {} as Record<string, string | null>
+    for (const [k, v] of Object.entries(sum.values)) fake[k] = v
+    // Two pseudo-tracks that differ exactly on the mixed fields.
+    const a = { ...fake } as unknown as Track, b = { ...fake } as unknown as Track
+    for (const f of sum.mixed) { (a as unknown as Record<string, string>)[f] = 'a'; (b as unknown as Record<string, string>)[f] = 'b' }
+    populateForm([a, b])
+  } catch (e) {
+    toast(`Failed to load the selection: ${e}`, 'error')
+  }
+}
+
 function populateForm(tracks: Track[]) {
   for (const field of TAG_FIELDS) {
     const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
@@ -729,6 +750,7 @@ function populateForm(tracks: Track[]) {
       el.value = ''; el.placeholder = '(multiple values)'; (el as HTMLElement).dataset.mixed = '1'
     }
     el.closest('.field-label')?.classList.toggle('field-staged', tracks.some(t => t._orig && field in t._orig))
+    delete (el as HTMLElement).dataset.dirty
   }
   // compilation: boolean checkbox; indeterminate = mixed across the selection.
   const comp = tracks.map(t => t.compilation === '1')
@@ -736,6 +758,7 @@ function populateForm(tracks: Track[]) {
   const cb = compilationCheckbox()
   cb.indeterminate = !compSame
   cb.checked = compSame ? comp[0] : false
+  delete cb.dataset.dirty
 }
 
 // ─── MusicBrainz lookup ───────────────────────────────────────────────────────
@@ -848,6 +871,7 @@ function applyLookupResult(r: LookupResult) {
     if (!el) continue
     el.value = (r[field] as string | null) ?? ''
     delete el.dataset.mixed
+    el.dataset.dirty = '1'
   }
 
   // Store full lookup result so MB IDs are included on save
@@ -986,8 +1010,7 @@ async function applyProposals(proposals: FixProposal[]) {
   if (state.sidebarMode === 'tags') await loadLibrary()
   await loadTracks()
   if (state.sidebarMode === 'quality') await renderQualityPanel()
-  const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
-  if (updated.length) populateForm(updated)
+  await fillEditorForm()
   await refreshUndoButton()
 }
 
@@ -1136,36 +1159,18 @@ async function loadTracks() {
 
   try {
     let result
-    if (state.query) {
-      result = await api.library.search(state.query, PAGE_SIZE, offset)
-    } else if (state.sidebarMode === 'files') {
-      const params: Record<string, string | number> = { limit: PAGE_SIZE, offset }
-      if (state.selectedDirectory !== null) params.directory = state.selectedDirectory
-      result = await api.library.tracks(params)
-    } else if (state.sidebarMode === 'quality') {
-      if (!state.selectedIssue) {
-        state.tracks = []; state.total = 0; renderTracks(); renderPagination(); return
-      }
-      if (state.selectedIssue === 'missing_files') {
-        result = await api.library.dead()
-      } else {
-        result = await api.library.tracks({ issue: state.selectedIssue, limit: PAGE_SIZE, offset })
-      }
+    if (state.sidebarMode === 'quality' && !state.query && !state.selectedIssue) {
+      state.tracks = []; state.total = 0; renderTracks(); renderPagination(); return
+    }
+    if (state.sidebarMode === 'quality' && !state.query && state.selectedIssue === 'missing_files') {
+      result = await api.library.dead()
     } else {
-      const params: Record<string, string | number> = { limit: PAGE_SIZE, offset }
-      if (state.selectedTag) {
-        params.tag = state.selectedTag.field
-        params.value = state.selectedTag.value
-      }
-      if (state.selectedArtist !== null) params.artist = state.selectedArtist
-      if (state.selectedAlbum  !== null) params.album  = state.selectedAlbum
-      result = await api.library.tracks(params)
+      result = await api.library.tracks({ ...viewParams(), limit: PAGE_SIZE, offset })
     }
     state.tracks = result.tracks.map(overlayStaged)
     state.total  = result.total
     renderTracks()
     renderPagination()
-    renderFormatOptions()
   } catch (e) {
     toast(`Failed to load tracks: ${e}`, 'error')
     trackLoading.hidden = true
@@ -1176,6 +1181,10 @@ async function loadTracks() {
 
 function updateRescanBtn() {
   rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
+  const movable = state.selectedDirectory !== null
+    && !state.musicDirs.includes(state.selectedDirectory)
+    && !state.libraryRoots.includes(state.selectedDirectory)
+  moveFolderBtn.disabled = renameFolderBtn.disabled = !movable
 }
 
 async function startScan(directory?: string) {
@@ -1231,15 +1240,15 @@ function pollScan(jobId: string) {
 async function saveTags(e: Event) {
   e.preventDefault()
   const update: Record<string, string> = {}
+  // Only fields the user changed: the form may stand for tracks on other
+  // pages whose values it doesn't show, so re-sending the rest could clobber them.
   for (const field of TAG_FIELDS) {
     const el = tagForm.elements.namedItem(field) as HTMLInputElement | HTMLTextAreaElement | null
-    if (!el) continue
-    if ((el as HTMLElement).dataset.mixed === '1' && el.value === '') continue
+    if (!el || (el as HTMLElement).dataset.dirty !== '1') continue
     update[field] = el.value
   }
-  // compilation: apply unless it's still "mixed" (indeterminate) across a multi-selection.
   const cb = compilationCheckbox()
-  if (!cb.indeterminate) update.compilation = cb.checked ? '1' : ''
+  if (cb.dataset.dirty === '1' && !cb.indeterminate) update.compilation = cb.checked ? '1' : ''
   // Attach MB IDs from pending lookup result
   if (state.pendingLookupResult) {
     const r = state.pendingLookupResult
@@ -1281,8 +1290,7 @@ async function saveTags(e: Event) {
     state.qualityIssues = null
     if (state.sidebarMode === 'tags') await loadLibrary()
     await loadTracks()
-    const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
-    if (updated.length) populateForm(updated)
+    await fillEditorForm()
     await refreshUndoButton()
   } catch (e) {
     toast(`Save failed: ${e}`, 'error')
@@ -1320,8 +1328,7 @@ async function normalizeCaseBulk() {
     if (state.sidebarMode === 'tags') await loadLibrary()
     await loadTracks()
     if (state.sidebarMode === 'quality') await renderQualityPanel()
-    const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
-    if (updated.length) populateForm(updated)
+    await fillEditorForm()
     await refreshUndoButton()
   } catch (e) {
     toast(`Normalize failed: ${e}`, 'error')
@@ -1406,6 +1413,109 @@ async function organizeFiles() {
   }
 }
 
+// ─── Folder move / rename ───────────────────────────────────────────────────────
+
+function rootOf(path: string): string | undefined {
+  return [...state.libraryRoots].sort((a, b) => b.length - a.length)
+    .find(r => path.startsWith(r + '/'))
+}
+
+async function afterFolderStage(res: import('./api').EditResult, what: string) {
+  if (res.staged) toast(`Staged ${what} — Review to write`, 'info')
+  else if (res.errors?.length) toast(`${what} failed: ${res.errors[0].error}`, 'error')
+  else toast(`Done: ${what}`, 'success')
+  if (!res.staged) { state.rootNode = null; state.selectedDirectory = null; await loadTree() }
+  await refreshAfterWrite()
+}
+
+function showMoveFolder() {
+  const src = state.selectedDirectory
+  if (!src) return
+  const from = rootOf(src)
+  const rel = from ? src.slice(from.length + 1) : src.split('/').pop()!
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.innerHTML = `
+    <form class="modal-card modal-wide" id="mv-form">
+      <div class="modal-title">Move folder</div>
+      <div class="modal-path">${esc(shortPath(src))}</div>
+      <label class="field-label">To library
+        <select id="mv-root">${state.libraryRoots.map(r =>
+          `<option value="${esc(r)}"${r === from ? ' selected' : ''}>${esc(shortPath(r))}</option>`).join('')}</select>
+      </label>
+      <label class="field-label">As folder
+        <input id="mv-rel" type="text" autocomplete="off" value="${esc(rel)}" />
+      </label>
+      <div id="mv-preview" class="rename-preview"></div>
+      <p class="settings-hint">Everything in the folder moves with it — cover art too. Staged: nothing moves until you write it from Review.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="mv-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Stage move</button>
+      </div>
+    </form>`
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#mv-cancel')!.addEventListener('click', close)
+  const rootEl = overlay.querySelector<HTMLSelectElement>('#mv-root')!
+  const relEl  = overlay.querySelector<HTMLInputElement>('#mv-rel')!
+  const prevEl = overlay.querySelector<HTMLElement>('#mv-preview')!
+  const dst = () => rootEl.value + '/' + relEl.value.split('/').map(p => p.trim()).filter(Boolean).join('/')
+  const preview = () => { prevEl.textContent = '→ ' + shortPath(dst()) }
+  rootEl.addEventListener('change', preview)
+  relEl.addEventListener('input', preview)
+  preview()
+  relEl.focus()
+  overlay.querySelector<HTMLFormElement>('#mv-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    try {
+      const res = await api.fs.move(src, dst())
+      close()
+      await afterFolderStage(res, `move of ${src.split('/').pop()}`)
+    } catch (err) {
+      toast(`Can't move: ${errText(err)}`, 'error')
+    }
+  })
+}
+
+function showRenameFolder() {
+  const path = state.selectedDirectory
+  if (!path) return
+  const name = path.split('/').pop()!
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.innerHTML = `
+    <form class="modal-card modal-wide" id="rn-form">
+      <div class="modal-title">Rename folder</div>
+      <div class="modal-path">${esc(shortPath(path))}</div>
+      <label class="field-label">New name<input id="rn-name" type="text" autocomplete="off" value="${esc(name)}" /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="rn-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Stage rename</button>
+      </div>
+    </form>`
+  document.body.appendChild(overlay)
+  const close = () => overlay.remove()
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  overlay.querySelector('#rn-cancel')!.addEventListener('click', close)
+  const input = overlay.querySelector<HTMLInputElement>('#rn-name')!
+  input.focus()
+  input.select()
+  overlay.querySelector<HTMLFormElement>('#rn-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    try {
+      const res = await api.fs.rename(path, input.value)
+      close()
+      await afterFolderStage(res, `rename of ${name}`)
+    } catch (err) {
+      toast(`Can't rename: ${errText(err)}`, 'error')
+    }
+  })
+}
+
+moveFolderBtn.addEventListener('click', showMoveFolder)
+renameFolderBtn.addEventListener('click', showRenameFolder)
+
 // ─── Album flows: auto-number & find/replace ────────────────────────────────────
 
 async function refreshAfterBulk() {
@@ -1413,8 +1523,7 @@ async function refreshAfterBulk() {
   if (state.sidebarMode === 'tags') await loadLibrary()
   await loadTracks()
   if (state.sidebarMode === 'quality') await renderQualityPanel()
-  const updated = state.tracks.filter(t => state.selectedIds.has(t.id))
-  if (updated.length) populateForm(updated)
+  await fillEditorForm()
   await refreshUndoButton()
 }
 
@@ -1523,7 +1632,7 @@ function currentViewParams(): Record<string, string | number> {
 
 function exportM3u() {
   if (!state.total) { toast('Nothing to export', 'info'); return }
-  const url = api.library.exportM3uUrl(currentViewParams())
+  const url = api.library.exportM3uUrl(viewParams())
   const a = document.createElement('a')
   a.href = url
   a.download = 'tagger-export.m3u'
@@ -1642,6 +1751,20 @@ function onSelectAll() {
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
+
+selectViewBtn.addEventListener('click', async () => {
+  selectViewBtn.disabled = true
+  try {
+    const { ids } = await api.library.trackIds(viewParams())
+    state.selectedIds = new Set(ids)
+    renderTracks()
+    renderEditor()
+  } catch (e) {
+    toast(`Select all failed: ${e}`, 'error')
+  } finally {
+    selectViewBtn.disabled = false
+  }
+})
 
 document.getElementById('sidebar-toggle')!.addEventListener('click', () => {
   appEl.classList.toggle('sidebar-collapsed')
@@ -1982,8 +2105,8 @@ reviewBtn.addEventListener('click', () => openReview(refreshAfterWrite))
 document.getElementById('history-btn')!.addEventListener('click', () => openHistory(refreshAfterWrite))
 
 // Filter selects
-filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; renderTracks() })
-filterFormatEl.addEventListener('change',  () => { state.filterFormat  = filterFormatEl.value;  renderTracks() })
+filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; state.page = 0; loadTracks() })
+filterFormatEl.addEventListener('change',  () => { state.filterFormat  = filterFormatEl.value;  state.page = 0; loadTracks() })
 
 
 // Keyboard shortcuts
@@ -2067,11 +2190,15 @@ document.getElementById('close-editor')!.addEventListener('click', () => {
 })
 
 tagForm.addEventListener('submit', saveTags)
-tagForm.addEventListener('input', (e) => { delete (e.target as HTMLElement).dataset.mixed; updateEditorRenamePreview() })
-
-document.getElementById('revert-btn')!.addEventListener('click', () => {
-  populateForm(state.tracks.filter(t => state.selectedIds.has(t.id)))
+tagForm.addEventListener('input', (e) => {
+  const el = e.target as HTMLElement
+  delete el.dataset.mixed
+  el.dataset.dirty = '1'
+  updateEditorRenamePreview()
 })
+tagForm.addEventListener('change', (e) => { (e.target as HTMLElement).dataset.dirty = '1' })
+
+document.getElementById('revert-btn')!.addEventListener('click', () => { fillEditorForm() })
 
 const debouncedSearch = debounce(async () => {
   state.selectedIds.clear()
@@ -2297,6 +2424,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   try {
     const saved = await api.settings.update(update)
     state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
+    state.libraryRoots = saved.effective_library_roots ?? state.libraryRoots
     renameOnSave = saved.rename_on_save
     renameTemplate = saved.rename_template
     // Refresh lookup status after saving
@@ -2373,7 +2501,9 @@ async function startApp() {
       lookupBtn.title += ' (AcoustID key set but fpcalc not found — install libchromaprint-tools)'
     }
   }).catch(() => {})
+  renderFormatOptions()
   api.settings.get().then(s => {
+    state.libraryRoots = s.effective_library_roots ?? []
     state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
     renameOnSave = s.rename_on_save
     renameTemplate = s.rename_template

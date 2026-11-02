@@ -10,6 +10,10 @@ optional new path (organize / rename-on-save). Writing is one undoable change.
 Each staging action is a Step: it records the entries it replaced, so staged
 work can be undone one action at a time (newest first) before it is written.
 Writing or discarding a track drops it from every step.
+
+Folder moves/renames are staged separately (`staged_dirs`, src -> dst) and
+written as one directory move, so cover art and other non-audio files come
+along. Tracks under a staged folder show its destination as their new path.
 """
 from __future__ import annotations
 
@@ -21,9 +25,9 @@ from pathlib import Path
 
 from core.config import settings
 from core.fileops import (
-    MoveError, move_file, prune_empty_dirs, root_for, same_filesystem,
+    MoveError, move_dir, move_file, prune_empty_dirs, root_for, same_filesystem,
 )
-from core.history import STAGEABLE, log_change, snapshot
+from core.history import STAGEABLE, log_change, repoint_tracks, snapshot
 from core.naming import render_template
 from core.tagger import write_tags
 
@@ -54,7 +58,76 @@ def load(conn, ids: list[int] | None = None) -> dict[int, dict]:
 
 
 def count(conn) -> int:
-    return conn.execute("SELECT COUNT(*) FROM staged").fetchone()[0]
+    """Staged changes: tracks plus folder moves."""
+    return (conn.execute("SELECT COUNT(*) FROM staged").fetchone()[0]
+            + conn.execute("SELECT COUNT(*) FROM staged_dirs").fetchone()[0])
+
+
+# ── Folder moves ──────────────────────────────────────────────────────────────
+
+def load_dirs(conn) -> dict[str, str]:
+    return {r["src"]: r["dst"] for r in conn.execute("SELECT src, dst FROM staged_dirs ORDER BY src")}
+
+
+def moved_path(path: str, dirs: dict[str, str]) -> str | None:
+    """Where path ends up when the staged folder containing it moves."""
+    for src in sorted(dirs, key=len, reverse=True):
+        if path.startswith(src + "/"):
+            return dirs[src] + path[len(src):]
+    return None
+
+
+def _save_dir(conn, src: str, dst: str | None) -> None:
+    if dst is None:
+        conn.execute("DELETE FROM staged_dirs WHERE src = ?", (src,))
+        return
+    conn.execute(
+        "INSERT INTO staged_dirs (src, dst, staged_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(src) DO UPDATE SET dst = excluded.dst, staged_at = excluded.staged_at",
+        (src, dst, time.time()),
+    )
+
+
+def _under(path: str, folder: str) -> bool:
+    return path == folder or path.startswith(folder + "/")
+
+
+def stage_dir(conn, src: str, dst: str, step: "Step | None" = None) -> None:
+    """Stage moving folder src to dst. Raises PlanError when it can't be done."""
+    from api.config import get_library_roots, get_music_dirs
+
+    src, dst = os.path.normpath(src), os.path.normpath(dst)
+    roots = get_library_roots()
+    if not Path(src).is_dir():
+        raise PlanError("folder not found")
+    if src == dst:
+        raise PlanError("that is where it already is")
+    if src in {str(r) for r in roots} or src in {os.path.normpath(d) for d in get_music_dirs()}:
+        raise PlanError("a library root can't be moved or renamed")
+    if _under(dst, src):
+        raise PlanError("can't move a folder inside itself")
+    root = root_for(dst, roots)
+    if root is None or str(root) == dst:
+        raise PlanError("destination must be inside a library root")
+    if Path(dst).exists() and not _same(src, dst):
+        raise PlanError("destination already exists")
+    dirs = load_dirs(conn)
+    for other in dirs:
+        if other != src and (_under(other, src) or _under(src, other)):
+            raise PlanError("a folder above or inside this one is already staged to move")
+        if other != src and dirs[other] == dst:
+            raise PlanError("another staged folder has the same destination")
+    n = len(src) + 1
+    busy = conn.execute(
+        "SELECT COUNT(*) FROM staged s JOIN tracks t ON t.id = s.track_id "
+        "WHERE s.new_path IS NOT NULL AND (t.directory = ? OR substr(t.directory, 1, ?) = ?)",
+        (src, n, src + "/"),
+    ).fetchone()[0]
+    if busy:
+        raise PlanError(f"{busy} track(s) in this folder already have staged moves -- write or discard them first")
+    if step:
+        step.touch_dir(src)
+    _save_dir(conn, src, dst)
 
 
 def effective(row, entry: dict | None) -> dict:
@@ -83,14 +156,21 @@ class Step:
     def __init__(self, conn, summary: str):
         self.conn, self.summary = conn, summary
         self.prev: dict[int, dict | None] = {}
+        self.prev_dirs: dict[str, str | None] = {}
 
     def touch(self, track_id: int) -> None:
         if track_id not in self.prev:
             self.prev[track_id] = load(self.conn, [track_id]).get(track_id)
 
+    def touch_dir(self, src: str) -> None:
+        if src not in self.prev_dirs:
+            self.prev_dirs[src] = load_dirs(self.conn).get(src)
+
     def save(self) -> int | None:
         now = load(self.conn, list(self.prev))
-        changed = {str(t): p for t, p in self.prev.items() if p != now.get(t)}
+        changed: dict = {str(t): p for t, p in self.prev.items() if p != now.get(t)}
+        dirs_now = load_dirs(self.conn)
+        changed.update({DIR_KEY + s: d for s, d in self.prev_dirs.items() if d != dirs_now.get(s)})
         if not changed:
             return None
         if "{fields}" in self.summary:
@@ -99,6 +179,9 @@ class Step:
             "INSERT INTO staged_steps (ts, summary, data) VALUES (?, ?, ?)",
             (time.time(), self.summary, json.dumps(changed)),
         ).lastrowid
+
+
+DIR_KEY = "dir:"  # step keys for folder moves; track keys are the id
 
 
 def _changed_fields(prev: dict, now: dict) -> str:
@@ -135,6 +218,8 @@ def undo_step(conn) -> dict:
         raise ValueError("Nothing staged to undo")
     restored = 0
     for tid, prev in json.loads(r["data"]).items():
+        if tid.startswith(DIR_KEY):
+            continue
         tid = int(tid)
         if not conn.execute("SELECT 1 FROM tracks WHERE id = ?", (tid,)).fetchone():
             continue
@@ -143,16 +228,20 @@ def undo_step(conn) -> dict:
         else:
             _save(conn, tid, prev["tags"], prev["new_path"])
         restored += 1
+    for key, prev in json.loads(r["data"]).items():
+        if key.startswith(DIR_KEY):
+            _save_dir(conn, key[len(DIR_KEY):], prev)
+            restored += 1
     conn.execute("DELETE FROM staged_steps WHERE id = ?", (r["id"],))
     return {"summary": r["summary"], "restored": restored}
 
 
-def _forget(conn, ids: list[int] | None) -> None:
-    """Drop tracks from every step (they were written or discarded)."""
+def _forget(conn, ids: list[int] | None, dirs: list[str] = ()) -> None:
+    """Drop tracks/folders from every step (they were written or discarded)."""
     if ids is None:
         conn.execute("DELETE FROM staged_steps")
         return
-    gone = {str(i) for i in ids}
+    gone = {str(i) for i in ids} | {DIR_KEY + d for d in dirs}
     for r in conn.execute("SELECT id, data FROM staged_steps").fetchall():
         data = json.loads(r["data"])
         kept = {k: v for k, v in data.items() if k not in gone}
@@ -196,7 +285,7 @@ def stage_edit(conn, row, tags: dict, step: Step | None = None) -> None:
 
     stage(conn, row, tags, step=step)
     app = load_settings()
-    if app.rename_on_save:
+    if app.rename_on_save and not moved_path(row["path"], load_dirs(conn)):
         entry = load(conn, [row["id"]]).get(row["id"])
         try:
             dest = plan_path(row, effective(row, entry), app.rename_template, get_library_roots())
@@ -205,39 +294,51 @@ def stage_edit(conn, row, tags: dict, step: Step | None = None) -> None:
         stage(conn, row, new_path=dest, step=step)
 
 
-def discard(conn, ids: list[int] | None = None) -> int:
-    _forget(conn, ids)
-    if ids is None:
-        return conn.execute("DELETE FROM staged").rowcount
-    if not ids:
-        return 0
-    ph = ",".join("?" * len(ids))
-    return conn.execute(f"DELETE FROM staged WHERE track_id IN ({ph})", ids).rowcount
+def discard(conn, ids: list[int] | None = None, dirs: list[str] | None = None) -> int:
+    """Drop staged changes: everything when both are None, else just these."""
+    if ids is None and dirs is None:
+        _forget(conn, None)
+        return (conn.execute("DELETE FROM staged").rowcount
+                + conn.execute("DELETE FROM staged_dirs").rowcount)
+    ids, dirs = ids or [], dirs or []
+    _forget(conn, ids, dirs)
+    n = 0
+    if ids:
+        ph = ",".join("?" * len(ids))
+        n += conn.execute(f"DELETE FROM staged WHERE track_id IN ({ph})", ids).rowcount
+    for d in dirs:
+        n += conn.execute("DELETE FROM staged_dirs WHERE src = ?", (d,)).rowcount
+    return n
 
 
-def apply(conn, ids: list[int] | None = None, summary: str | None = None) -> dict:
+def apply(conn, ids: list[int] | None = None, summary: str | None = None,
+          dirs: list[str] | None = None) -> dict:
     """
-    Write staged changes to the files. Per track: tags first, then the move.
-    Each track is committed on its own, so a failure part-way leaves every
-    written track recorded and every unwritten one still staged.
+    Write staged changes to the files. Per track: tags first, then the move;
+    then folder moves (whole folders). Everything when ids and dirs are None.
+    Each track/folder is committed on its own, so a failure part-way leaves
+    everything written recorded and everything unwritten still staged.
     """
     from api.config import get_library_roots
 
     entries = load(conn, ids)
-    if not entries:
+    staged_dirs = load_dirs(conn)
+    if ids is not None or dirs is not None:
+        staged_dirs = {s: d for s, d in staged_dirs.items() if s in (dirs or [])}
+    if not entries and not staged_dirs:
         return {"applied": 0, "errors": [], "change_id": None}
 
     ph = ",".join("?" * len(entries))
     rows = {
         r["id"]: r
         for r in conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", list(entries)).fetchall()
-    }
+    } if entries else {}
     # Two tracks headed for the same file: refuse both.
     dests = Counter(e["new_path"] for e in entries.values() if e["new_path"])
     roots = get_library_roots()
 
     errors: list[dict] = []
-    snaps: list[dict] = []
+    snaps: dict[int, dict] = {}   # first (pre-change) snapshot per track
     vacated: list[Path] = []
     for tid, entry in entries.items():
         row = rows.get(tid)
@@ -293,17 +394,50 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None) -> dic
         _forget(conn, [tid])
         conn.commit()
         if sets:
-            snaps.append(snap)
+            snaps.setdefault(tid, snap)
+
+    moved_dirs: list[dict] = []
+    for src, dst in staged_dirs.items():
+        problem = None
+        if not Path(src).is_dir():
+            problem = "folder no longer exists"
+        elif Path(dst).exists() and not _same(src, dst):
+            problem = "destination already exists"
+        elif not same_filesystem(src, dst):
+            problem = "destination is on a different filesystem -- outside the mounted library?"
+        if problem:
+            errors.append({"dir": src, "name": Path(src).name, "error": problem})
+            continue
+        n = len(src) + 1
+        under = conn.execute(
+            "SELECT * FROM tracks WHERE directory = ? OR substr(directory, 1, ?) = ?",
+            (src, n, src + "/"),
+        ).fetchall()
+        try:
+            move_dir(src, dst)
+        except (MoveError, OSError) as exc:
+            errors.append({"dir": src, "name": Path(src).name, "error": f"move failed: {exc}"})
+            continue
+        for r in under:
+            snaps.setdefault(r["id"], snapshot(r))
+        repoint_tracks(conn, src, dst)
+        _save_dir(conn, src, None)
+        _forget(conn, [], [src])
+        conn.commit()
+        moved_dirs.append({"src": src, "dst": dst})
+        vacated.append(Path(src).parent)
 
     for d in set(vacated):
         stop = root_for(d, roots) or settings.music_dir
         prune_empty_dirs(d, stop)
 
     n = len(snaps)
-    change_id = log_change(
-        conn, "tag_edit", summary or f"Wrote changes to {n} track{'s' if n != 1 else ''}", snaps,
-    )
-    return {"applied": n, "errors": errors, "change_id": change_id}
+    if not summary:
+        summary = f"Wrote changes to {n} track{'s' if n != 1 else ''}"
+        if moved_dirs:
+            summary += f" ({len(moved_dirs)} folder{'s' if len(moved_dirs) != 1 else ''} moved)"
+    change_id = log_change(conn, "tag_edit", summary, list(snaps.values()), moved_dirs)
+    return {"applied": n, "folders": len(moved_dirs), "errors": errors, "change_id": change_id}
 
 
 def _same(a: str, b: str) -> bool:

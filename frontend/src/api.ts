@@ -33,13 +33,19 @@ export interface Track {
   tagged_at: number | null
   // Edits held for review (null when none). The UI overlays these on the
   // fields above and keeps the on-file values in _orig.
-  staged?: StagedEntry | null
+  staged?: (StagedEntry & { via_folder?: boolean }) | null
   _orig?: Record<string, string | null>
 }
 
 export interface StagedEntry {
   tags: Record<string, string | null>
   new_path: string | null
+}
+
+export interface StagedDir {
+  src: string
+  dst: string
+  tracks: number
 }
 
 export interface StagedTrack {
@@ -51,7 +57,7 @@ export interface StagedTrack {
   changes: { field: string; old: string | null; new: string | null }[]
 }
 
-export interface WriteError { id: number; name?: string; error: string }
+export interface WriteError { id?: number; dir?: string; name?: string; error: string }
 
 /** What an editing call did: held for review, or written straight away. */
 export interface EditResult {
@@ -227,6 +233,14 @@ export const api = {
       const qs = new URLSearchParams(params as Record<string, string>).toString()
       return request<TrackList>('GET', `/api/library/tracks${qs ? '?' + qs : ''}`)
     },
+    trackIds: (params: Record<string, string | number> = {}) => {
+      const qs = new URLSearchParams(params as Record<string, string>).toString()
+      return request<{ ids: number[] }>('GET', `/api/library/track-ids${qs ? '?' + qs : ''}`)
+    },
+    formats: () => request<string[]>('GET', '/api/library/formats'),
+    summary: (ids: number[]) =>
+      request<{ count: number; values: Record<string, string>; mixed: string[] }>(
+        'POST', '/api/library/summary', { track_ids: ids }),
     search: (q: string, limit = 50, offset = 0) =>
       request<TrackList>('GET', `/api/library/search?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
     track: (id: number) => request<Track>('GET', `/api/library/track/${id}`),
@@ -271,14 +285,15 @@ export const api = {
   },
 
   staged: {
-    list: () => request<{ count: number; tracks: StagedTrack[] }>('GET', '/api/staged'),
+    list: () => request<{ count: number; tracks: StagedTrack[]; dirs: StagedDir[] }>('GET', '/api/staged'),
     count: () => request<StagedCount>('GET', '/api/staged/count'),
     undo: () => request<{ summary: string; restored: number }>('POST', '/api/staged/undo'),
     apply: (trackIds?: number[]) =>
-      request<{ applied: number; errors: WriteError[]; change_id: number | null }>(
+      request<{ applied: number; folders?: number; errors: WriteError[]; change_id: number | null }>(
         'POST', '/api/staged/apply', { track_ids: trackIds ?? null }),
-    discard: (trackIds?: number[]) =>
-      request<{ discarded: number }>('POST', '/api/staged/discard', { track_ids: trackIds ?? null }),
+    discard: (trackIds?: number[], dirs?: string[]) =>
+      request<{ discarded: number }>('POST', '/api/staged/discard',
+        { track_ids: trackIds ?? null, dirs: dirs ?? null }),
   },
 
   jobs: {
@@ -292,6 +307,8 @@ export const api = {
   fs: {
     tree: (path?: string) =>
       request<TreeResult>('GET', `/api/fs/tree${path ? '?path=' + encodeURIComponent(path) : ''}`),
+    move: (src: string, dst: string) => request<EditResult>('POST', '/api/fs/move', { src, dst }),
+    rename: (path: string, name: string) => request<EditResult>('POST', '/api/fs/rename', { path, name }),
   },
 
   settings: {

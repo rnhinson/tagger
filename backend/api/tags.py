@@ -174,8 +174,12 @@ def reorganize(req: Reorganize):
         found = {r["id"] for r in rows}
         errors += [{"id": t, "error": "not found"} for t in req.track_ids if t not in found]
         pending = staging.load(conn, list(found))
+        staged_dirs = staging.load_dirs(conn)
         step = staging.Step(conn, f"Organize {len(rows)} files")
         for row in rows:
+            if staged_dirs and staging.moved_path(row["path"], staged_dirs):
+                errors.append({"id": row["id"], "error": "its folder is staged to move -- write that first"})
+                continue
             try:
                 dest = staging.plan_path(
                     row, staging.effective(row, pending.get(row["id"])), app.rename_template, roots,

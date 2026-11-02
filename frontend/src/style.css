@@ -1072,3 +1072,9 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .history-badge { font-size: 11px; color: var(--text-muted); }
 
 #setting-library-roots { font-family: ui-monospace, monospace; font-size: 12px; }
+
+.review-warn { color: var(--staged); font-size: 12px; margin: 0 0 6px; }
+.modal-card.modal-wide { width: 520px; }
+.modal-path { font-size: 12px; color: var(--text-muted); word-break: break-all; }
+.btn-link { background: none; border: none; color: var(--accent); padding: 4px 6px; }
+.btn-link:hover:not(:disabled) { text-decoration: underline; }
