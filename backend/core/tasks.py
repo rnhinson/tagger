@@ -10,18 +10,44 @@ import uuid
 from typing import Any
 
 from core.database import db
+from core.scanner import ScanCancelled
 
 logger = logging.getLogger("tagger.scan")
 
 
-def create_scan_job() -> str:
+_CANCEL: set[str] = set()
+
+
+def create_scan_job(directory: str | None = None) -> str:
     job_id = str(uuid.uuid4())
     with db() as conn:
         conn.execute(
-            "INSERT INTO scan_jobs (id, status, started_at) VALUES (?, 'pending', ?)",
-            (job_id, time.time()),
+            "INSERT INTO scan_jobs (id, status, started_at, directory) VALUES (?, 'pending', ?, ?)",
+            (job_id, time.time(), directory),
         )
     return job_id
+
+
+def request_cancel(job_id: str) -> bool:
+    """Ask a pending/running scan to stop at its next file."""
+    job = get_job(job_id)
+    if not job or job["status"] not in ("pending", "running"):
+        return False
+    _CANCEL.add(job_id)
+    return True
+
+
+def mark_interrupted() -> int:
+    """
+    At startup: a job still pending/running belongs to a process that died
+    (pod restart). Left as is it would block every later scan as "already
+    running".
+    """
+    with db() as conn:
+        return conn.execute(
+            "UPDATE scan_jobs SET status = 'interrupted', finished_at = ? "
+            "WHERE status IN ('pending', 'running')", (time.time(),)
+        ).rowcount
 
 
 def get_job(job_id: str) -> dict | None:
@@ -107,22 +133,30 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
     def progress(scanned: int, total: int) -> None:
         _update_job(job_id, scanned=scanned, total=total)
 
+    def phase(name: str) -> None:
+        _update_job(job_id, phase=name)
+
     logger.info("scan %s started (%s)", job_id, directory or "full library")
     started = time.time()
     try:
         total, upserted = await asyncio.to_thread(
             scan_library, progress, app_settings.scan_tags, music_dirs,
-            prune_under, app_settings.scan_exclude,
+            prune_under, app_settings.scan_exclude, lambda: job_id in _CANCEL, phase,
         )
         _update_job(
             job_id,
             status="done",
+            phase=None,
             finished_at=time.time(),
             total=total,
-            scanned=upserted,
+            scanned=total,
+            changed=upserted,
         )
         logger.info("scan %s done: %d found, %d upserted in %.1fs",
                     job_id, total, upserted, time.time() - started)
+    except ScanCancelled:
+        _update_job(job_id, status="cancelled", phase=None, finished_at=time.time())
+        logger.info("scan %s cancelled", job_id)
     except Exception as exc:
         _update_job(
             job_id,
@@ -131,3 +165,5 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
             error=str(exc),
         )
         logger.exception("scan %s failed: %s", job_id, exc)
+    finally:
+        _CANCEL.discard(job_id)

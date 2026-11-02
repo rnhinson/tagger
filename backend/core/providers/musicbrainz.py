@@ -138,3 +138,84 @@ class MusicBrainzProvider(MetadataProvider):
                 "track_count": medium.get("track-count"),
             })
         return out
+
+
+# ── Releases (album-level matching, core/albummatch.py) ───────────────────────
+
+_RELEASE_CACHE: dict[str, tuple[float, dict]] = {}
+_RELEASE_TTL = 900.0
+
+
+def search_releases(album: str, artist: str | None, limit: int = 15) -> list[dict]:
+    """Release candidates for an album title (+ artist), best first."""
+    params = {"release": album or "", "limit": limit}
+    if artist:
+        params["artist"] = artist
+    try:
+        resp = _with_retry(musicbrainzngs.search_releases, **params)
+    except Exception:
+        return []
+    out = []
+    for rel in resp.get("release-list", []):
+        media = rel.get("medium-list") or []
+        out.append({
+            "mb_album_id": rel.get("id"),
+            "album": rel.get("title"),
+            "artist": rel.get("artist-credit-phrase"),
+            "date": rel.get("date"),
+            "country": rel.get("country"),
+            "formats": sorted({m.get("format") for m in media if m.get("format")}),
+            "discs": len(media) or None,
+            "tracks": int(rel["medium-track-count"]) if rel.get("medium-track-count") else
+                      sum(int(m.get("track-count") or 0) for m in media) or None,
+            "type": (rel.get("release-group") or {}).get("primary-type"),
+            "score": int(rel.get("ext:score", 0)) / 100.0,
+        })
+    return out
+
+
+def get_release(mb_album_id: str) -> dict | None:
+    """One release with every track (cached: the match and the apply both need it)."""
+    hit = _RELEASE_CACHE.get(mb_album_id)
+    if hit and time.time() - hit[0] < _RELEASE_TTL:
+        return hit[1]
+    try:
+        resp = _with_retry(musicbrainzngs.get_release_by_id, mb_album_id,
+                           includes=["recordings", "artist-credits", "release-groups", "media"])
+    except Exception:
+        return None
+    rel = resp.get("release") or {}
+    credits = [c for c in rel.get("artist-credit") or [] if isinstance(c, dict)]
+    aa_id = credits[0]["artist"]["id"] if credits and credits[0].get("artist") else None
+    rg = rel.get("release-group") or {}
+    out = {
+        "mb_album_id": rel.get("id"),
+        "album": rel.get("title"),
+        "album_artist": rel.get("artist-credit-phrase"),
+        "mb_album_artist_id": aa_id,
+        "date": rel.get("date"),
+        "original_year": (rg.get("first-release-date") or "")[:4] or None,
+        "year": (rel.get("date") or "")[:4] or None,
+        "country": rel.get("country"),
+        "tracks": [],
+    }
+    for medium in rel.get("medium-list") or []:
+        disc = int(medium.get("position") or 1)
+        for t in medium.get("track-list") or []:
+            rec = t.get("recording") or {}
+            rcred = [c for c in rec.get("artist-credit") or [] if isinstance(c, dict)]
+            length = t.get("length") or rec.get("length")
+            out["tracks"].append({
+                "key": f"{disc}-{t.get('position')}",
+                "disc": disc,
+                "position": int(t.get("position") or 0),
+                "number": t.get("number"),
+                "title": t.get("title") or rec.get("title"),
+                "artist": t.get("artist-credit-phrase") or rec.get("artist-credit-phrase") or out["album_artist"],
+                "mb_artist_id": rcred[0]["artist"]["id"] if rcred and rcred[0].get("artist") else aa_id,
+                "mb_track_id": rec.get("id"),
+                "duration": int(length) / 1000 if length else None,
+            })
+    out["discs"] = len({t["disc"] for t in out["tracks"]})
+    _RELEASE_CACHE[mb_album_id] = (time.time(), out)
+    return out

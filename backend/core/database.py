@@ -48,6 +48,11 @@ def _migrate(conn) -> None:
             conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
     # Staging steps record what they changed TO (for Review), not just what
     # they replaced (for undo). Steps from before this have no details.
+    # Scan jobs: scope, phase and changed-file count, for the Background page.
+    jobs = {r[1] for r in conn.execute("PRAGMA table_info(scan_jobs)")}
+    for col, decl in (("directory", "TEXT"), ("phase", "TEXT"), ("changed", "INTEGER")):
+        if jobs and col not in jobs:
+            conn.execute(f"ALTER TABLE scan_jobs ADD COLUMN {col} {decl}")
     steps = {r[1] for r in conn.execute("PRAGMA table_info(staged_steps)")}
     if "after" not in steps:
         conn.execute("ALTER TABLE staged_steps ADD COLUMN after TEXT")

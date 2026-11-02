@@ -6,7 +6,7 @@ export const APP_HTML = `
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
     </div>
     <div class="topbar-actions">
-      <span id="scan-status" class="scan-status"></span>
+      <button id="scan-status" class="scan-status" type="button" title="Scan progress — click for details" hidden></button>
       <button id="review-btn" class="btn btn-review btn-sm" title="Review staged changes, then write them to the files" hidden></button>
       <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
       <button id="cleanup-btn" class="btn btn-ghost btn-sm" title="Standardize tag separators (Folk/Celtic → Folk; Celtic)">Clean up</button>
@@ -16,12 +16,18 @@ export const APP_HTML = `
     </div>
   </header>
 
-  <aside id="settings-sidebar" class="settings-sidebar">
+  <aside id="settings-sidebar" class="settings-sidebar settings-page">
     <div class="settings-sidebar-header">
-      <span class="settings-sidebar-title">Settings</span>
+      <nav class="settings-tabs" role="tablist">
+        <button class="settings-tab active" data-tab="settings" role="tab">Settings</button>
+        <button class="settings-tab" data-tab="background" role="tab">Background <span id="bg-dot" class="bg-dot" hidden></span></button>
+        <button class="settings-tab" data-tab="about" role="tab">About</button>
+      </nav>
       <button id="settings-modal-close" class="btn btn-ghost btn-icon" aria-label="Close settings">✕</button>
     </div>
-    <div class="settings-sidebar-body">
+    <div id="pane-background" class="settings-sidebar-body settings-pane" hidden></div>
+    <div id="pane-about" class="settings-sidebar-body settings-pane" hidden></div>
+    <div id="pane-settings" class="settings-sidebar-body settings-pane">
       <div class="settings-section">
         <div class="settings-section-title">Libraries</div>
         <p class="settings-hint">With library roots set (below), a full scan covers only the libraries switched on here. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written.</p>
@@ -123,7 +129,7 @@ export const APP_HTML = `
         </label>
       </div>
     </div>
-    <div class="settings-sidebar-footer">
+    <div class="settings-sidebar-footer" id="settings-footer">
       <button id="settings-logout" class="btn btn-ghost" hidden>Log out</button>
       <button id="settings-save" class="btn btn-primary">Save</button>
     </div>
@@ -200,6 +206,8 @@ export const APP_HTML = `
         <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
         <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
         <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
+        <button id="mb-album-btn" class="btn btn-ghost btn-sm" title="Match the selected tracks to a MusicBrainz release, track by track — reviewed, then staged">Match album…</button>
+        <button id="lyrics-btn" class="btn btn-ghost btn-sm" title="Fetch lyrics (synced when available) from LRCLIB — reviewed, then staged">Lyrics…</button>
         <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
         <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
         <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
