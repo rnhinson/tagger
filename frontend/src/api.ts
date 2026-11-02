@@ -286,12 +286,32 @@ export function setUnauthorizedHandler(fn: () => void): void {
   unauthorizedHandler = fn
 }
 
+/**
+ * Behind an auth proxy (Pomerium), an expired session answers every API call
+ * with a redirect to the sign-in page. fetch can't follow that cross-origin,
+ * so without this each call -- and every 1-2 s poll -- fails as "Failed to
+ * fetch". `redirect: 'manual'` turns it into a detectable opaqueredirect: we
+ * stop calling the API and show one "sign in again" banner instead.
+ */
+export class SessionExpired extends Error {
+  constructor() { super('Your sign-in has expired') }
+}
+export let sessionExpired = false
+let sessionExpiredHandler: (() => void) | null = null
+export function onSessionExpired(fn: () => void) { sessionExpiredHandler = fn }
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  if (sessionExpired) throw new SessionExpired()
   const res = await fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
+    redirect: 'manual',
   })
+  if (res.type === 'opaqueredirect') {
+    if (!sessionExpired) { sessionExpired = true; sessionExpiredHandler?.() }
+    throw new SessionExpired()
+  }
   if (!res.ok) {
     // A 401 on anything other than the login attempt means the session lapsed.
     if (res.status === 401 && !url.startsWith('/api/auth/login')) unauthorizedHandler?.()
