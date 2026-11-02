@@ -2,8 +2,8 @@ import './style.css'
 import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS } from './state'
-import { COL_DEFS } from './columns'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
+import { COL_DEFS, orderedCols } from './columns'
 import {
   trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
@@ -34,6 +34,26 @@ const tagEditor      = document.getElementById('tag-editor')!
 const tagForm        = document.getElementById('tag-form') as HTMLFormElement
 // Genre on a multi-track selection: chips (add/remove values per track)
 // instead of one string that would overwrite every track's genres.
+// Read-only tracks (e.g. a reference mount): say so, and don't offer Save.
+const readOnlyNote = document.createElement('div')
+readOnlyNote.className = 'readonly-note'
+readOnlyNote.hidden = true
+tagForm.prepend(readOnlyNote)
+const saveBtn = tagForm.querySelector<HTMLButtonElement>('button[type=submit]')!
+function setReadOnly(n: number, of: number) {
+  readOnlyNote.hidden = n === 0
+  tagForm.classList.toggle('form-readonly', n > 0)
+  for (const el of tagForm.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement | HTMLSelectElement>(
+    'input, textarea, select, button')) {
+    if (el.closest('.spectro-section') || el.id === 'spectro-btn') continue   // viewing aids stay usable
+    el.disabled = n > 0
+  }
+  readOnlyNote.textContent = n === of
+    ? `🔒 Read-only — ${of === 1 ? 'this file is' : `these ${of.toLocaleString()} files are`} on a read-only folder and can't be changed.`
+    : `🔒 ${n.toLocaleString()} of ${of.toLocaleString()} selected tracks are read-only and can't be changed. Deselect them to save.`
+  saveBtn.hidden = n > 0
+}
+
 const genreChips = new ValueChips('genres')
 const genreInput = tagForm.elements.namedItem('genre') as HTMLInputElement
 genreInput.closest('.field-label')!.after(genreChips.el)
@@ -371,7 +391,7 @@ function renderViewMode() {
 
 function renderColPicker() {
   colPickerEl.innerHTML = ''
-  for (const col of COL_DEFS) {
+  for (const col of orderedCols()) {
     const label = document.createElement('label')
     label.className = 'col-picker-item'
     const cb = document.createElement('input')
@@ -437,7 +457,7 @@ function navigateTrack(dir: 1 | -1) {
 function renderColHeaders() {
   const qualityTh = state.visibleCols.has('quality') ? '<th class="col-quality"></th>' : ''
   trackTheadRow.innerHTML = `${qualityTh}<th class="col-check"><input type="checkbox" id="select-all" /></th>`
-  for (const col of COL_DEFS) {
+  for (const col of orderedCols()) {
     if (col.key === 'quality') continue
     if (!state.visibleCols.has(col.key)) continue
     const th = document.createElement('th')
@@ -449,7 +469,14 @@ function renderColHeaders() {
       label += state.sortDir === 'asc' ? ' ↑' : ' ↓'
     }
     th.textContent = label
-    th.addEventListener('click', () => {
+    th.dataset.col = col.key
+    th.draggable = true
+    const grip = document.createElement('span')
+    grip.className = 'col-resizer'
+    grip.title = 'Drag to resize · double-click to reset all widths'
+    th.appendChild(grip)
+    th.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).classList.contains('col-resizer')) return
       if (state.sortKey === col.key) {
         state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'
       } else {
@@ -463,7 +490,118 @@ function renderColHeaders() {
     trackTheadRow.appendChild(th)
   }
   selectAll()?.addEventListener('change', onSelectAll)
+  applyColWidths()
 }
+
+// ─── Column reordering ────────────────────────────────────────────────────────
+// Drag a header onto another: it lands before or after it (whichever half of
+// the target the pointer is over). The order persists and the Columns menu
+// follows it.
+
+let draggingCol: string | null = null
+
+trackTheadRow.addEventListener('dragstart', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!th) return
+  draggingCol = th.dataset.col!
+  e.dataTransfer!.effectAllowed = 'move'
+  e.dataTransfer!.setData('text/plain', draggingCol)
+  th.classList.add('col-dragging')
+})
+
+trackTheadRow.addEventListener('dragover', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!draggingCol || !th || th.dataset.col === draggingCol) return
+  e.preventDefault()
+  const r = th.getBoundingClientRect()
+  const after = e.clientX > r.left + r.width / 2
+  trackTheadRow.querySelectorAll('.col-drop-before, .col-drop-after').forEach(x => x.classList.remove('col-drop-before', 'col-drop-after'))
+  th.classList.add(after ? 'col-drop-after' : 'col-drop-before')
+})
+
+trackTheadRow.addEventListener('drop', (e) => {
+  const th = (e.target as HTMLElement).closest<HTMLElement>('th[data-col]')
+  if (!draggingCol || !th || th.dataset.col === draggingCol) return
+  e.preventDefault()
+  const after = th.classList.contains('col-drop-after')
+  const keys = orderedCols().map(c => c.key).filter(k => k !== draggingCol)
+  keys.splice(keys.indexOf(th.dataset.col!) + (after ? 1 : 0), 0, draggingCol)
+  saveColOrder(keys)
+  renderColHeaders()
+  renderTracks()
+  if (state.colPickerOpen) renderColPicker()
+})
+
+trackTheadRow.addEventListener('dragend', () => {
+  draggingCol = null
+  trackTheadRow.querySelectorAll('.col-dragging, .col-drop-before, .col-drop-after')
+    .forEach(x => x.classList.remove('col-dragging', 'col-drop-before', 'col-drop-after'))
+})
+
+// ─── Column resizing ──────────────────────────────────────────────────────────
+// Dragging a header's right edge sets that column's width in px. The first
+// drag freezes every column at its current width (fixed layout), so one
+// column grows or shrinks without the others reflowing; the table can then
+// be wider than the pane and scrolls sideways. Double-click resets.
+
+let colWidths = loadColWidths()
+const trackTable = trackTheadRow.closest('table') as HTMLTableElement
+
+function dataThs(): HTMLTableCellElement[] {
+  return [...trackTheadRow.querySelectorAll<HTMLTableCellElement>('th')]
+}
+
+function applyColWidths() {
+  const ths = dataThs()
+  if (!Object.keys(colWidths).length) {
+    trackTable.style.tableLayout = ''; trackTable.style.width = ''
+    ths.forEach(th => { th.style.width = '' })
+    return
+  }
+  let total = 0
+  for (const th of ths) {
+    const key = th.dataset.col
+    // Unsized columns (new, or the check/quality cells) keep their current width.
+    const w = (key && colWidths[key]) || th.getBoundingClientRect().width || 80
+    th.style.width = `${w}px`
+    total += w
+  }
+  trackTable.style.tableLayout = 'fixed'
+  trackTable.style.width = `${total}px`
+}
+
+trackTheadRow.addEventListener('mousedown', (e) => {
+  const grip = e.target as HTMLElement
+  if (!grip.classList.contains('col-resizer')) return
+  e.preventDefault()
+  const th = grip.parentElement as HTMLTableCellElement
+  if (!Object.keys(colWidths).length) {
+    for (const h of dataThs()) if (h.dataset.col) colWidths[h.dataset.col] = Math.round(h.getBoundingClientRect().width)
+    applyColWidths()
+  }
+  const key = th.dataset.col!
+  const startX = e.clientX, startW = th.getBoundingClientRect().width
+  document.body.classList.add('col-resizing')
+  const move = (ev: MouseEvent) => {
+    colWidths[key] = Math.max(40, Math.round(startW + ev.clientX - startX))
+    applyColWidths()
+  }
+  const up = () => {
+    document.removeEventListener('mousemove', move)
+    document.removeEventListener('mouseup', up)
+    document.body.classList.remove('col-resizing')
+    saveColWidths(colWidths)
+  }
+  document.addEventListener('mousemove', move)
+  document.addEventListener('mouseup', up)
+})
+
+trackTheadRow.addEventListener('dblclick', (e) => {
+  if (!(e.target as HTMLElement).classList.contains('col-resizer')) return
+  colWidths = {}
+  saveColWidths(colWidths)
+  applyColWidths()
+})
 
 function renderTracks() {
   trackTbody.innerHTML = ''
@@ -489,7 +627,7 @@ function renderTracks() {
   trackCount.textContent = `${state.total.toLocaleString()} track${state.total !== 1 ? 's' : ''}`
     + (state.filterFormat || state.filterQuality ? ' (filtered)' : '')
 
-  const visibleCols = COL_DEFS.filter(c => state.visibleCols.has(c.key))
+  const visibleCols = orderedCols().filter(c => state.visibleCols.has(c.key))
 
   for (const t of displayedTracks) {
     const selected = state.selectedIds.has(t.id)
@@ -508,7 +646,11 @@ function renderTracks() {
     const qualityCell = state.visibleCols.has('quality')
       ? `<td class="col-quality"><span class="quality-dot quality-dot-${q}" title="${QUALITY_TITLES[q]}"></span></td>`
       : ''
-    let cells = `${qualityCell}<td class="col-check"><input type="checkbox"${selected ? ' checked' : ''} /></td>`
+    // Read-only: no checkbox -- it can be opened (view only), never bulk-selected.
+    const check = t.read_only ? '<span class="ro-lock" title="Read-only — view only">🔒</span>'
+      : `<input type="checkbox"${selected ? ' checked' : ''} />`
+    let cells = `${qualityCell}<td class="col-check">${check}</td>`
+    if (t.read_only) tr.classList.add('row-readonly')
     for (const col of visibleCols) {
       if (col.key === 'quality') continue
       const was = t._orig && col.key in t._orig ? t._orig[col.key] : undefined
@@ -539,13 +681,15 @@ function renderTracks() {
 
 function updateBulkBar() {
   const n = state.selectedIds.size
-  bulkActions.hidden = n === 0
+  // A read-only track is only ever selected alone, to view: no bulk actions.
+  bulkActions.hidden = n === 0 || state.tracks.some(t => t.read_only && state.selectedIds.has(t.id))
   const offPage = n - state.tracks.filter(t => state.selectedIds.has(t.id)).length
   selectionCount.textContent = offPage > 0
     ? `${n.toLocaleString()} selected (${offPage.toLocaleString()} on other pages)`
     : `${n.toLocaleString()} selected`
   // Whole page selected but the view is bigger: offer the rest.
-  const pageAll = state.tracks.length > 0 && state.tracks.every(t => state.selectedIds.has(t.id))
+  const pageAll = state.tracks.some(t => !t.read_only)
+    && state.tracks.every(t => t.read_only || state.selectedIds.has(t.id))
   selectViewBtn.hidden = !(pageAll && state.total > n)
   selectViewBtn.textContent = `Select all ${state.total.toLocaleString()} in this view`
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
@@ -734,11 +878,15 @@ const compilationCheckbox = () => tagForm.elements.namedItem('compilation') as H
 let formToken = 0
 async function fillEditorForm() {
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
-  if (sel.length === state.selectedIds.size) { populateForm(sel); return }
+  if (sel.length === state.selectedIds.size) {
+    setReadOnly(sel.filter(t => t.read_only).length, sel.length)
+    populateForm(sel); return
+  }
   const token = ++formToken
   try {
     const sum = await api.library.summary([...state.selectedIds])
     if (token !== formToken) return
+    setReadOnly(sum.read_only ?? 0, sum.count)
     const fake = {} as Record<string, string | null>
     for (const [k, v] of Object.entries(sum.values)) fake[k] = v
     // Two pseudo-tracks that differ exactly on the mixed fields.
@@ -1927,7 +2075,9 @@ async function undoLast() {
 function onSelectAll() {
   const sa = selectAll()
   if (!sa) return
-  state.tracks.forEach(t => sa.checked ? state.selectedIds.add(t.id) : state.selectedIds.delete(t.id))
+  state.tracks.forEach(t => {
+    if (sa.checked && !t.read_only) state.selectedIds.add(t.id); else state.selectedIds.delete(t.id)
+  })
   renderTracks()
   renderEditor()
 }
@@ -2182,17 +2332,25 @@ trackTbody.addEventListener('click', (e) => {
   if (!tr) return
   const id = parseInt(tr.dataset.id!, 10)
   const isCheckbox = (e.target as HTMLElement).matches('input[type=checkbox]')
-  const cb = tr.querySelector<HTMLInputElement>('input[type=checkbox]')!
+  const cb = tr.querySelector<HTMLInputElement>('input[type=checkbox]')
+  const readOnly = new Set(state.tracks.filter(t => t.read_only).map(t => t.id))
 
-  if (e.shiftKey && state.selectedIds.size > 0) {
+  if (readOnly.has(id) && !isCheckbox) {
+    // View only, and only on its own.
+    const only = state.selectedIds.size === 1 && state.selectedIds.has(id)
+    state.selectedIds.clear()
+    if (!only) state.selectedIds.add(id)
+  } else if (e.shiftKey && state.selectedIds.size > 0) {
     const rows  = [...trackTbody.querySelectorAll<HTMLTableRowElement>('tr')]
     const ids   = rows.map(r => parseInt(r.dataset.id!, 10))
     const idArr = [...state.selectedIds]
     const last  = idArr[idArr.length - 1]
     const from = ids.indexOf(last), to = ids.indexOf(id)
     const [lo, hi] = from < to ? [from, to] : [to, from]
-    ids.slice(lo, hi + 1).forEach(i => state.selectedIds.add(i))
-  } else if (isCheckbox) {
+    ids.slice(lo, hi + 1).forEach(i => { if (!readOnly.has(i)) state.selectedIds.add(i) })
+    for (const i of readOnly) state.selectedIds.delete(i)
+  } else if (isCheckbox && cb) {
+    for (const i of readOnly) state.selectedIds.delete(i)
     cb.checked ? state.selectedIds.add(id) : state.selectedIds.delete(id)
   } else {
     if (state.selectedIds.has(id) && state.selectedIds.size === 1) {
@@ -2438,6 +2596,44 @@ function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
   return document.querySelectorAll<HTMLInputElement>('#scan-tags-list input[data-tag]')
 }
 
+const librariesListEl = document.getElementById('libraries-list') as HTMLUListElement
+
+async function renderLibraries() {
+  try {
+    const libs = await api.settings.libraries()
+    librariesListEl.innerHTML = libs.length ? libs.map(l => `
+      <li class="library-row${l.active ? '' : ' library-off'}">
+        <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
+          <span>${l.writable ? '' : '🔒 '}${esc(l.name)}</span></label>
+        <span class="library-meta" title="${esc(l.path)}">${l.active ? `${l.tracks.toLocaleString()} tracks` : 'off'}</span>
+      </li>`).join('')
+      : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
+  } catch (e) {
+    librariesListEl.innerHTML = `<li class="settings-hint">Failed to load libraries: ${esc(String(e))}</li>`
+  }
+}
+
+librariesListEl.addEventListener('change', async (e) => {
+  const cb = e.target as HTMLInputElement
+  if (!cb.dataset.path) return
+  cb.disabled = true
+  try {
+    const r = await api.settings.setLibrary(cb.dataset.path, cb.checked)
+    if (r.active) {
+      toast(r.job_id ? 'Library on — scanning it now' : 'Library on — it will be included in the next scan', 'success')
+      if (r.job_id) pollScan(r.job_id)
+    } else {
+      toast(`Library off — ${(r.removed ?? 0).toLocaleString()} tracks removed from Tagger (files untouched)`, 'success')
+      state.tagValues = new Map()
+      await refreshAfterBulk()
+    }
+  } catch (err) {
+    toast(`Failed: ${err}`, 'error'); cb.checked = !cb.checked
+  } finally {
+    await renderLibraries()
+  }
+})
+
 async function openSettings() {
   try {
     const [s, status, rgStatus] = await Promise.all([
@@ -2463,6 +2659,7 @@ async function openSettings() {
     getScanTagCheckboxes().forEach(cb => {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
+    renderLibraries()
     musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
     localMusicDirs = [...(s.music_dirs ?? [])]
     renderMusicDirsList()

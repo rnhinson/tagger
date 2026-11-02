@@ -12,6 +12,30 @@ export function loadColPrefs(): Set<string> {
   return new Set(DEFAULT_COLS)
 }
 
+const ORDER_KEY = 'tagger_col_order'
+
+export function loadColOrder(): string[] {
+  try { return JSON.parse(localStorage.getItem(ORDER_KEY) || '[]') } catch { return [] }
+}
+
+export function saveColOrder(keys: string[]): void {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(keys)) } catch { /* storage blocked */ }
+}
+
+const WIDTHS_KEY = 'tagger_col_widths'
+
+/** Column widths (px) the user dragged; empty = the stylesheet's defaults. */
+export function loadColWidths(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(WIDTHS_KEY) || '{}') } catch { return {} }
+}
+
+export function saveColWidths(w: Record<string, number>): void {
+  try {
+    if (Object.keys(w).length) localStorage.setItem(WIDTHS_KEY, JSON.stringify(w))
+    else localStorage.removeItem(WIDTHS_KEY)
+  } catch { /* storage blocked */ }
+}
+
 export function saveColPrefs(cols: Set<string>): void {
   localStorage.setItem(COLS_KEY, JSON.stringify([...cols]))
 }

@@ -378,7 +378,7 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .col-genre  { width: 100px; }
 .col-format { width: 56px; font-size: 11px; color: var(--text-muted); font-weight: 500; }
 .col-dur    { width: 58px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.col-source { width: 120px; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-source { width: 220px; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .track-table input[type=checkbox] { cursor: pointer; accent-color: var(--accent); }
 
@@ -1233,3 +1233,33 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .ma-move { display: flex; gap: 2px; }
 .ma-pick { display: flex; cursor: pointer; }
 .ma-clashes { padding: 8px 12px; font-size: 12px; }
+
+/* ── Resizable columns ────────────────────────────────────────────────────── */
+.track-table th { position: relative; overflow: hidden; text-overflow: ellipsis; }
+.col-resizer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize;
+  border-right: 2px solid transparent;
+}
+.track-table th:hover .col-resizer { border-right-color: var(--border); }
+.col-resizer:hover, body.col-resizing .col-resizer { border-right-color: var(--accent) !important; }
+body.col-resizing { cursor: col-resize; user-select: none; }
+
+/* ── Libraries (settings) and read-only ───────────────────────────────────── */
+.libraries-list { list-style: none; margin: 0; padding: 0; }
+.library-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.library-off .settings-toggle span { color: var(--text-muted); }
+.library-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.readonly-note {
+  font-size: 12px; padding: 6px 8px; border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--text);
+}
+
+/* ── Column reordering + read-only rows ───────────────────────────────────── */
+.track-table th[draggable=true] { cursor: grab; }
+.track-table th.col-dragging { opacity: .4; }
+.track-table th.col-drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.track-table th.col-drop-after  { box-shadow: inset -3px 0 0 var(--accent); }
+.ro-lock { font-size: 11px; opacity: .8; }
+.row-readonly td { color: var(--text-muted); }
+.tag-form.form-readonly input:disabled, .tag-form.form-readonly textarea:disabled { opacity: .75; cursor: default; }
