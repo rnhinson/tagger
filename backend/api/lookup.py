@@ -240,7 +240,9 @@ async def album_match(req: AlbumMatch):
     for t in sorted(tracks, key=lambda t: (albummatch._int(t.get("disc_number")) or 1,
                                            albummatch._int(t.get("track_number")), t["filename"])):
         key, sc = pairs[t["id"]]
+        mb = next((r for r in rel["tracks"] if r["key"] == key), None)
         items.append({"id": t["id"], "filename": t["filename"], "title": t.get("title"),
+                      "title_similarity": round(albummatch.title_similarity(t, mb), 3) if mb else None,
                       "artist": t.get("artist"), "track_number": t.get("track_number"),
                       "disc_number": t.get("disc_number"), "duration": t.get("duration"),
                       "key": key, "score": sc})

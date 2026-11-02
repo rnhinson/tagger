@@ -78,3 +78,11 @@ def test_quality_counts_unmatched_tracks_as_zero(client, lib, monkeypatch):
     a = _insert(lib / "Shared" / "x" / "1.mp3", title="Come Together", track_number="1", duration=259.0)
     r = client.post("/api/lookup/album/score", json={"track_ids": [a], "mb_album_id": REL_ID}).json()
     assert (r["matched"], r["local"], r["release_tracks"]) == (1, 1, 3) and r["quality"] > 0.9
+
+
+def test_number_and_length_alone_never_pair_without_a_title_match():
+    local = [{"id": 1, "title": "Her Majesty", "track_number": "1", "duration": 259.9},   # #1 + Come Together's length
+             {"id": 2, "title": "", "filename": "02 - Somthing.mp3", "track_number": "", "duration": None}]
+    m = albummatch.match(local, RELEASE["tracks"])
+    assert m[1] == (None, 0.0)          # right number and length, wrong song
+    assert m[2][0] == "1-2"             # untitled: compared by file name

@@ -1338,3 +1338,15 @@ button.scan-status[hidden] { display: none; }
 }
 .scan-now-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 #scan-btn[hidden] { display: none; }
+
+/* ── Album match: wider, resizable, two-sided rows ────────────────────────── */
+.mb-modal { width: min(1400px, 96vw); height: 88vh; max-height: 96vh; max-width: 98vw; min-width: 640px; min-height: 420px; resize: both; overflow: hidden; }
+.mb-table { table-layout: fixed; font-family: var(--font); font-size: 12px; }
+.mb-table td { word-break: normal; overflow-wrap: anywhere; white-space: normal; padding: 6px 8px; }
+.mb-table .mb-side { width: 46%; }
+.mb-table th.mb-link, .mb-table td.mb-link { width: 72px; text-align: center; vertical-align: middle; }
+.mb-side-title { font-size: 13px; color: var(--text); }
+.mb-none-side { color: var(--text-dim); font-style: italic; }
+.mb-half td { background: color-mix(in srgb, var(--surface2) 50%, transparent); }
+.mb-pick-row { margin-top: 4px; }
+.mb-pick-row select { font-size: 11px; max-width: 100%; }

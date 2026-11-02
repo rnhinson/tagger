@@ -240,7 +240,8 @@ export interface MbMatch {
              year: string | null; original_year: string | null; country: string | null; discs: number }
   release_tracks: MbReleaseTrack[]
   items: { id: number; filename: string; title: string | null; artist: string | null; track_number: string | null
-           disc_number: string | null; duration: number | null; key: string | null; score: number }[]
+           disc_number: string | null; duration: number | null; key: string | null; score: number
+           title_similarity: number | null }[]
   unmatched: string[]
 }
 

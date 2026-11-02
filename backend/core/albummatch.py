@@ -3,8 +3,11 @@ Pair a folder's tracks with a MusicBrainz release's tracks (album-level match).
 
 Each (local, release) pair is scored on disc + track number, title similarity
 and duration; pairs are taken greedily, best first, so every track and every
-release track is used at most once. The user can reassign any pair before
-anything is staged -- this only proposes.
+release track is used at most once. A pair is only proposed when the TITLES
+agree (similarity >= TITLE_MIN): a matching number or length alone says
+nothing about which song it is. A track without a title tag is compared by
+its file name (leading number dropped). The user can reassign any pair
+before anything is staged -- this only proposes.
 """
 from __future__ import annotations
 
@@ -12,6 +15,8 @@ import re
 from difflib import SequenceMatcher
 
 MIN_SCORE = 0.35
+TITLE_MIN = 0.6
+_LEADING_NUM = re.compile(r"^\s*(\d+[\s.\-_]*)+")
 _BRACKETS = re.compile(r"[\(\[][^)\]]*(remaster|version|edit|mix|live|mono|stereo|bonus)[^)\]]*[\)\]]", re.I)
 _NONWORD = re.compile(r"[^\w]+")
 
@@ -28,6 +33,19 @@ def _int(v) -> int:
         return 0
 
 
+def local_title(local: dict) -> str:
+    """The title to compare: the tag, else the file name without its leading number."""
+    if local.get("title"):
+        return local["title"]
+    stem = (local.get("filename") or "").rsplit(".", 1)[0]
+    return _LEADING_NUM.sub("", stem)
+
+
+def title_similarity(local: dict, mb: dict) -> float:
+    a, b = _norm(local_title(local)), _norm(mb.get("title"))
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
 def score(local: dict, mb: dict) -> float:
     """0..1: how likely `local` (a track row) is release track `mb`."""
     s = 0.0
@@ -37,9 +55,7 @@ def score(local: dict, mb: dict) -> float:
         s += 0.4
     elif num and num == mb["position"]:
         s += 0.2
-    a, b = _norm(local.get("title")), _norm(mb.get("title"))
-    if a and b:
-        s += 0.45 * SequenceMatcher(None, a, b).ratio()
+    s += 0.45 * title_similarity(local, mb)
     d1, d2 = local.get("duration"), mb.get("duration")
     if d1 and d2:
         diff = abs(d1 - d2)
@@ -49,7 +65,8 @@ def score(local: dict, mb: dict) -> float:
 
 def match(local: list[dict], release_tracks: list[dict]) -> dict[int, tuple[str | None, float]]:
     """{track id: (release track key or None, score)}."""
-    pairs = sorted(((score(l, m), l["id"], m["key"]) for l in local for m in release_tracks), reverse=True)
+    pairs = sorted(((score(l, m), l["id"], m["key"]) for l in local for m in release_tracks
+                    if title_similarity(l, m) >= TITLE_MIN), reverse=True)
     out: dict[int, tuple[str | None, float]] = {}
     used: set[str] = set()
     for sc, tid, key in pairs:

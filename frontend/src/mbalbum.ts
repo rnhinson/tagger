@@ -1,7 +1,7 @@
 // Album-level MusicBrainz match: search releases for the selection, pick
 // one, review the proposed track-by-track pairing (reassign any row), choose
 // the fields, and stage it as one step. Backend: /api/lookup/album/*.
-import { api, MbCandidate, MbMatch } from './api'
+import { api, MbCandidate, MbMatch, MbReleaseTrack } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration } from './util'
 import { editToast, errText } from './staged'
@@ -40,7 +40,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
             <label class="settings-toggle"><input type="checkbox" id="mb-orig" checked /><span>Original year</span></label>
             <label class="settings-toggle"><input type="checkbox" id="mb-cover" /><span>Cover art (written now)</span></label>
           </div>
-          <table class="pr-table mb-table"><thead><tr><th class="pr-check"></th><th>Your track</th><th>MusicBrainz track</th><th>Match</th></tr></thead>
+          <table class="pr-table mb-table"><thead><tr><th class="pr-check"></th><th>Your track</th><th class="mb-link">Match</th><th>MusicBrainz track</th></tr></thead>
             <tbody id="mb-rows"></tbody></table>
           <div id="mb-unmatched" class="mb-unmatched"></div>
         </div>
@@ -165,28 +165,53 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     for (const [id, k] of chosen) if (k && !skip.has(id)) counts.set(k, (counts.get(k) ?? 0) + 1)
     const opts = (sel: string | null) => `<option value="">— no match —</option>` + m.release_tracks.map(t =>
       `<option value="${esc(t.key)}" ${t.key === sel ? 'selected' : ''}>${m.release_tracks.some(x => x.disc > 1) ? `${t.disc}-` : ''}${t.position}. ${esc(t.title)} (${fmtDuration(t.duration ?? 0)})</option>`).join('')
-    rowsEl.innerHTML = m.items.map(it => {
-      const k = chosen.get(it.id) ?? null, t = k ? byKey.get(k) : undefined
-      const dup = k && (counts.get(k) ?? 0) > 1 && !skip.has(it.id)
-      const proposed = k === it.key
-      const sc = proposed ? it.score : null
-      const badge = !k ? '<span class="mb-score mb-none">none</span>'
-        : dup ? '<span class="mb-score mb-bad">used twice</span>'
-        : sc === null ? '<span class="mb-score">manual</span>'
-        : `<span class="mb-score ${sc >= 0.75 ? 'mb-good' : sc >= 0.5 ? 'mb-ok' : 'mb-bad'}">${Math.round(sc * 100)}%</span>`
-      const dur = it.duration && t?.duration ? Math.abs(it.duration - t.duration) : null
-      return `<tr class="pr-row${skip.has(it.id) ? ' pr-excluded' : ''}${dup ? ' mb-dup' : ''}">
-        <td class="pr-check"><input type="checkbox" data-id="${it.id}" ${skip.has(it.id) || !k ? '' : 'checked'} ${k ? '' : 'disabled'} /></td>
-        <td><div>${esc([it.disc_number && it.disc_number !== '1' ? it.disc_number + '-' : '', it.track_number ?? ''].join(''))} ${esc(it.title || it.filename)}</div>
-          <div class="ma-dim">${esc(it.filename)} · ${fmtDuration(it.duration ?? 0)}</div></td>
-        <td><select data-id="${it.id}" class="mb-pick">${opts(k)}</select>
-          ${t && dur !== null && dur > 10 ? `<div class="pr-msg">length differs by ${Math.round(dur)}s</div>` : ''}</td>
-        <td>${badge}</td></tr>`
-    }).join('')
+    // Two sides, in the release's order: every release track gets a row (with
+    // whichever of your tracks is paired to it, or none), then your tracks that
+    // aren't paired to anything. Nothing on either side is ever hidden.
+    const num = (t: MbReleaseTrack) => `${m.release_tracks.some(x => x.disc > 1) ? `${t.disc}-` : ''}${t.position}`
+    const yours = (it: MbMatch['items'][number]) => `
+      <div class="mb-side-title">${esc([it.disc_number && it.disc_number !== '1' ? it.disc_number + '-' : '', it.track_number ?? ''].join(''))} ${esc(it.title || '(no title)')}</div>
+      <div class="ma-dim">${esc(it.artist ?? '')}${it.artist ? ' · ' : ''}${fmtDuration(it.duration ?? 0)} · ${esc(it.filename)}</div>`
+    const theirs = (t: MbReleaseTrack) => `
+      <div class="mb-side-title">${num(t)}. ${esc(t.title)}</div>
+      <div class="ma-dim">${esc(t.artist ?? '')} · ${fmtDuration(t.duration ?? 0)}</div>`
+    const badgeFor = (it: MbMatch['items'][number], k: string, dup: boolean) => {
+      if (dup) return '<span class="mb-score mb-bad">used twice</span>'
+      if (k !== it.key) return '<span class="mb-score">manual</span>'
+      const sc = it.score
+      const title = it.title_similarity != null ? ` title ${Math.round(it.title_similarity * 100)}%` : ''
+      return `<span class="mb-score ${sc >= 0.75 ? 'mb-good' : sc >= 0.5 ? 'mb-ok' : 'mb-bad'}" title="Overall ${Math.round(sc * 100)}% —${title}">${Math.round(sc * 100)}%</span>`
+    }
+    const pickRelease = (it: MbMatch['items'][number], k: string | null) =>
+      `<select data-id="${it.id}" class="mb-pick"><option value="">— no match —</option>${m.release_tracks.map(t =>
+        `<option value="${esc(t.key)}" ${t.key === k ? 'selected' : ''}>${num(t)}. ${esc(t.title)} (${fmtDuration(t.duration ?? 0)})</option>`).join('')}</select>`
+    const free = m.items.filter(it => !chosen.get(it.id))
+    const pickYours = (t: MbReleaseTrack) => free.length
+      ? `<select data-key="${esc(t.key)}" class="mb-pick"><option value="">— assign one of your tracks —</option>${free.map(it =>
+          `<option value="${it.id}">${esc(it.track_number ?? '')} ${esc(it.title || it.filename)}</option>`).join('')}</select>` : ''
+    const row = (it: MbMatch['items'][number] | null, t: MbReleaseTrack | null) => {
+      const k = it ? chosen.get(it.id) ?? null : null
+      const dup = !!(it && k && (counts.get(k) ?? 0) > 1 && !skip.has(it.id))
+      const dur = it?.duration && t?.duration ? Math.abs(it.duration - t.duration) : null
+      return `<tr class="pr-row${it && skip.has(it.id) ? ' pr-excluded' : ''}${dup ? ' mb-dup' : ''}${!it || !t ? ' mb-half' : ''}">
+        <td class="pr-check">${it && t ? `<input type="checkbox" data-id="${it.id}" ${skip.has(it.id) ? '' : 'checked'} />` : ''}</td>
+        <td class="mb-side">${it ? yours(it) : '<span class="mb-none-side">none of your tracks</span>'}</td>
+        <td class="mb-link">${it && t ? badgeFor(it, t.key, dup) : '<span class="mb-score mb-none">—</span>'}</td>
+        <td class="mb-side">${t ? theirs(t) : '<span class="mb-none-side">no match on this release</span>'}
+          ${t && dur !== null && dur > 10 ? `<div class="pr-msg">length differs by ${Math.round(dur)}s</div>` : ''}
+          <div class="mb-pick-row">${it ? pickRelease(it, k) : t ? pickYours(t) : ''}</div></td></tr>`
+    }
+    const rows: string[] = []
+    for (const t of m.release_tracks) {
+      const paired = m.items.filter(it => chosen.get(it.id) === t.key)
+      if (paired.length) for (const it of paired) rows.push(row(it, t))
+      else rows.push(row(null, t))
+    }
+    for (const it of free) rows.push(row(it, null))
+    rowsEl.innerHTML = rows.join('')
     const used = new Set([...chosen.values()].filter(Boolean))
     const left = m.release_tracks.filter(t => !used.has(t.key))
-    $('#mb-unmatched').innerHTML = left.length
-      ? `<span class="ma-dim">Not matched on the release (${left.length}): ${left.slice(0, 12).map(t => esc(t.title)).join(', ')}${left.length > 12 ? '…' : ''}</span>` : ''
+    $('#mb-unmatched').innerHTML = left.length ? `<span class="ma-dim">${left.length} release track${left.length !== 1 ? 's' : ''} without one of yours · ${free.length} of yours without a match</span>` : ''
     const n = m.items.filter(it => chosen.get(it.id) && !skip.has(it.id)).length
     const dups = [...counts.values()].some(c => c > 1)
     sumEl.innerHTML = dups ? '<span class="pr-bad">Two tracks point at the same release track</span>' : `${n} of ${m.items.length} tracks`
@@ -197,7 +222,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   rowsEl.addEventListener('change', (e) => {
     const el = e.target as HTMLInputElement | HTMLSelectElement
     const id = Number(el.dataset.id)
-    if (el instanceof HTMLSelectElement) chosen.set(id, el.value || null)
+    if (el instanceof HTMLSelectElement && el.dataset.key) { if (el.value) chosen.set(Number(el.value), el.dataset.key) }
+    else if (el instanceof HTMLSelectElement) chosen.set(id, el.value || null)
     else if (el.checked) skip.delete(id); else skip.add(id)
     renderMatch()
   })
