@@ -2,7 +2,7 @@ import './style.css'
 import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs } from './state'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS } from './state'
 import { COL_DEFS } from './columns'
 import {
   trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
@@ -102,37 +102,57 @@ function renderSidebarTabs() {
 
 // ─── Tags panel ───────────────────────────────────────────────────────────────
 
+function navRow(cls: string, arrow: 'open' | 'closed' | 'none', label: string, count?: number): HTMLLIElement {
+  const li = document.createElement('li')
+  li.className = 'nav-item ' + cls
+  const a = arrow === 'none' ? '' : (arrow === 'open' ? '▾' : '▸')
+  li.innerHTML = `
+    <span class="nav-arrow${arrow === 'none' ? ' nav-arrow-empty' : ''}" data-toggle="1">${a}</span>
+    <span class="nav-label">${label}</span>
+    ${count !== undefined ? `<span class="nav-count">${count.toLocaleString()}</span>` : ''}`
+  return li
+}
+
 function renderTagsPanel() {
   artistListEl.innerHTML = ''
+  const nothingSelected = state.selectedArtist === null && !state.selectedTag
 
   // All tracks
   const allLi = document.createElement('li')
-  allLi.className = 'nav-item nav-all' + (!state.selectedArtist && state.selectedArtist !== '' ? ' active' : '')
+  allLi.className = 'nav-item nav-all' + (nothingSelected ? ' active' : '')
   allLi.dataset.all = '1'
   allLi.innerHTML = `<span class="nav-icon">♪</span><span class="nav-label">All tracks</span>`
   artistListEl.appendChild(allLi)
 
-  for (const a of state.artists) {
-    const artistKey = a.artist
-    const isSelected = state.selectedArtist === artistKey
-    const isExpanded = state.expandedArtists.has(artistKey)
-    const artistAlbums = state.albumsByArtist.get(artistKey) ?? []
+  for (const { field, label } of BROWSE_TAGS) {
+    const open = state.expandedTags.has(field)
+    const values = state.tagValues.get(field)
+    const header = navRow('nav-tag', values && !values.length ? 'none' : (open ? 'open' : 'closed'),
+                          esc(label), values ? values.length : undefined)
+    header.dataset.tag = field
+    artistListEl.appendChild(header)
+    if (!open || !values) continue
 
-    const artistLi = document.createElement('li')
-    artistLi.className = 'nav-item nav-artist' + (isSelected && !state.selectedAlbum ? ' active' : '')
-    artistLi.dataset.artist = artistKey
-    artistLi.innerHTML = `
-      <span class="nav-arrow" data-toggle="1">${isExpanded ? '▾' : '▸'}</span>
-      <span class="nav-label">${esc(a.artist || '(Unknown Artist)')}</span>
-      <span class="nav-count">${a.track_count}</span>
-    `
-    artistListEl.appendChild(artistLi)
+    for (const v of values) {
+      const isArtist = field === 'artist'
+      const albums = isArtist ? (state.albumsByArtist.get(v.value) ?? []) : []
+      const expanded = isArtist && state.expandedArtists.has(v.value)
+      const selected = isArtist
+        ? state.selectedArtist === v.value && !state.selectedAlbum
+        : state.selectedTag?.field === field && state.selectedTag.value === v.value
+      const li = navRow('nav-value' + (selected ? ' active' : ''),
+                        albums.length ? (expanded ? 'open' : 'closed') : 'none',
+                        v.value ? esc(v.value) : '<span class="nav-none">(none)</span>', v.track_count)
+      li.dataset.tag = field
+      li.dataset.value = v.value
+      artistListEl.appendChild(li)
 
-    if (isExpanded) {
-      for (const alb of artistAlbums) {
+      if (!expanded) continue
+      for (const alb of albums) {
         const albLi = document.createElement('li')
-        albLi.className = 'nav-item nav-album' + (isSelected && state.selectedAlbum === alb.album ? ' active' : '')
-        albLi.dataset.artist = artistKey
+        albLi.className = 'nav-item nav-album'
+          + (state.selectedArtist === v.value && state.selectedAlbum === alb.album ? ' active' : '')
+        albLi.dataset.artist = v.value
         albLi.dataset.album  = alb.album
         albLi.innerHTML = `
           <span class="nav-label">${esc(alb.album || '(Unknown Album)')}</span>
@@ -141,6 +161,14 @@ function renderTagsPanel() {
         artistListEl.appendChild(albLi)
       }
     }
+  }
+}
+
+async function loadTagValues(field: string) {
+  try {
+    state.tagValues.set(field, await api.library.tagValues(field))
+  } catch (e) {
+    toast(`Failed to load ${field} values: ${e}`, 'error')
   }
 }
 
@@ -177,7 +205,7 @@ function renderDirNode(node: DirNode, depth: number): HTMLElement {
   if (node.loading) {
     arrow.textContent = '…'
     arrow.className += ' tree-arrow-loading'
-  } else if (node.children === null || node.children.length > 0) {
+  } else if (node.children === null ? node.hasDirs !== false : node.children.length > 0) {
     arrow.textContent = node.expanded ? '▾' : '▸'
     arrow.dataset.toggle = '1'
   } else {
@@ -437,7 +465,7 @@ function renderTracks() {
 
   if (!state.tracks.length) {
     const pristine = state.total === 0 && !state.query && !state.artists.length
-      && state.selectedArtist === null && state.selectedAlbum === null
+      && state.selectedArtist === null && state.selectedAlbum === null && !state.selectedTag
       && state.selectedDirectory === null && !state.selectedIssue
     trackEmpty.innerHTML = pristine
       ? 'Your library is empty. Click <strong>Scan Library</strong> to index your music.'
@@ -1049,6 +1077,10 @@ async function loadLibrary() {
       }
       state.albumsByArtist.get(key)!.push(alb)
     }
+    // Values change with every write: refetch the open tags, forget the rest.
+    const open = [...state.expandedTags]
+    state.tagValues = new Map()
+    await Promise.all(open.map(loadTagValues))
     renderTagsPanel()
   } catch (e) {
     toast(`Failed to load library: ${e}`, 'error')
@@ -1064,7 +1096,7 @@ async function loadTree() {
     state.rootNode = {
       name,
       path:     result.path,
-      children: result.dirs.map(d => ({ name: d.name, path: d.path, children: null, loading: false, expanded: false })),
+      children: result.dirs.map(d => ({ name: d.name, path: d.path, hasDirs: d.has_dirs, children: null, loading: false, expanded: false })),
       loading:  false,
       expanded: true,
     }
@@ -1085,7 +1117,7 @@ async function expandDirNode(node: DirNode) {
   renderFilesPanel()
   try {
     const result = await api.fs.tree(node.path)
-    node.children = result.dirs.map(d => ({ name: d.name, path: d.path, children: null, loading: false, expanded: false }))
+    node.children = result.dirs.map(d => ({ name: d.name, path: d.path, hasDirs: d.has_dirs, children: null, loading: false, expanded: false }))
     node.expanded  = true
     node.loading   = false
   } catch (e) {
@@ -1121,6 +1153,10 @@ async function loadTracks() {
       }
     } else {
       const params: Record<string, string | number> = { limit: PAGE_SIZE, offset }
+      if (state.selectedTag) {
+        params.tag = state.selectedTag.field
+        params.value = state.selectedTag.value
+      }
       if (state.selectedArtist !== null) params.artist = state.selectedArtist
       if (state.selectedAlbum  !== null) params.album  = state.selectedAlbum
       result = await api.library.tracks(params)
@@ -1479,6 +1515,7 @@ function currentViewParams(): Record<string, string | number> {
       : {}
   }
   const params: Record<string, string | number> = {}
+  if (state.selectedTag) { params.tag = state.selectedTag.field; params.value = state.selectedTag.value }
   if (state.selectedArtist !== null) params.artist = state.selectedArtist
   if (state.selectedAlbum !== null) params.album = state.selectedAlbum
   return params
@@ -1519,6 +1556,10 @@ async function scanReplayGain() {
 
 // ─── Undo / history ─────────────────────────────────────────────────────────────
 
+// ↶ undoes the newest STAGED step first (nothing on disk changes); with
+// nothing staged it undoes the newest written change.
+let undoTarget: { kind: 'staged' } | { kind: 'written'; id: number } | null = null
+
 async function refreshReviewButton() {
   try {
     const { count } = await api.staged.count()
@@ -1543,22 +1584,35 @@ async function refreshAfterWrite() {
 async function refreshUndoButton() {
   refreshReviewButton()
   try {
+    const st = await api.staged.count()
+    if (st.last_step) {
+      undoTarget = { kind: 'staged' }
+      undoBtn.hidden = false
+      undoBtn.title = `Undo staged: ${st.last_step.summary}`
+      return
+    }
     const history = await api.library.history(10)
     const undoable = history.find(h => !h.undone)
+    undoTarget = undoable ? { kind: 'written', id: undoable.id } : null
     undoBtn.hidden = !undoable
     undoBtn.title = undoable ? `Undo: ${undoable.summary}` : 'Nothing to undo'
-    undoBtn.dataset.changeId = undoable ? String(undoable.id) : ''
   } catch {
     undoBtn.hidden = true
   }
 }
 
 async function undoLast() {
-  const id = undoBtn.dataset.changeId
-  if (!id) return
+  const target = undoTarget
+  if (!target) return
   undoBtn.disabled = true
   try {
-    const res = await api.library.undo(Number(id))
+    if (target.kind === 'staged') {
+      const r = await api.staged.undo()
+      toast(`Undid staged: ${r.summary}`, 'success')
+      await refreshAfterWrite()
+      return
+    }
+    const res = await api.library.undo(target.id)
     if (res.errors?.length) {
       toast(`Undo incomplete — ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
     } else {
@@ -1680,6 +1734,7 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
   } else if (mode === 'files') {
     state.selectedArtist = null
     state.selectedAlbum  = null
+    state.selectedTag    = null
     if (!state.rootNode) await loadTree()
   } else {
     state.selectedIssue = null
@@ -1699,61 +1754,72 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
   renderEditor()
 })
 
-// Tags panel: artist/album clicks
-artistListEl.addEventListener('click', async (e) => {
-  const li = (e.target as HTMLElement).closest<HTMLElement>('.nav-item')
-  if (!li) return
-
-  const artist = li.dataset.artist ?? null
-  const album  = li.dataset.album  ?? null
-
-  // "All tracks"
-  if (li.dataset.all === '1') {
-    state.selectedArtist  = null
-    state.selectedAlbum   = null
-    state.expandedArtists.clear()
-    state.selectedIds.clear()
-    state.page = 0
-    renderTagsPanel()
-    await loadTracks()
-    renderEditor()
-    return
-  }
-
-  // Album click (has both artist and album dataset attrs)
-  if (album !== null) {
-    state.selectedArtist = artist
-    state.selectedAlbum  = album
-    state.selectedIds.clear()
-    state.page = 0
-    renderTagsPanel()
-    await loadTracks()
-    renderEditor()
-    return
-  }
-
-  // Artist row click — select artist and toggle expand/collapse
-  if (state.expandedArtists.has(artist!)) {
-    state.expandedArtists.delete(artist!)
-  } else {
-    state.expandedArtists.add(artist!)
-  }
-  state.selectedArtist = artist
+// Tags panel: tag headers open/close; values and albums filter the tracks.
+async function selectInTags(apply: () => void) {
+  state.selectedArtist = null
   state.selectedAlbum  = null
+  state.selectedTag    = null
+  apply()
   state.selectedIds.clear()
   state.page = 0
   renderTagsPanel()
   await loadTracks()
   renderEditor()
+}
+
+artistListEl.addEventListener('click', async (e) => {
+  const target = e.target as HTMLElement
+  const li = target.closest<HTMLElement>('.nav-item')
+  if (!li) return
+  const onArrow = target.dataset.toggle === '1'
+
+  if (li.dataset.all === '1') {
+    await selectInTags(() => {})
+    return
+  }
+
+  // Album under an artist
+  if (li.dataset.album !== undefined) {
+    await selectInTags(() => {
+      state.selectedArtist = li.dataset.artist ?? ''
+      state.selectedAlbum  = li.dataset.album ?? ''
+    })
+    return
+  }
+
+  const field = li.dataset.tag!
+  // Tag header: open/close, loading its values the first time
+  if (li.dataset.value === undefined) {
+    if (state.expandedTags.has(field)) {
+      state.expandedTags.delete(field)
+    } else {
+      state.expandedTags.add(field)
+      if (!state.tagValues.has(field)) await loadTagValues(field)
+    }
+    renderTagsPanel()
+    return
+  }
+
+  const value = li.dataset.value
+  if (field === 'artist') {
+    const toggle = () => state.expandedArtists.has(value)
+      ? state.expandedArtists.delete(value) : state.expandedArtists.add(value)
+    if (onArrow) { toggle(); renderTagsPanel(); return }
+    await selectInTags(() => { state.selectedArtist = value })
+    return
+  }
+  await selectInTags(() => { state.selectedTag = { field, value } })
 })
 
 // Tags panel: expand/collapse all
-document.getElementById('expand-all-btn')!.addEventListener('click', () => {
-  for (const a of state.artists) state.expandedArtists.add(a.artist)
+document.getElementById('expand-all-btn')!.addEventListener('click', async () => {
+  for (const t of BROWSE_TAGS) state.expandedTags.add(t.field)
+  await Promise.all(BROWSE_TAGS.filter(t => !state.tagValues.has(t.field)).map(t => loadTagValues(t.field)))
   renderTagsPanel()
 })
 
 document.getElementById('collapse-all-btn')!.addEventListener('click', () => {
+  state.expandedTags.clear()
   state.expandedArtists.clear()
   renderTagsPanel()
 })
@@ -1793,6 +1859,9 @@ async function navigateTo(artist: string, album?: string) {
   state.sidebarMode     = 'tags'
   state.selectedArtist  = artist || null
   state.selectedAlbum   = album  || null
+  state.selectedTag     = null
+  state.expandedTags.add('artist')
+  if (!state.tagValues.has('artist')) await loadTagValues('artist')
   state.selectedIds.clear()
   state.page = 0
   if (artist) state.expandedArtists.add(artist)

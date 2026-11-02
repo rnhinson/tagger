@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from core import staging
@@ -45,8 +45,23 @@ def list_staged():
 
 @router.get("/count")
 def staged_count():
+    """Staged tracks, plus the staging undo stack (newest step first)."""
     with db() as conn:
-        return {"count": staging.count(conn)}
+        return {
+            "count": staging.count(conn),
+            "steps": staging.step_count(conn),
+            "last_step": staging.last_step(conn),
+        }
+
+
+@router.post("/undo")
+def undo_staged_step():
+    """Undo the newest staging action (nothing on disk changes)."""
+    with db() as conn:
+        try:
+            return staging.undo_step(conn)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
 
 
 @router.post("/apply")

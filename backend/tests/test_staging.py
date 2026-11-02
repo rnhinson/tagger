@@ -288,3 +288,89 @@ def test_rename_preview_for_a_track_shows_its_root(client, lib):
         "track_id": tid, "tags": {"title": "New"},
     }).json()
     assert r["ok"] and r["preview"] == "Libraries/Music - Christmas/A/Al/01 New.mp3"
+
+
+# ── staging undo steps ───────────────────────────────────────────────────────
+
+def _staged(client, tid):
+    return client.get(f"/api/library/track/{tid}").json()["staged"]
+
+
+def test_undo_staged_steps_newest_first(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A", genre="Rock", album="Al", album_artist="X", track_number="1")
+    b = _insert(lib / "Shared" / "b.mp3", title="B", genre="Rock")
+    client.patch(f"/api/tags/{a}", json={"genre": "Folk"})                       # step 1
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "Soundtrack"}})  # step 2
+    client.post("/api/tags/reorganize", json={"track_ids": [a]})                  # step 3
+
+    c = client.get("/api/staged/count").json()
+    assert c["steps"] == 3 and c["last_step"]["summary"].startswith("Organize")
+
+    assert client.post("/api/staged/undo").json()["restored"] == 1
+    assert _staged(client, a) == {"tags": {"genre": "Soundtrack"}, "new_path": None}
+    client.post("/api/staged/undo")                                              # bulk
+    assert _staged(client, a)["tags"] == {"genre": "Folk"}
+    assert _staged(client, b) is None
+    client.post("/api/staged/undo")                                              # first edit
+    assert _staged(client, a) is None
+    assert client.post("/api/staged/undo").status_code == 400
+
+
+def test_no_op_staging_is_not_a_step(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A")
+    client.patch(f"/api/tags/{a}", json={"title": "A"})
+    assert client.get("/api/staged/count").json()["steps"] == 0
+
+
+def test_discard_drops_tracks_from_steps(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A")
+    b = _insert(lib / "Shared" / "b.mp3", title="B")
+    client.patch(f"/api/tags/{a}", json={"title": "A2"})
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "G"}})
+    client.post("/api/staged/discard", json={"track_ids": [a]})
+    c = client.get("/api/staged/count").json()
+    assert c["steps"] == 1 and c["last_step"]["count"] == 1   # step 1 emptied and gone
+    client.post("/api/staged/undo")
+    assert _staged(client, a) is None and _staged(client, b) is None
+
+
+@needs_ffmpeg
+def test_writing_clears_the_step_stack(client, lib):
+    a = _insert(_mp3(lib / "Shared" / "a.mp3"), title="A")
+    client.patch(f"/api/tags/{a}", json={"title": "A2"})
+    client.post("/api/staged/apply", json={})
+    assert client.get("/api/staged/count").json()["steps"] == 0
+
+
+# ── browsing ─────────────────────────────────────────────────────────────────
+
+def test_tag_values_and_tag_filter(client, lib):
+    _insert(lib / "Shared" / "a.mp3", genre="Soundtrack")
+    _insert(lib / "Shared" / "b.mp3", genre="Soundtrack")
+    _insert(lib / "Shared" / "c.mp3")
+    vals = client.get("/api/library/tag-values?field=genre").json()
+    assert {v["value"]: v["track_count"] for v in vals} == {"": 1, "Soundtrack": 2}
+    assert client.get("/api/library/tracks?tag=genre&value=Soundtrack").json()["total"] == 2
+    assert client.get("/api/library/tracks?tag=genre&value=").json()["total"] == 1
+    assert client.get("/api/library/tag-values?field=path").status_code == 400
+    # an unknown tag is ignored, never interpolated
+    assert client.get("/api/library/tracks?tag=path&value=x").json()["total"] == 3
+
+
+def test_tree_reports_subfolders(client, lib):
+    (lib / "Libraries" / "Music - Christmas" / "Album").mkdir()
+    tree = client.get(f"/api/fs/tree?path={lib / 'Libraries'}").json()
+    xmas = next(d for d in tree["dirs"] if d["name"] == "Music - Christmas")
+    assert xmas["has_dirs"] is True
+    inner = client.get(f"/api/fs/tree?path={lib / 'Libraries' / 'Music - Christmas'}").json()
+    assert inner["dirs"][0]["has_dirs"] is False
+
+
+def test_step_label_names_the_changed_fields(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A", genre="Rock", year="1999")
+    b = _insert(lib / "Shared" / "b.mp3", title="B", genre="Rock", year="1999")
+    # the editor sends every field; only genre actually changes
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "Folk", "year": "1999"}})
+    assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Set genre on 2 tracks"
+    client.patch(f"/api/tags/{a}", json={"title": "A2", "album_artist": "X"})
+    assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Edited album artist, title — A"

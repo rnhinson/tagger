@@ -25,6 +25,15 @@ def _is_under_any(target: str, dirs: list[str]) -> bool:
     return False
 
 
+def _has_subdirs(path: str) -> bool:
+    """Whether a folder has subfolders -- the tree shows an arrow only then."""
+    try:
+        with os.scandir(path) as it:
+            return any(e.is_dir() for e in it)
+    except OSError:
+        return False
+
+
 @router.get("/tree")
 def get_tree(path: Optional[str] = None):
     """Return immediate children (subdirs + audio files) of a directory."""
@@ -54,7 +63,8 @@ def get_tree(path: Optional[str] = None):
     try:
         for entry in sorted(os.scandir(target), key=lambda e: (not e.is_dir(), e.name.lower())):
             if entry.is_dir():
-                dirs.append({"name": entry.name, "path": entry.path})
+                dirs.append({"name": entry.name, "path": entry.path,
+                             "has_dirs": _has_subdirs(entry.path)})
             elif is_audio_file(entry.name):
                 files.append({"name": entry.name, "path": entry.path})
     except PermissionError:

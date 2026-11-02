@@ -14,8 +14,10 @@ from api.config import _load as load_settings, get_library_roots
 router = APIRouter()
 
 
-def _finish(conn, ids: list[int], summary: str) -> dict:
-    """With staging off, write what was just staged for these tracks."""
+def _finish(conn, step: staging.Step, ids: list[int]) -> dict:
+    """Record the staging step; with staging off, write it straight away."""
+    step.save()
+    summary = step.summary
     if load_settings().stage_changes:
         return {"staged": True}
     res = staging.apply(conn, ids, summary)
@@ -93,9 +95,10 @@ def update_track_tags(track_id: int, update: TagUpdate):
         ).fetchone()
         if not row:
             raise HTTPException(404, "Track not found")
-        staging.stage_edit(conn, row, updates)
         title = row["title"] or row["filename"]
-        return {"ok": True, **_finish(conn, [track_id], f"Edited tags — {title}")}
+        step = staging.Step(conn, f"Edited {{fields}} — {title}")
+        staging.stage_edit(conn, row, updates, step)
+        return {"ok": True, **_finish(conn, step, [track_id])}
 
 
 class AutoNumber(BaseModel):
@@ -116,9 +119,10 @@ def autonumber(req: AutoNumber):
         raise HTTPException(400, "No track IDs provided")
     with db() as conn:
         rows = sorted(_rows(conn, req.track_ids), key=lambda r: r["filename"].lower())
+        step = staging.Step(conn, f"Auto-numbered {len(rows)} tracks")
         for i, row in enumerate(rows, start=1):
-            staging.stage_edit(conn, row, {"track_number": str(i)})
-        res = _finish(conn, [r["id"] for r in rows], f"Auto-numbered {len(rows)} tracks")
+            staging.stage_edit(conn, row, {"track_number": str(i)}, step)
+        res = _finish(conn, step, [r["id"] for r in rows])
     return {"numbered": len(rows), **res}
 
 
@@ -133,6 +137,7 @@ def find_replace(req: FindReplace):
     with db() as conn:
         rows = _rows(conn, req.track_ids)
         pending = staging.load(conn, [r["id"] for r in rows])
+        step = staging.Step(conn, f"Find/replace “{req.find}” in {req.field}")
         for row in rows:
             # Work on the value as staged, so edits build on each other.
             val = staging.effective(row, pending.get(row["id"]))[req.field]
@@ -141,9 +146,9 @@ def find_replace(req: FindReplace):
             new_val = val.replace(req.find, req.replace)
             if new_val == val:
                 continue
-            staging.stage_edit(conn, row, {req.field: new_val})
+            staging.stage_edit(conn, row, {req.field: new_val}, step)
             changed.append(row["id"])
-        res = _finish(conn, changed, f"Find/replace on {len(changed)} tracks")
+        res = _finish(conn, step, changed)
     return {"changed": len(changed), **res}
 
 
@@ -169,6 +174,7 @@ def reorganize(req: Reorganize):
         found = {r["id"] for r in rows}
         errors += [{"id": t, "error": "not found"} for t in req.track_ids if t not in found]
         pending = staging.load(conn, list(found))
+        step = staging.Step(conn, f"Organize {len(rows)} files")
         for row in rows:
             try:
                 dest = staging.plan_path(
@@ -178,11 +184,11 @@ def reorganize(req: Reorganize):
                 errors.append({"id": row["id"], "error": str(exc)})
                 continue
             if dest == row["path"]:
-                staging.stage(conn, row, new_path=None)
+                staging.stage(conn, row, new_path=None, step=step)
                 continue
-            staging.stage(conn, row, new_path=dest)
+            staging.stage(conn, row, new_path=dest, step=step)
             planned.append(row["id"])
-        res = _finish(conn, planned, f"Reorganized {len(planned)} files")
+        res = _finish(conn, step, planned)
     moved = 0 if res["staged"] else res["applied"]
     return {"planned": len(planned), "moved": moved, "errors": errors + res.get("errors", []),
             "staged": res["staged"]}
@@ -198,7 +204,8 @@ def bulk_update_tags(update: BulkTagUpdate):
         rows = _rows(conn, update.track_ids)
         found = {r["id"] for r in rows}
         errors = [{"id": t, "error": "not found"} for t in update.track_ids if t not in found]
+        step = staging.Step(conn, f"Set {{fields}} on {len(rows)} tracks")
         for row in rows:
-            staging.stage_edit(conn, row, updates)
-        res = _finish(conn, list(found), f"Bulk edit — {len(rows)} tracks")
+            staging.stage_edit(conn, row, updates, step)
+        res = _finish(conn, step, list(found))
     return {"ok": True, **res, "errors": errors + res.get("errors", [])}

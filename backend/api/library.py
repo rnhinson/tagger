@@ -47,14 +47,27 @@ def _tracks(conn, rows) -> list[dict]:
     return [{**dict(r), "staged": entries.get(r["id"])} for r in rows]
 
 
+# Tags the sidebar can browse by (Tags panel: tag -> values).
+BROWSE_FIELDS = ("artist", "album_artist", "album", "genre", "year", "composer")
+
+
 def _track_filters(
     directory: Optional[str],
     artist: Optional[str],
     album: Optional[str],
     issue: Optional[str],
+    tag: Optional[str] = None,
+    value: Optional[str] = None,
 ) -> tuple[str, list, str]:
     """Build the shared WHERE clause + ORDER BY used by listing and export."""
     clauses, params = [], []
+    if tag in BROWSE_FIELDS and value is not None:
+        # `tag` is whitelisted, so it is safe to interpolate.
+        if value == "":
+            clauses.append(f"({tag} IS NULL OR {tag} = '')")
+        else:
+            clauses.append(f"{tag} = ?")
+            params.append(value)
     if directory:
         clauses.append("(directory = ? OR substr(directory, 1, ?) = ?)")
         params.extend([directory, len(directory) + 1, directory + "/"])
@@ -233,10 +246,12 @@ def list_tracks(
     artist: Optional[str] = None,
     album: Optional[str] = None,
     issue: Optional[str] = None,
+    tag: Optional[str] = None,
+    value: Optional[str] = None,
     limit: int = Query(100, le=500),
     offset: int = 0,
 ):
-    where, params, order = _track_filters(directory, artist, album, issue)
+    where, params, order = _track_filters(directory, artist, album, issue, tag, value)
 
     with db() as conn:
         rows = conn.execute(
@@ -268,6 +283,8 @@ def export_m3u(
     artist: Optional[str] = None,
     album: Optional[str] = None,
     issue: Optional[str] = None,
+    tag: Optional[str] = None,
+    value: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = Query(10000, le=100000),
 ):
@@ -284,7 +301,7 @@ def export_m3u(
                 (_fts_query(q), limit),
             ).fetchall()
         else:
-            where, params, order = _track_filters(directory, artist, album, issue)
+            where, params, order = _track_filters(directory, artist, album, issue, tag, value)
             rows = conn.execute(
                 f"SELECT * FROM tracks {where} {order} LIMIT ?", [*params, limit]
             ).fetchall()
@@ -343,6 +360,22 @@ def get_track(track_id: int):
         if not row:
             raise HTTPException(404, "Track not found")
         return _tracks(conn, [row])[0]
+
+
+@router.get("/tag-values")
+def tag_values(field: str):
+    """Distinct values of one tag with track counts; '' = tracks without it."""
+    if field not in BROWSE_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    order = "value DESC" if field == "year" else "value COLLATE NOCASE"
+    with db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT COALESCE({field}, '') AS value, COUNT(*) AS track_count
+            FROM tracks GROUP BY COALESCE({field}, '') ORDER BY {order}
+            """
+        ).fetchall()
+    return [_row(r) for r in rows]
 
 
 @router.get("/artists")

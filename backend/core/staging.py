@@ -6,6 +6,10 @@ so there is one write path either way.
 
 A staged entry per track holds tag values that differ from the DB row and an
 optional new path (organize / rename-on-save). Writing is one undoable change.
+
+Each staging action is a Step: it records the entries it replaced, so staged
+work can be undone one action at a time (newest first) before it is written.
+Writing or discarding a track drops it from every step.
 """
 from __future__ import annotations
 
@@ -73,8 +77,97 @@ def _save(conn, track_id: int, tags: dict, new_path: str | None) -> None:
     )
 
 
-def stage(conn, row, tags: dict | None = None, new_path=_UNSET) -> None:
+class Step:
+    """One staging action; call save() when done to make it undoable."""
+
+    def __init__(self, conn, summary: str):
+        self.conn, self.summary = conn, summary
+        self.prev: dict[int, dict | None] = {}
+
+    def touch(self, track_id: int) -> None:
+        if track_id not in self.prev:
+            self.prev[track_id] = load(self.conn, [track_id]).get(track_id)
+
+    def save(self) -> int | None:
+        now = load(self.conn, list(self.prev))
+        changed = {str(t): p for t, p in self.prev.items() if p != now.get(t)}
+        if not changed:
+            return None
+        if "{fields}" in self.summary:
+            self.summary = self.summary.replace("{fields}", _changed_fields(self.prev, now))
+        return self.conn.execute(
+            "INSERT INTO staged_steps (ts, summary, data) VALUES (?, ?, ?)",
+            (time.time(), self.summary, json.dumps(changed)),
+        ).lastrowid
+
+
+def _changed_fields(prev: dict, now: dict) -> str:
+    """'genre, year' -- what a step changed, for its label."""
+    fields: list[str] = []
+    for t, p in prev.items():
+        a, b = p or {"tags": {}, "new_path": None}, now.get(t) or {"tags": {}, "new_path": None}
+        for k in sorted(set(a["tags"]) | set(b["tags"])):
+            if a["tags"].get(k) != b["tags"].get(k) and k not in fields:
+                fields.append(k)
+        if a["new_path"] != b["new_path"] and "location" not in fields:
+            fields.append("location")
+    names = [f.replace("_", " ") for f in fields]
+    return ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "") or "tags"
+
+
+def last_step(conn) -> dict | None:
+    r = conn.execute(
+        "SELECT id, ts, summary, data FROM staged_steps ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not r:
+        return None
+    return {"id": r["id"], "ts": r["ts"], "summary": r["summary"], "count": len(json.loads(r["data"]))}
+
+
+def step_count(conn) -> int:
+    return conn.execute("SELECT COUNT(*) FROM staged_steps").fetchone()[0]
+
+
+def undo_step(conn) -> dict:
+    """Put back what the newest staging action replaced. Raises ValueError if none."""
+    r = conn.execute("SELECT * FROM staged_steps ORDER BY id DESC LIMIT 1").fetchone()
+    if not r:
+        raise ValueError("Nothing staged to undo")
+    restored = 0
+    for tid, prev in json.loads(r["data"]).items():
+        tid = int(tid)
+        if not conn.execute("SELECT 1 FROM tracks WHERE id = ?", (tid,)).fetchone():
+            continue
+        if prev is None:
+            _save(conn, tid, {}, None)
+        else:
+            _save(conn, tid, prev["tags"], prev["new_path"])
+        restored += 1
+    conn.execute("DELETE FROM staged_steps WHERE id = ?", (r["id"],))
+    return {"summary": r["summary"], "restored": restored}
+
+
+def _forget(conn, ids: list[int] | None) -> None:
+    """Drop tracks from every step (they were written or discarded)."""
+    if ids is None:
+        conn.execute("DELETE FROM staged_steps")
+        return
+    gone = {str(i) for i in ids}
+    for r in conn.execute("SELECT id, data FROM staged_steps").fetchall():
+        data = json.loads(r["data"])
+        kept = {k: v for k, v in data.items() if k not in gone}
+        if len(kept) == len(data):
+            continue
+        if kept:
+            conn.execute("UPDATE staged_steps SET data = ? WHERE id = ?", (json.dumps(kept), r["id"]))
+        else:
+            conn.execute("DELETE FROM staged_steps WHERE id = ?", (r["id"],))
+
+
+def stage(conn, row, tags: dict | None = None, new_path=_UNSET, step: Step | None = None) -> None:
     """Merge tags (and/or a new path) into row's staged entry."""
+    if step:
+        step.touch(row["id"])
     cur = load(conn, [row["id"]]).get(row["id"], {"tags": {}, "new_path": None})
     merged = {**cur["tags"], **{k: v for k, v in (tags or {}).items() if k in STAGEABLE}}
     # A value equal to what is on file is not a change.
@@ -97,11 +190,11 @@ def plan_path(row, tags: dict, template: str, roots: list[Path]) -> str:
     return str(root / rel)
 
 
-def stage_edit(conn, row, tags: dict) -> None:
+def stage_edit(conn, row, tags: dict, step: Step | None = None) -> None:
     """Stage a tag edit; with rename-on-save, also stage the matching path."""
     from api.config import _load as load_settings, get_library_roots
 
-    stage(conn, row, tags)
+    stage(conn, row, tags, step=step)
     app = load_settings()
     if app.rename_on_save:
         entry = load(conn, [row["id"]]).get(row["id"])
@@ -109,10 +202,11 @@ def stage_edit(conn, row, tags: dict) -> None:
             dest = plan_path(row, effective(row, entry), app.rename_template, get_library_roots())
         except PlanError:
             return  # leave the file where it is
-        stage(conn, row, new_path=dest)
+        stage(conn, row, new_path=dest, step=step)
 
 
 def discard(conn, ids: list[int] | None = None) -> int:
+    _forget(conn, ids)
     if ids is None:
         return conn.execute("DELETE FROM staged").rowcount
     if not ids:
@@ -196,6 +290,7 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None) -> dic
             )
         # Keep a failed move staged so it can be retried; the tags are done.
         _save(conn, tid, {}, None if (moved_to or not new) else new)
+        _forget(conn, [tid])
         conn.commit()
         if sets:
             snaps.append(snap)

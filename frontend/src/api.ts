@@ -172,6 +172,18 @@ export interface IssueCount {
 export interface TreeEntry {
   name: string
   path: string
+  has_dirs?: boolean
+}
+
+export interface TagValue {
+  value: string
+  track_count: number
+}
+
+export interface StagedCount {
+  count: number
+  steps: number
+  last_step: { id: number; ts: number; summary: string; count: number } | null
 }
 
 export interface TreeResult {
@@ -223,6 +235,8 @@ export const api = {
     removeTracks: (ids: number[]) => request<{ removed: number }>('POST', '/api/library/remove', ids),
     deleteFiles: (ids: number[]) => request<{ deleted: number }>('POST', '/api/library/delete-files', ids),
     artists: () => request<Artist[]>('GET', '/api/library/artists'),
+    tagValues: (field: string) =>
+      request<TagValue[]>('GET', `/api/library/tag-values?field=${encodeURIComponent(field)}`),
     albums: (artist?: string) =>
       request<Album[]>('GET', `/api/library/albums${artist ? '?artist=' + encodeURIComponent(artist) : ''}`),
     exportM3uUrl: (params: Record<string, string | number> = {}) => {
@@ -258,7 +272,8 @@ export const api = {
 
   staged: {
     list: () => request<{ count: number; tracks: StagedTrack[] }>('GET', '/api/staged'),
-    count: () => request<{ count: number }>('GET', '/api/staged/count'),
+    count: () => request<StagedCount>('GET', '/api/staged/count'),
+    undo: () => request<{ summary: string; restored: number }>('POST', '/api/staged/undo'),
     apply: (trackIds?: number[]) =>
       request<{ applied: number; errors: WriteError[]; change_id: number | null }>(
         'POST', '/api/staged/apply', { track_ids: trackIds ?? null }),

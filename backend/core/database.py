@@ -142,5 +142,13 @@ def init_db() -> None:
                 new_path  TEXT,                         -- planned move, or NULL
                 staged_at REAL NOT NULL
             );
+
+            -- Undo stack for staging: what each staging action replaced.
+            CREATE TABLE IF NOT EXISTS staged_steps (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts      REAL NOT NULL,
+                summary TEXT NOT NULL,
+                data    TEXT NOT NULL   -- JSON: track_id -> previous entry or null
+            );
         """)
         _migrate(conn)

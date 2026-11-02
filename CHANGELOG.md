@@ -12,6 +12,17 @@
 - The track list shows staged values in place (amber, with the on-file value
   on hover); rows with a planned move are marked.
 - **History** dialog: every change, undo any of them newest-first per track.
+- **Undo staged steps.** Each staging action (save, bulk edit, organize,
+  find/replace, auto-number) is a step, labelled by the fields it changed;
+  ↶ undoes the newest staged step first, and Review has *Undo last step*.
+  Writing or discarding a track drops it from the steps.
+
+### Browsing (beartums fork)
+- The Tags panel is a tree: tag (Artist, Album Artist, Album, Genre, Year,
+  Composer) → its values with counts → (for artists) albums. `(none)` lists
+  tracks missing that tag. `GET /api/library/tag-values`, and `tag`/`value`
+  filters on `/tracks` and the M3U export.
+- Folder tree shows an open/close arrow only on folders with subfolders.
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root

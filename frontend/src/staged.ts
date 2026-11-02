@@ -87,12 +87,33 @@ export async function openReview(onChanged: () => Promise<void>) {
   let failures = new Map<number, string>()
 
   const render = async () => {
-    const { count, tracks } = await api.staged.list()
+    const [{ count, tracks }, st] = await Promise.all([api.staged.list(), api.staged.count()])
     m.titleEl.textContent = count
       ? `Review changes — ${count} track${count !== 1 ? 's' : ''}`
       : 'Review changes'
     m.body.innerHTML = ''
     m.footer.innerHTML = ''
+    // Undo the newest staging step (works on what's staged, not the files).
+    const undoStep = document.createElement('button')
+    undoStep.className = 'btn btn-ghost review-undo-step'
+    undoStep.hidden = !st.last_step
+    if (st.last_step) {
+      undoStep.textContent = '↶ Undo last step'
+      undoStep.title = `${st.last_step.summary} · ${st.steps} step${st.steps !== 1 ? 's' : ''} staged`
+    }
+    undoStep.addEventListener('click', async () => {
+      undoStep.disabled = true
+      try {
+        const r = await api.staged.undo()
+        toast(`Undid staged: ${r.summary}`, 'success')
+        await onChanged()
+        await render()
+      } catch (e) {
+        toast(`Undo failed: ${errText(e)}`, 'error')
+        undoStep.disabled = false
+      }
+    })
+    m.footer.append(undoStep)
     if (!count) {
       m.body.innerHTML = '<p class="review-empty">Nothing staged. Edits wait here until you write them.</p>'
       const ok = document.createElement('button')

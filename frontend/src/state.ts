@@ -1,4 +1,4 @@
-import { Track, Artist, Album, ScanJob, LookupResult, IssueCount } from './api'
+import { Track, Artist, Album, ScanJob, LookupResult, IssueCount, TagValue } from './api'
 
 export const PAGE_SIZE = 100
 export const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
@@ -25,9 +25,20 @@ export const TAG_FIELDS: TagField[] = [
   'track_number', 'disc_number', 'genre', 'comment', 'composer', 'bpm', 'lyrics',
 ]
 
+// Tags the Tags panel browses by, in order. Artist values open to their albums.
+export const BROWSE_TAGS: { field: string; label: string }[] = [
+  { field: 'artist',       label: 'Artist' },
+  { field: 'album_artist', label: 'Album Artist' },
+  { field: 'album',        label: 'Album' },
+  { field: 'genre',        label: 'Genre' },
+  { field: 'year',         label: 'Year' },
+  { field: 'composer',     label: 'Composer' },
+]
+
 export interface DirNode {
   name:     string
   path:     string
+  hasDirs?: boolean   // false = known to have no subfolders (no arrow)
   children: DirNode[] | null
   loading:  boolean
   expanded: boolean
@@ -42,6 +53,11 @@ export interface State {
   selectedArtist:    string | null
   selectedAlbum:     string | null
   expandedArtists:   Set<string>
+  // tag tree: which tags are open, their values (loaded on open), and a
+  // selected value for any tag other than artist (artist uses selectedArtist)
+  expandedTags:      Set<string>
+  tagValues:         Map<string, TagValue[]>
+  selectedTag:       { field: string; value: string } | null
   // files panel
   rootNode:          DirNode | null
   selectedDirectory: string | null
@@ -86,6 +102,9 @@ export const state: State = {
   selectedArtist:    null,
   selectedAlbum:     null,
   expandedArtists:   new Set(),
+  expandedTags:      new Set(['artist']),
+  tagValues:         new Map(),
+  selectedTag:       null,
   rootNode:          null,
   selectedDirectory: null,
   tracks:            [],
