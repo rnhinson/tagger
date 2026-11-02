@@ -1210,3 +1210,12 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .cleanup-new { color: var(--success); }
 .cleanup-none { font-size: 12px; color: var(--text-muted); padding: 8px 10px; }
 .modal-card .cleanup-value input, .modal-card .cleanup-sep input { padding: 0; }
+
+/* ── Tags from file names (parsenames.ts) ─────────────────────────────────── */
+.pn-fields { display: flex; flex-wrap: wrap; gap: 4px; }
+.pn-fields .btn { font-family: ui-monospace, monospace; font-size: 11px; padding: 2px 6px; }
+.pn-table td { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.pn-table .pn-file { color: var(--text-muted); max-width: 300px; }
+.pn-change { color: var(--success); }
+.pn-same { color: var(--text-dim); }
+.pn-nomatch .pn-file { color: var(--text-dim); }

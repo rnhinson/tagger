@@ -312,6 +312,12 @@ export const api = {
     standardize: (body: { field: string; track_ids: number[] | null; separators: string[]; keep: string[]; preview: boolean }) =>
       request<EditResult & { tracks: number; changes: { old: string; new: string; tracks: number }[] }>(
         'POST', '/api/tags/standardize', body),
+    parsePreview: (trackIds: number[], pattern: string) =>
+      request<{ total: number; matched: number; changing: number;
+                items: { id: number; path: string; matched: boolean; tags: Record<string, string>; changes: Record<string, string> }[] }>(
+        'POST', '/api/tags/parse-preview', { track_ids: trackIds, pattern }),
+    parseNames: (trackIds: number[], pattern: string, exclude: number[]) =>
+      request<EditResult & { changed: number }>('POST', '/api/tags/parse', { track_ids: trackIds, pattern, exclude }),
     editValues: (trackIds: number[], field: string, add: string[], remove: string[]) =>
       request<EditResult & { changed: number }>('POST', '/api/tags/values', { track_ids: trackIds, field, add, remove }),
     replaygain: (trackIds: number[], albumMode = false) =>

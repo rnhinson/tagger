@@ -10,6 +10,7 @@ from core.database import db
 from core.tagger import TAG_FIELDS
 from core.multivalue import MULTI_FIELDS, edit_values
 from core.cleanup import SEPARATORS, found_separators, standardize
+from core.nameparse import PatternError, compile_pattern, parse_path
 from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings, get_library_roots
 
@@ -473,3 +474,51 @@ def standardize_separators(req: Standardize):
             staging.stage_edit(conn, row, {req.field: new}, step)
         res = _finish(conn, step, [r["id"] for r, _ in todo])
     return {"tracks": len(todo), "changes": listed, **res, "errors": res.get("errors", [])}
+class NameParse(BaseModel):
+    track_ids: list[int]
+    pattern: str
+    exclude: list[int] = []     # opted out in the preview
+
+
+def _parse_names(conn, req: NameParse) -> tuple[list, list[dict]]:
+    try:
+        compiled = compile_pattern(req.pattern)
+    except PatternError as exc:
+        raise HTTPException(400, str(exc))
+    rows = sorted(_rows(conn, req.track_ids), key=lambda r: r["path"])
+    entries = staging.load(conn, [r["id"] for r in rows])
+    out = []
+    for row in rows:
+        eff = staging.effective(row, entries.get(row["id"]))
+        tags = parse_path(row["path"], compiled)
+        changes = {k: v for k, v in (tags or {}).items() if (eff.get(k) or "") != v}
+        out.append({"id": row["id"], "path": row["path"], "matched": tags is not None,
+                    "tags": tags or {}, "changes": changes})
+    return rows, out
+
+
+@router.post("/parse-preview")
+def parse_names_preview(req: NameParse):
+    """What a file-name pattern would set on each track (current values alongside)."""
+    with db() as conn:
+        _rows_, items = _parse_names(conn, req)
+    return {"items": items[:1000], "total": len(items),
+            "matched": sum(i["matched"] for i in items),
+            "changing": sum(bool(i["changes"]) for i in items)}
+
+
+@router.post("/parse")
+def parse_names(req: NameParse):
+    """Stage the tags a file-name pattern reads, as one step."""
+    skip = set(req.exclude)
+    with db() as conn:
+        rows, items = _parse_names(conn, req)
+        by_id = {r["id"]: r for r in rows}
+        todo = [i for i in items if i["changes"] and i["id"] not in skip]
+        if not todo:
+            return {"ok": True, "changed": 0, "staged": load_settings().stage_changes, "errors": []}
+        step = staging.Step(conn, f"Tags from file names ({req.pattern.strip()}) on {len(todo)} tracks")
+        for i in todo:
+            staging.stage_edit(conn, by_id[i["id"]], i["changes"], step)
+        res = _finish(conn, step, [i["id"] for i in todo])
+    return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}

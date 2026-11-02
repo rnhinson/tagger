@@ -13,6 +13,7 @@ import { ValueChips } from './chips'
 import { openCleanup } from './cleanup'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
+import { openParseNames } from './parsenames'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1576,6 +1577,10 @@ function showRenameFolder() {
 moveFolderBtn.addEventListener('click', showMoveFolder)
 
 // Bulk rename: list order = the view's order (counters number in that order).
+document.getElementById('parse-names-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openParseNames(ids, refreshAfterBulk)
+})
 document.getElementById('bulk-rename-btn')!.addEventListener('click', () => {
   const onPage = state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.id)
   const ids = onPage.length === state.selectedIds.size ? onPage : [...state.selectedIds]
