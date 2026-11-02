@@ -1185,3 +1185,28 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .chip-btn-add:hover    { background: color-mix(in srgb, var(--success) 20%, transparent); }
 .chip-btn-remove:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); }
 .chip-btn-gap { width: 22px; flex: none; }
+
+/* ── Clean up separators (cleanup.ts) ─────────────────────────────────────── */
+.modal-card.modal-cleanup { width: 620px; max-height: 88vh; }
+.cleanup-row { display: flex; gap: 12px; }
+.cleanup-row .field-label { flex: 1; }
+.cleanup-hint { font-size: 12px; color: var(--text-muted); }
+.cleanup-hint code, .cleanup-none code { font-family: ui-monospace, monospace; }
+.cleanup-found { max-height: 32vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.cleanup-sep { border-bottom: 1px solid var(--border); }
+.cleanup-sep:last-child { border-bottom: 0; }
+.cleanup-sep summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.cleanup-sep summary label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.cleanup-sym { font-family: ui-monospace, monospace; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; }
+.cleanup-values { padding: 0 10px 6px 30px; }
+.cleanup-value { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 0; }
+.cleanup-value span:first-of-type { flex: 1; }
+.cleanup-count { margin-left: auto; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cleanup-subtitle { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); }
+.cleanup-preview { max-height: 24vh; overflow-y: auto; font-size: 12px; }
+.cleanup-change { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; }
+.cleanup-old { color: var(--text-muted); text-decoration: line-through; }
+.cleanup-arrow { color: var(--text-dim); }
+.cleanup-new { color: var(--success); }
+.cleanup-none { font-size: 12px; color: var(--text-muted); padding: 8px 10px; }
+.modal-card .cleanup-value input, .modal-card .cleanup-sep input { padding: 0; }

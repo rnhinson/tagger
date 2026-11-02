@@ -9,6 +9,7 @@ export const APP_HTML = `
       <span id="scan-status" class="scan-status"></span>
       <button id="review-btn" class="btn btn-review btn-sm" title="Review staged changes, then write them to the files" hidden></button>
       <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
+      <button id="cleanup-btn" class="btn btn-ghost btn-sm" title="Standardize tag separators (Folk/Celtic → Folk; Celtic)">Clean up</button>
       <button id="history-btn" class="btn btn-ghost btn-sm" title="Change history and undo">History</button>
       <button id="scan-btn" class="btn btn-primary">Scan Library</button>
       <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings" aria-label="Settings">⚙</button>

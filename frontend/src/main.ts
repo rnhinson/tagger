@@ -10,6 +10,7 @@ import {
 } from './quality'
 import { APP_HTML } from './template'
 import { ValueChips } from './chips'
+import { openCleanup } from './cleanup'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
 
@@ -2268,6 +2269,8 @@ deleteFilesBtn.addEventListener('click', deleteFiles)
 organizeBtn.addEventListener('click', organizeFiles)
 autonumberBtn.addEventListener('click', autoNumber)
 findReplaceBtn.addEventListener('click', showFindReplace)
+document.getElementById('cleanup-btn')!.addEventListener('click', () =>
+  openCleanup([...state.selectedIds], async () => { state.tagValues = new Map(); await refreshAfterBulk() }))
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)

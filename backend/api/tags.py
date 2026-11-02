@@ -9,6 +9,7 @@ from core import staging
 from core.database import db
 from core.tagger import TAG_FIELDS
 from core.multivalue import MULTI_FIELDS, edit_values
+from core.cleanup import SEPARATORS, found_separators, standardize
 from core.replaygain import rg_tool, scan as rg_scan
 from api.config import _load as load_settings, get_library_roots
 
@@ -414,3 +415,61 @@ def edit_tag_values(req: ValueEdit):
             staging.stage_edit(conn, row, {req.field: new}, step)
         res = _finish(conn, step, [r["id"] for r, _ in todo])
     return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}
+
+
+class CleanupScope(BaseModel):
+    field: str
+    track_ids: Optional[list[int]] = None   # None = the whole library
+
+
+class Standardize(CleanupScope):
+    separators: list[str]
+    keep: list[str] = []
+    preview: bool = True
+
+
+def _scope(conn, req: CleanupScope) -> list[tuple]:
+    """(row, effective value) for every track in scope (as staged)."""
+    if req.field not in MULTI_FIELDS:
+        raise HTTPException(400, "Invalid field")
+    rows = (_rows(conn, req.track_ids) if req.track_ids is not None
+            else conn.execute("SELECT * FROM tracks").fetchall())
+    entries = staging.load(conn, [r["id"] for r in rows])
+    return [(r, staging.effective(r, entries.get(r["id"])).get(req.field) or "") for r in rows]
+
+
+@router.post("/separators")
+def find_separators(req: CleanupScope):
+    """Which separators other than ';' the field's values use, with counts."""
+    with db() as conn:
+        counts: dict[str, int] = {}
+        for _row, value in _scope(conn, req):
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+    return {"separators": found_separators(counts)}
+
+
+@router.post("/standardize")
+def standardize_separators(req: Standardize):
+    """Rewrite the chosen separators as ';' -- preview, or stage as one step."""
+    seps = [s for s in req.separators if s in SEPARATORS]
+    if not seps:
+        raise HTTPException(400, "No separators chosen")
+    keep = set(req.keep)
+    with db() as conn:
+        todo, changes = [], {}
+        for row, old in _scope(conn, req):
+            new = standardize(old, seps, keep)
+            if new != old:
+                todo.append((row, new))
+                c = changes.setdefault(old, {"old": old, "new": new, "tracks": 0})
+                c["tracks"] += 1
+        listed = sorted(changes.values(), key=lambda c: (-c["tracks"], c["old"].casefold()))
+        if req.preview or not todo:
+            return {"tracks": len(todo), "changes": listed}
+        label = req.field.replace("_", " ")
+        step = staging.Step(conn, f"Standardize {label} separators ({' '.join(seps)}) on {len(todo)} tracks")
+        for row, new in todo:
+            staging.stage_edit(conn, row, {req.field: new}, step)
+        res = _finish(conn, step, [r["id"] for r, _ in todo])
+    return {"tracks": len(todo), "changes": listed, **res, "errors": res.get("errors", [])}
