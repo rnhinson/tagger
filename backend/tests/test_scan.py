@@ -87,3 +87,29 @@ def test_scan_respects_exclude(temp_db, tmp_path):
         )
     total, upserted = scan_library(music_dirs=[str(root)], exclude=["*skip*"])
     assert total == 1  # the excluded directory is pruned
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
+def test_newer_reader_rereads_unchanged_files_once(temp_db, tmp_path):
+    import mutagen
+    from core import scanner
+    root = tmp_path / "music"
+    root.mkdir()
+    f = root / "1.mp3"
+    subprocess.run([FFMPEG, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.3",
+                    "-c:a", "libmp3lame", "-y", str(f)], check=True, capture_output=True)
+    m = mutagen.File(str(f), easy=True)
+    if m.tags is None:
+        m.add_tags()
+    m.tags["genre"] = ["Folk", "Celtic"]; m.save()
+    with db() as conn:  # as an old reader left it: first value only, version 0
+        conn.execute("PRAGMA user_version = 0")
+    scan_library(music_dirs=[str(root)])
+    with db() as conn:
+        conn.execute("UPDATE tracks SET genre = 'Folk'")
+        conn.execute("PRAGMA user_version = 0")
+    assert scan_library(music_dirs=[str(root)]) == (1, 1)     # re-read though mtime is unchanged
+    assert _count("WHERE genre = 'Folk; Celtic'") == 1
+    with db() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == scanner.READER_VERSION
+    assert scan_library(music_dirs=[str(root)]) == (1, 0)     # and only once

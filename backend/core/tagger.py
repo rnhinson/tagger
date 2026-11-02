@@ -13,6 +13,8 @@ import mutagen
 from mutagen.easyid3 import EasyID3
 from mutagen.easymp4 import EasyMP4
 
+from core.multivalue import MULTI_FIELDS, join_values, split_values
+
 # EasyMP4 doesn't register composer/bpm by default — add them so the MP4/M4A
 # path handles the same field set as ID3 and Vorbis.
 for _key, _atom in (("composer", "\xa9wrt"),):
@@ -62,6 +64,13 @@ _MB_VORBIS = {
 }
 
 
+def _joined(val: Any) -> str | None:
+    """All values of a (possibly multi-value) tag as one '; '-joined string."""
+    vals = val if isinstance(val, list) else ([] if val is None else [val])
+    out = split_values("; ".join(str(v) for v in vals))
+    return join_values(out) if out else None
+
+
 def _first(val: Any) -> str | None:
     if val is None:
         return None
@@ -83,6 +92,11 @@ def read_tags(path: str | Path, extended: bool = True) -> dict:
 
     tags = f.tags or {}
     result: dict = {internal: _first(tags.get(easy)) for easy, internal in _FROM_EASY.items()}
+    # Multi-value fields keep EVERY value (Lidarr writes several genre frames;
+    # keeping only the first silently dropped the rest, and the next save
+    # wrote that loss back to the file). One string, "; "-joined.
+    for internal in MULTI_FIELDS:
+        result[internal] = _joined(tags.get(_TO_EASY[internal]))
     if extended:
         result.update(_read_extended(str(path)))
     else:
@@ -122,6 +136,9 @@ def write_tags(path: str | Path, updates: dict) -> None:
         if val is None or val == "":
             if easy_key in f.tags:
                 del f.tags[easy_key]
+        elif internal_key in MULTI_FIELDS:
+            # "; "-joined in the app -> one native value per item in the file.
+            f.tags[easy_key] = split_values(str(val)) or [str(val)]
         else:
             f.tags[easy_key] = [str(val)]
 

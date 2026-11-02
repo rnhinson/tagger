@@ -37,6 +37,12 @@ def _excluded(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(path, p) or fnmatch.fnmatch(base, p) for p in patterns)
 
 
+# Bump when read_tags() reads existing files differently, so the next full
+# scan re-reads every file instead of skipping unchanged ones.
+#   1: multi-value tags keep every value ("; "-joined), not just the first.
+READER_VERSION = 1
+
+
 def scan_library(
     progress_cb: Callable[[int, int], None] | None = None,
     scan_tags: list[str] | None = None,
@@ -83,6 +89,10 @@ def scan_library(
             row[0]: row[1]
             for row in conn.execute("SELECT path, mtime FROM tracks")
         }
+        # A newer tag reader re-reads every file once, even unchanged ones.
+        reread = conn.execute("PRAGMA user_version").fetchone()[0] < READER_VERSION
+        if reread:
+            existing = {}
 
         for i, fpath in enumerate(all_files):
             try:
@@ -176,6 +186,9 @@ def scan_library(
                     progress_cb(i + 1, total)
 
         conn.commit()
+        if reread and prune_under is None:  # only a full scan covers every file
+            conn.execute(f"PRAGMA user_version = {READER_VERSION}")
+            conn.commit()
 
         # Remove DB rows for files that no longer exist on disk. A targeted
         # rescan only prunes within the scanned roots.
