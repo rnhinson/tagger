@@ -177,9 +177,11 @@ class Step:
             return None
         if "{fields}" in self.summary:
             self.summary = self.summary.replace("{fields}", _changed_fields(self.prev, now))
+        after = {k: (dirs_now.get(k[len(DIR_KEY):]) if k.startswith(DIR_KEY) else now.get(int(k)))
+                 for k in changed}
         return self.conn.execute(
-            "INSERT INTO staged_steps (ts, summary, data) VALUES (?, ?, ?)",
-            (time.time(), self.summary, json.dumps(changed)),
+            "INSERT INTO staged_steps (ts, summary, data, after) VALUES (?, ?, ?, ?)",
+            (time.time(), self.summary, json.dumps(changed), json.dumps(after)),
         ).lastrowid
 
 
@@ -244,15 +246,87 @@ def _forget(conn, ids: list[int] | None, dirs: list[str] = ()) -> None:
         conn.execute("DELETE FROM staged_steps")
         return
     gone = {str(i) for i in ids} | {DIR_KEY + d for d in dirs}
-    for r in conn.execute("SELECT id, data FROM staged_steps").fetchall():
+    for r in conn.execute("SELECT id, data, after FROM staged_steps").fetchall():
         data = json.loads(r["data"])
         kept = {k: v for k, v in data.items() if k not in gone}
         if len(kept) == len(data):
             continue
         if kept:
-            conn.execute("UPDATE staged_steps SET data = ? WHERE id = ?", (json.dumps(kept), r["id"]))
+            after = json.loads(r["after"]) if r["after"] else None
+            if after is not None:
+                after = {k: v for k, v in after.items() if k not in gone}
+            conn.execute("UPDATE staged_steps SET data = ?, after = ? WHERE id = ?",
+                         (json.dumps(kept), json.dumps(after) if after is not None else None, r["id"]))
         else:
             conn.execute("DELETE FROM staged_steps WHERE id = ?", (r["id"],))
+
+
+def _track_lines(row, prev: dict | None, after: dict | None) -> list[dict]:
+    """One line per change a step made to a track: each tag, and the path."""
+    a, b = prev or {"tags": {}, "new_path": None}, after or {"tags": {}, "new_path": None}
+    name = row["title"] or row["filename"]
+    lines = []
+    for f in sorted(set(a["tags"]) | set(b["tags"])):
+        old = a["tags"].get(f, row[f]) if f in a["tags"] else row[f]
+        new = b["tags"].get(f, row[f]) if f in b["tags"] else row[f]
+        if _norm(old) != _norm(new):
+            lines.append({"kind": "tag", "id": row["id"], "name": name, "field": f, "old": old, "new": new})
+    old_p, new_p = a["new_path"] or row["path"], b["new_path"] or row["path"]
+    if old_p != new_p:
+        lines.append({"kind": "path", "id": row["id"], "name": name, "old": old_p, "new": new_p})
+    return lines
+
+
+def describe(conn) -> dict:
+    """
+    Staged changes grouped by the action that staged them (newest first),
+    one line per change, plus anything staged outside a recorded action.
+    """
+    steps = conn.execute("SELECT * FROM staged_steps ORDER BY id DESC").fetchall()
+    entries, dirs = load(conn), load_dirs(conn)
+    ids = set(entries)
+    for s in steps:
+        ids |= {int(k) for k in json.loads(s["data"]) if not k.startswith(DIR_KEY)}
+    rows = {}
+    for chunk in (list(ids)[i:i + 900] for i in range(0, len(ids), 900)):
+        ph = ",".join("?" * len(chunk))
+        rows.update({r["id"]: r for r in conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", chunk)})
+
+    def dir_line(src, old_dst, new_dst):
+        return {"kind": "folder", "src": src, "old": old_dst, "new": new_dst,
+                "tracks": conn.execute(
+                    "SELECT COUNT(*) FROM tracks WHERE directory = ? OR substr(directory, 1, ?) = ?",
+                    (src, len(src) + 1, src + "/")).fetchone()[0]}
+
+    covered_tracks: set[int] = set()
+    covered_dirs: set[str] = set()
+    out = []
+    for s in steps:
+        data = json.loads(s["data"])
+        after = json.loads(s["after"]) if s["after"] else None
+        lines = []
+        for k, prev in data.items():
+            if k.startswith(DIR_KEY):
+                src = k[len(DIR_KEY):]
+                covered_dirs.add(src)
+                if after is not None:
+                    lines.append(dir_line(src, prev, after.get(k)))
+            else:
+                tid = int(k)
+                covered_tracks.add(tid)
+                if after is not None and tid in rows:
+                    lines += _track_lines(rows[tid], prev, after.get(k))
+        out.append({"id": s["id"], "ts": s["ts"], "summary": s["summary"], "count": len(data),
+                    "details": after is not None, "lines": lines})
+
+    other = []
+    for tid, e in entries.items():
+        if tid not in covered_tracks and tid in rows:
+            other += _track_lines(rows[tid], None, e)
+    for src, dst in dirs.items():
+        if src not in covered_dirs:
+            other.append(dir_line(src, None, dst))
+    return {"count": count(conn), "steps": out, "other": other}
 
 
 def stage(conn, row, tags: dict | None = None, new_path=_UNSET, step: Step | None = None) -> None:

@@ -1114,3 +1114,24 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .pr-same { color: var(--text-dim); font-style: italic; }
 .pr-msg { font-family: var(--font); font-weight: 400; font-size: 11px; }
 @media (max-width: 700px) { .pr-controls { grid-template-columns: 1fr; } }
+
+/* ─── Review: actions with compact change lines ─────────────────────────────── */
+.rv-actions { list-style: none; margin: 0; padding: 0; }
+.rv-action { border-bottom: 1px solid var(--border-subtle); }
+.rv-head { display: flex; align-items: center; gap: 8px; padding: 9px 16px; cursor: pointer; user-select: none; }
+.rv-head:hover { background: var(--surface2); }
+.rv-caret { width: 12px; color: var(--text-muted); font-size: 12px; }
+.rv-summary { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.rv-lines { list-style: none; margin: 0; padding: 0 16px 8px 36px; }
+.rv-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: 12px; line-height: 1.7; }
+.rv-what { color: var(--text-muted); min-width: 0; }
+.rv-subject { color: var(--text); }
+.rv-from { color: var(--text-muted); word-break: break-all; }
+.rv-arrow { color: var(--text-dim); }
+.rv-to { color: var(--text); font-weight: 500; word-break: break-all; }
+.rv-note { flex-basis: 100%; font-size: 11px; line-height: 1.4; padding-bottom: 2px; }
+.rv-err { color: var(--danger); }
+.rv-warn { color: var(--staged); }
+.rv-failed .rv-to { color: var(--danger); }
+.rv-nodetail { color: var(--text-muted); font-style: italic; }

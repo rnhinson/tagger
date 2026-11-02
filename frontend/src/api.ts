@@ -62,6 +62,20 @@ export interface RenameItem {
   message: string | null
 }
 
+export type StagedLine =
+  | { kind: 'tag'; id: number; name: string; field: string; old: string | null; new: string | null }
+  | { kind: 'path'; id: number; name: string; old: string; new: string }
+  | { kind: 'folder'; src: string; old: string | null; new: string | null; tracks: number }
+
+export interface StagedAction {
+  id: number
+  ts: number
+  summary: string
+  count: number
+  details: boolean
+  lines: StagedLine[]
+}
+
 export interface StagedDir {
   src: string
   dst: string
@@ -315,6 +329,7 @@ export const api = {
   staged: {
     list: () => request<{ count: number; tracks: StagedTrack[]; dirs: StagedDir[] }>('GET', '/api/staged'),
     count: () => request<StagedCount>('GET', '/api/staged/count'),
+    actions: () => request<{ count: number; steps: StagedAction[]; other: StagedLine[] }>('GET', '/api/staged/actions'),
     undo: () => request<{ summary: string; restored: number }>('POST', '/api/staged/undo'),
     apply: (trackIds?: number[]) =>
       request<{ applied: number; folders?: number; errors: WriteError[]; change_id: number | null }>(
