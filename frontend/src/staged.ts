@@ -1,5 +1,5 @@
 // Staged changes: overlay on tracks, the Review dialog and the History dialog.
-import { api, EditResult, Track, WriteError } from './api'
+import { api, EditResult, StagedLine, Track, WriteError } from './api'
 import { toast } from './toast'
 import { esc } from './util'
 import { state } from './state'
@@ -78,44 +78,65 @@ function modalShell(title: string) {
 }
 
 function fmtVal(v: string | null): string {
-  return v ? esc(v.length > 80 ? v.slice(0, 80) + '…' : v) : '<span class="fix-empty">empty</span>'
+  return v ? esc(v.length > 60 ? v.slice(0, 60) + '…' : v) : '<span class="fix-empty">empty</span>'
 }
 
-/** List every staged change; write or discard all, or discard per track. */
+const base = (p: string) => p.split('/').pop() ?? p
+const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/'))
+
+/** One compact line for one change. */
+function lineHtml(l: StagedLine, failures: Map<string, string>): string {
+  let what: string, from: string, to: string
+  if (l.kind === 'tag') {
+    what = `<span class="rv-subject">${esc(l.name)}</span> · ${esc(FIELD_LABELS[l.field] ?? l.field)}`
+    from = fmtVal(l.old); to = fmtVal(l.new)
+  } else if (l.kind === 'path') {
+    const sameDir = dirOf(l.old!) === dirOf(l.new!)
+    what = `<span class="rv-subject">${esc(l.name)}</span> · ${sameDir ? 'rename' : 'move'}`
+    from = esc(sameDir ? base(l.old!) : shortPath(l.old!))
+    to = esc(sameDir ? base(l.new!) : shortPath(l.new!))
+  } else {
+    what = `<span class="rv-subject">📁 ${esc(base(l.src))}</span> · folder (${l.tracks} track${l.tracks !== 1 ? 's' : ''} + files)`
+    from = esc(l.old ? shortPath(l.old) : shortPath(l.src))
+    to = l.new ? esc(shortPath(l.new)) : '<span class="fix-empty">stays</span>'
+  }
+  const key = l.kind === 'folder' ? `dir:${l.src}` : `id:${l.id}`
+  const err = failures.get(key)
+  const shared = l.kind === 'folder' && l.new && /\/Shared(\/|$)/.test(l.src) && !/\/Shared(\/|$)/.test(l.new)
+  return `<li class="rv-line${err ? ' rv-failed' : ''}">
+      <span class="rv-what">${what}</span>
+      <span class="rv-from">${from}</span><span class="rv-arrow">→</span><span class="rv-to">${to}</span>
+      ${err ? `<span class="rv-note rv-err">⚠ ${esc(err)}</span>` : ''}
+      ${shared ? '<span class="rv-note rv-warn">leaving Shared: unmonitor in Lidarr first</span>' : ''}
+    </li>`
+}
+
+const MAX_LINES = 500
+
+/** Staged changes as actions (newest first); expand one to see its changes. */
 export async function openReview(onChanged: () => Promise<void>) {
   const m = modalShell('Review changes')
-  let failures = new Map<number, string>()
-  let dirFailures = new Map<string, string>()
+  const failures = new Map<string, string>()
+  const open = new Set<string>()
 
   const render = async () => {
-    const [{ count, tracks, dirs }, st] = await Promise.all([api.staged.list(), api.staged.count()])
-    m.titleEl.textContent = count
-      ? `Review changes — ${count} change${count !== 1 ? 's' : ''}`
-      : 'Review changes'
+    const r = await api.staged.actions()
+    const groups: { key: string; summary: string; ts?: number; lines: StagedLine[]; details: boolean; count: number; undo: boolean }[] =
+      r.steps.map((s, i) => ({ key: `s${s.id}`, summary: s.summary, ts: s.ts, lines: s.lines,
+                               details: s.details, count: s.count, undo: i === 0 }))
+    if (r.other.length) groups.push({ key: 'other', summary: 'Other staged changes', lines: r.other,
+                                      details: true, count: r.other.length, undo: false })
+    // Open anything with a failure, and a lone action.
+    for (const g of groups) {
+      if (g.lines.some(l => failures.has(l.kind === 'folder' ? `dir:${l.src}` : `id:${l.id}`))) open.add(g.key)
+    }
+    if (groups.length === 1) open.add(groups[0].key)
+
+    m.titleEl.textContent = 'Review changes'
+      + (groups.length ? ` — ${groups.length} action${groups.length !== 1 ? 's' : ''}` : '')
     m.body.innerHTML = ''
     m.footer.innerHTML = ''
-    // Undo the newest staging step (works on what's staged, not the files).
-    const undoStep = document.createElement('button')
-    undoStep.className = 'btn btn-ghost review-undo-step'
-    undoStep.hidden = !st.last_step
-    if (st.last_step) {
-      undoStep.textContent = '↶ Undo last step'
-      undoStep.title = `${st.last_step.summary} · ${st.steps} step${st.steps !== 1 ? 's' : ''} staged`
-    }
-    undoStep.addEventListener('click', async () => {
-      undoStep.disabled = true
-      try {
-        const r = await api.staged.undo()
-        toast(`Undid staged: ${r.summary}`, 'success')
-        await onChanged()
-        await render()
-      } catch (e) {
-        toast(`Undo failed: ${errText(e)}`, 'error')
-        undoStep.disabled = false
-      }
-    })
-    m.footer.append(undoStep)
-    if (!count) {
+    if (!groups.length) {
       m.body.innerHTML = '<p class="review-empty">Nothing staged. Edits wait here until you write them.</p>'
       const ok = document.createElement('button')
       ok.className = 'btn btn-ghost'
@@ -124,74 +145,58 @@ export async function openReview(onChanged: () => Promise<void>) {
       m.footer.append(ok)
       return
     }
-    for (const d of dirs) {
-      const err = dirFailures.get(d.src)
-      const fromShared = /\/Shared(\/|$)/.test(d.src) && !/\/Shared(\/|$)/.test(d.dst)
-      const section = document.createElement('div')
-      section.className = 'fix-confirm-track'
-      section.innerHTML = `
-        <div class="fix-confirm-track-header">
-          <span class="fix-confirm-track-name">📁 ${esc(d.src.split('/').pop() ?? d.src)}
-            <span class="fix-confirm-source">${d.tracks} track${d.tracks !== 1 ? 's' : ''} + everything else in it</span></span>
-          <button class="btn btn-ghost btn-sm review-discard-dir" data-src="${esc(d.src)}">Discard</button>
+
+    const list = document.createElement('ul')
+    list.className = 'rv-actions'
+    for (const g of groups) {
+      const isOpen = open.has(g.key)
+      const n = g.details ? g.lines.length : g.count
+      const li = document.createElement('li')
+      li.className = 'rv-action' + (isOpen ? ' rv-open' : '')
+      const when = g.ts ? new Date(g.ts * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
+      li.innerHTML = `
+        <div class="rv-head" data-key="${g.key}">
+          <span class="rv-caret">${isOpen ? '▾' : '▸'}</span>
+          <span class="rv-summary">${esc(g.summary)}</span>
+          <span class="rv-meta">${n.toLocaleString()} change${n !== 1 ? 's' : ''}${when ? ' · ' + esc(when) : ''}</span>
+          ${g.undo ? '<button class="btn btn-ghost btn-sm rv-undo" title="Undo this staged action (files are untouched)">↶ Undo</button>' : ''}
         </div>
-        ${err ? `<div class="review-error">⚠ ${esc(err)}</div>` : ''}
-        ${fromShared ? '<div class="review-warn">Leaving Shared: unmonitor this album in Lidarr first, or Lidarr will try to download it again.</div>' : ''}
-        <table class="fix-confirm-table"><tbody><tr>
-          <td class="fix-col-field">Folder</td>
-          <td class="fix-col-current review-path">${esc(shortPath(d.src))}</td>
-          <td class="fix-col-arrow">→</td>
-          <td class="fix-col-proposed review-path">${esc(shortPath(d.dst))}</td>
-        </tr></tbody></table>`
-      m.body.appendChild(section)
+        ${isOpen ? `<ul class="rv-lines">${
+          !g.details ? '<li class="rv-line rv-nodetail">Details weren\'t recorded for this action (staged before this version).</li>'
+          : g.lines.slice(0, MAX_LINES).map(l => lineHtml(l, failures)).join('')
+            + (g.lines.length > MAX_LINES ? `<li class="rv-line rv-nodetail">…and ${(g.lines.length - MAX_LINES).toLocaleString()} more</li>` : '')
+        }</ul>` : ''}`
+      list.appendChild(li)
     }
-    m.body.querySelectorAll<HTMLButtonElement>('.review-discard-dir').forEach(b => {
-      b.addEventListener('click', async () => {
-        b.disabled = true
-        await api.staged.discard([], [b.dataset.src!])
-        await onChanged()
-        await render()
+    m.body.appendChild(list)
+
+    list.querySelectorAll<HTMLElement>('.rv-head').forEach(h => {
+      h.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('.rv-undo')) return
+        const k = h.dataset.key!
+        open.has(k) ? open.delete(k) : open.add(k)
+        render()
       })
     })
-    for (const t of tracks) {
-      const rows = t.changes.map(c => `<tr>
-          <td class="fix-col-field">${esc(FIELD_LABELS[c.field] ?? c.field)}</td>
-          <td class="fix-col-current">${fmtVal(c.old)}</td>
-          <td class="fix-col-arrow">→</td>
-          <td class="fix-col-proposed">${fmtVal(c.new)}</td>
-        </tr>`).join('')
-      const move = t.new_path ? `<tr>
-          <td class="fix-col-field">Move</td>
-          <td class="fix-col-current review-path">${esc(shortPath(t.path))}</td>
-          <td class="fix-col-arrow">→</td>
-          <td class="fix-col-proposed review-path">${esc(shortPath(t.new_path))}</td>
-        </tr>` : ''
-      const err = failures.get(t.id)
-      const section = document.createElement('div')
-      section.className = 'fix-confirm-track'
-      section.innerHTML = `
-        <div class="fix-confirm-track-header">
-          <span class="fix-confirm-track-name" title="${esc(t.path)}">${esc(t.title || t.filename)}</span>
-          <button class="btn btn-ghost btn-sm review-discard" data-id="${t.id}">Discard</button>
-        </div>
-        ${err ? `<div class="review-error">⚠ ${esc(err)}</div>` : ''}
-        <table class="fix-confirm-table"><tbody>${rows}${move}</tbody></table>`
-      m.body.appendChild(section)
-    }
-    m.body.querySelectorAll<HTMLButtonElement>('.review-discard').forEach(b => {
-      b.addEventListener('click', async () => {
-        b.disabled = true
-        await api.staged.discard([Number(b.dataset.id)])
+    list.querySelector<HTMLButtonElement>('.rv-undo')?.addEventListener('click', async (e) => {
+      const b = e.currentTarget as HTMLButtonElement
+      b.disabled = true
+      try {
+        const u = await api.staged.undo()
+        toast(`Undid staged: ${u.summary}`, 'success')
         await onChanged()
         await render()
-      })
+      } catch (err) {
+        toast(`Undo failed: ${errText(err)}`, 'error')
+        b.disabled = false
+      }
     })
 
     const discardAll = document.createElement('button')
     discardAll.className = 'btn btn-ghost'
     discardAll.textContent = 'Discard all'
     discardAll.addEventListener('click', async () => {
-      if (!confirm(`Discard all ${count} staged change${count !== 1 ? 's' : ''}?`)) return
+      if (!confirm('Discard everything staged?')) return
       await api.staged.discard()
       await onChanged()
       m.close()
@@ -199,29 +204,28 @@ export async function openReview(onChanged: () => Promise<void>) {
     })
     const write = document.createElement('button')
     write.className = 'btn btn-primary'
-    write.textContent = `Write ${count} change${count !== 1 ? 's' : ''}`
+    write.textContent = `Write all (${r.count.toLocaleString()} item${r.count !== 1 ? 's' : ''})`
     write.addEventListener('click', async () => {
       write.disabled = discardAll.disabled = true
       write.textContent = 'Writing…'
       try {
         const res = await api.staged.apply()
         await onChanged()
+        failures.clear()
+        for (const e of res.errors as WriteError[]) failures.set(e.dir ? `dir:${e.dir}` : `id:${e.id}`, e.error)
+        const done = `Wrote ${res.applied} track${res.applied !== 1 ? 's' : ''}`
+          + (res.folders ? ` · moved ${res.folders} folder${res.folders !== 1 ? 's' : ''}` : '')
         if (res.errors.length) {
-          failures = new Map(res.errors.filter((e: WriteError) => e.id !== undefined)
-            .map((e: WriteError) => [e.id!, e.error]))
-          dirFailures = new Map(res.errors.filter((e: WriteError) => e.dir)
-            .map((e: WriteError) => [e.dir!, e.error]))
-          toast(`Wrote ${res.applied}; ${res.errors.length} need attention`, 'error')
+          toast(`${done}; ${res.errors.length} need attention`, 'error')
           await render()
         } else {
-          toast(`Wrote ${res.applied} track${res.applied !== 1 ? 's' : ''}`
-            + (res.folders ? ` · moved ${res.folders} folder${res.folders !== 1 ? 's' : ''}` : ''), 'success')
+          toast(done, 'success')
           m.close()
         }
       } catch (e) {
         toast(`Write failed: ${e}`, 'error')
         write.disabled = discardAll.disabled = false
-        write.textContent = `Write ${count} changes`
+        write.textContent = 'Write all'
       }
     })
     m.footer.append(discardAll, write)

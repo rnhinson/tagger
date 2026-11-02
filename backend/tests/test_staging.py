@@ -374,3 +374,72 @@ def test_step_label_names_the_changed_fields(client, lib):
     assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Set genre on 2 tracks"
     client.patch(f"/api/tags/{a}", json={"title": "A2", "album_artist": "X"})
     assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Edited album artist, title — A"
+
+
+# ── Review grouped by action ─────────────────────────────────────────────────
+
+def test_actions_group_lines_by_step_newest_first(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A", genre="Rock", album="Al", album_artist="X", track_number="1")
+    b = _insert(lib / "Shared" / "b.mp3", title="B", genre="Rock")
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "Folk"}})
+    client.patch(f"/api/tags/{a}", json={"genre": "Jazz", "year": "2001"})
+    client.post("/api/tags/reorganize", json={"track_ids": [a]})
+    r = client.get("/api/staged/actions").json()
+    assert [s["summary"] for s in r["steps"]] == ["Organize 1 files", "Edited genre, year — A", "Set genre on 2 tracks"]
+    org, edit, bulk = r["steps"]
+    assert [l["kind"] for l in org["lines"]] == ["path"] and org["lines"][0]["new"].endswith("/X/Al/01 A.mp3")
+    assert {(l["field"], l["old"], l["new"]) for l in edit["lines"]} == {("genre", "Folk", "Jazz"), ("year", None, "2001")}
+    assert {(l["name"], l["old"], l["new"]) for l in bulk["lines"]} == {("A", "Rock", "Folk"), ("B", "Rock", "Folk")}
+    assert r["other"] == [] and r["count"] == 2
+
+
+def test_actions_track_discards_and_undo(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A")
+    b = _insert(lib / "Shared" / "b.mp3", title="B")
+    client.post("/api/tags/bulk", json={"track_ids": [a, b], "tags": {"genre": "G"}})
+    client.post("/api/staged/discard", json={"track_ids": [a]})
+    s = client.get("/api/staged/actions").json()["steps"]
+    assert len(s) == 1 and [l["name"] for l in s[0]["lines"]] == ["B"]
+    client.post("/api/staged/undo")
+    assert client.get("/api/staged/actions").json() == {"count": 0, "steps": [], "other": []}
+
+
+def test_actions_show_folder_moves_and_untracked_changes(client, lib):
+    (lib / "Shared" / "A").mkdir()
+    client.post("/api/fs/move", json={"src": str(lib / "Shared" / "A"), "dst": str(lib / "Shared" / "B")})
+    line = client.get("/api/staged/actions").json()["steps"][0]["lines"][0]
+    assert line["kind"] == "folder" and line["old"] is None and line["new"].endswith("/Shared/B")
+    # a staged entry with no step (e.g. a move left over from a failed write)
+    t = _insert(lib / "Shared" / "c.mp3", title="C")
+    from core.database import db
+    with db() as conn:
+        conn.execute("INSERT INTO staged (track_id, tags, new_path, staged_at) VALUES (?, '{}', ?, 1)",
+                     (t, str(lib / "Shared" / "d.mp3")))
+    other = client.get("/api/staged/actions").json()["other"]
+    assert [(l["kind"], l["name"]) for l in other] == [("path", "C")]
+
+
+def test_steps_from_before_details_still_list_and_undo(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="A")
+    client.patch(f"/api/tags/{a}", json={"title": "B"})
+    from core.database import db
+    with db() as conn:
+        conn.execute("UPDATE staged_steps SET after = NULL")
+    s = client.get("/api/staged/actions").json()["steps"][0]
+    assert s["details"] is False and s["lines"] == [] and s["count"] == 1
+    client.post("/api/staged/undo")
+    assert client.get("/api/staged/count").json()["count"] == 0
+
+
+def test_migration_adds_after_to_an_existing_steps_table(tmp_path, monkeypatch):
+    import sqlite3
+    from core.database import init_db
+    monkeypatch.setattr(settings, "config_dir", tmp_path)
+    con = sqlite3.connect(tmp_path / "library.db")
+    con.execute("CREATE TABLE staged_steps (id INTEGER PRIMARY KEY, ts REAL, summary TEXT, data TEXT)")
+    con.execute("INSERT INTO staged_steps (ts, summary, data) VALUES (1, 'old', '{}')")
+    con.commit(); con.close()
+    init_db()
+    con = sqlite3.connect(tmp_path / "library.db")
+    assert "after" in {r[1] for r in con.execute("PRAGMA table_info(staged_steps)")}
+    assert con.execute("SELECT summary, after FROM staged_steps").fetchall() == [("old", None)]

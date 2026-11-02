@@ -111,8 +111,13 @@ def _stage_folder(src: str, dst: str, summary: str) -> dict:
 @router.post("/move")
 def move_folder(req: FolderMove):
     """Stage moving a folder (with everything in it) to dst."""
-    return _stage_folder(req.src, req.dst,
-                         f"Move folder {os.path.basename(req.src)} → {os.path.dirname(req.dst)}")
+    from core.config import settings
+    parent = os.path.dirname(os.path.normpath(req.dst))
+    try:
+        where = os.path.relpath(parent, settings.music_dir)
+    except ValueError:
+        where = parent
+    return _stage_folder(req.src, req.dst, f"Move folder {os.path.basename(req.src)} → {where}")
 
 
 @router.post("/rename")

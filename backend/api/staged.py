@@ -54,6 +54,13 @@ def list_staged():
     return {"count": len(tracks) + len(folders), "tracks": tracks, "dirs": folders}
 
 
+@router.get("/actions")
+def staged_actions():
+    """Staged changes grouped by action (newest first), one line per change."""
+    with db() as conn:
+        return staging.describe(conn)
+
+
 @router.get("/count")
 def staged_count():
     """Staged tracks, plus the staging undo stack (newest step first)."""

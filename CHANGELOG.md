@@ -49,6 +49,12 @@
   existing file, rename chains) are flagged and never staged.
 - The default track order sorts disc/track numbers as numbers (it put 10
   before 2).
+- **Review lists actions, not files**: one row per staging action ("Rename
+  29 files", "Set genre on 120 tracks", newest first) with ↶ Undo on the
+  newest; expand a row for one compact line per change. Changes staged
+  outside an action (e.g. a move left by a failed write) appear under
+  "Other staged changes". Steps now record their result (`after`);
+  steps from earlier versions still list and undo, without details.
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root

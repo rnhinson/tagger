@@ -43,6 +43,11 @@ def _migrate(conn) -> None:
     ):
         if col not in have:
             conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
+    # Staging steps record what they changed TO (for Review), not just what
+    # they replaced (for undo). Steps from before this have no details.
+    steps = {r[1] for r in conn.execute("PRAGMA table_info(staged_steps)")}
+    if "after" not in steps:
+        conn.execute("ALTER TABLE staged_steps ADD COLUMN after TEXT")
 
 
 def init_db() -> None:
@@ -155,7 +160,8 @@ def init_db() -> None:
                 id      INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts      REAL NOT NULL,
                 summary TEXT NOT NULL,
-                data    TEXT NOT NULL   -- JSON: track_id -> previous entry or null
+                data    TEXT NOT NULL,  -- JSON: track_id -> previous entry or null
+                after   TEXT            -- JSON: same keys -> entry after the step
             );
         """)
         _migrate(conn)
