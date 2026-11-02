@@ -467,6 +467,9 @@ export const api = {
     albumSearch: (trackIds: number[], album?: string, artist?: string) =>
       request<{ album: string | null; artist: string | null; local_tracks: number; candidates: MbCandidate[] }>(
         'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist }),
+    albumScore: (trackIds: number[], mbAlbumId: string) =>
+      request<{ mb_album_id: string; quality: number; matched: number; local: number; release_tracks: number }>(
+        'POST', '/api/lookup/album/score', { track_ids: trackIds, mb_album_id: mbAlbumId }),
     albumMatch: (trackIds: number[], mbAlbumId: string) =>
       request<MbMatch>('POST', '/api/lookup/album/match', { track_ids: trackIds, mb_album_id: mbAlbumId }),
     albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean }) =>

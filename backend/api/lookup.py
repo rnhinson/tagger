@@ -250,6 +250,16 @@ async def album_match(req: AlbumMatch):
             "unmatched": [t["key"] for t in rel["tracks"] if t["key"] not in used]}
 
 
+@router.post("/album/score")
+async def album_score(req: AlbumMatch):
+    """One candidate's fit to the selection -- the dialog ranks candidates by this."""
+    rel = await asyncio.to_thread(_release, req.mb_album_id)
+    with db() as conn:
+        tracks = _selection(conn, req.track_ids)
+    q = albummatch.quality(tracks, rel["tracks"])
+    return {"mb_album_id": req.mb_album_id, **{k: v for k, v in q.items() if k != "pairs"}}
+
+
 class AlbumApply(BaseModel):
     mb_album_id: str
     pairs: dict[int, str]                    # track id -> release track key

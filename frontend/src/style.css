@@ -1322,6 +1322,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 button.scan-status { background: transparent; border: 0; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 button.scan-status:hover { color: var(--text); background: var(--surface2); }
 button.scan-status[hidden] { display: none; }
+.mb-cand-wrap { border-bottom: 1px solid var(--border); }
+.mb-cand-wrap .mb-cand { border-bottom: 0; width: 100%; }
+.mb-cand-wrap.mb-open { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.mb-cand-detail:empty { display: none; }
+.mb-cand-detail { padding: 0 8px 8px 24px; }
+.mb-cand-tracks { display: flex; gap: 8px; align-items: center; }
 
 /* ── Session expired (auth proxy redirect) ────────────────────────────────── */
 .session-expired {

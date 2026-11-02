@@ -66,3 +66,15 @@ def test_search_puts_the_tagged_release_first(client, lib, monkeypatch):
     r = client.post("/api/lookup/album/search", json={"track_ids": [a]}).json()
     assert [c["mb_album_id"] for c in r["candidates"]] == [REL_ID, "x-other"] and r["candidates"][0]["tagged"]
     assert (r["album"], r["artist"], r["local_tracks"]) == ("Abbey Road", "The Beatles", 1)
+
+
+def test_quality_counts_unmatched_tracks_as_zero(client, lib, monkeypatch):
+    local = [{"id": 1, "title": "Come Together", "track_number": "1", "duration": 259},
+             {"id": 2, "title": "Something", "track_number": "2", "duration": 182}]
+    full = albummatch.quality(local, RELEASE["tracks"])
+    half = albummatch.quality(local, RELEASE["tracks"][:1])
+    assert full["matched"] == 2 and half["matched"] == 1 and full["quality"] > half["quality"] > 0
+    monkeypatch.setattr(mbp, "get_release", lambda _id: RELEASE)
+    a = _insert(lib / "Shared" / "x" / "1.mp3", title="Come Together", track_number="1", duration=259.0)
+    r = client.post("/api/lookup/album/score", json={"track_ids": [a], "mb_album_id": REL_ID}).json()
+    assert (r["matched"], r["local"], r["release_tracks"]) == (1, 1, 3) and r["quality"] > 0.9
