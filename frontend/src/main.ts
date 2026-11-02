@@ -1,5 +1,5 @@
 import './style.css'
-import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
+import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler, onSessionExpired } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
@@ -10,6 +10,7 @@ import {
 } from './quality'
 import { APP_HTML } from './template'
 import { ValueChips } from './chips'
+import { muteErrorToasts } from './toast'
 import { openCleanup } from './cleanup'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
@@ -35,6 +36,19 @@ const trackLoading   = document.getElementById('track-loading')!
 const trackCount     = document.getElementById('track-count')!
 const tagEditor      = document.getElementById('tag-editor')!
 const tagForm        = document.getElementById('tag-form') as HTMLFormElement
+
+// Session expired (auth proxy redirecting to sign-in): stop the pollers'
+// error spam and offer one way out.
+onSessionExpired(() => {
+  muteErrorToasts()
+  if (state.scanPollTimer) { clearInterval(state.scanPollTimer); state.scanPollTimer = null }
+  const bar = document.createElement('div')
+  bar.className = 'session-expired'
+  bar.innerHTML = '<span>Your sign-in has expired — unsaved edits in open dialogs are lost on reload; staged changes are kept.</span>'
+    + '<button class="btn btn-primary btn-sm" type="button">Reload to sign in</button>'
+  bar.querySelector('button')!.addEventListener('click', () => location.reload())
+  document.body.appendChild(bar)
+})
 // Genre on a multi-track selection: chips (add/remove values per track)
 // instead of one string that would overwrite every track's genres.
 // Read-only tracks (e.g. a reference mount): say so, and don't offer Save.

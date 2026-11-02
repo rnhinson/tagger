@@ -1322,3 +1322,11 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 button.scan-status { background: transparent; border: 0; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
 button.scan-status:hover { color: var(--text); background: var(--surface2); }
 button.scan-status[hidden] { display: none; }
+
+/* ── Session expired (auth proxy redirect) ────────────────────────────────── */
+.session-expired {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px;
+  background: color-mix(in srgb, var(--danger) 85%, black); color: #fff; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
