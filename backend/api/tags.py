@@ -167,6 +167,10 @@ def reorganize(req: Reorganize):
     Plan a move for each selected file to the rename template, relative to its
     own library root (core/fileops.py), and stage it -- nothing moves until the
     staged changes are written. Uses the tags as staged.
+
+    Not offered in the UI (removed 2026-11-02: a whole-selection re-file from
+    the template is too easy to fire by accident). Kept for the tests that
+    exercise staged moves + undo, and for a future CLI.
     """
     if not req.track_ids:
         raise HTTPException(400, "No track IDs provided")
