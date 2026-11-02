@@ -1330,3 +1330,5 @@ button.scan-status[hidden] { display: none; }
   background: color-mix(in srgb, var(--danger) 85%, black); color: #fff; font-size: 13px;
   box-shadow: 0 4px 16px rgba(0,0,0,.35);
 }
+.scan-now-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#scan-btn[hidden] { display: none; }

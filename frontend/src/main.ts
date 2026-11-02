@@ -1392,6 +1392,11 @@ async function loadTracks() {
 
 // ─── Scan ─────────────────────────────────────────────────────────────────────
 
+/** The header's Scan Library is for first-time setup; afterwards it lives in Settings. */
+async function updateScanBtnVisibility() {
+  try { scanBtn.hidden = (await api.about()).tracks > 0 } catch { /* keep as is */ }
+}
+
 function updateRescanBtn() {
   rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
   const movable = isMovableFolder(state.selectedDirectory)
@@ -1424,6 +1429,7 @@ function pollScan(jobId: string) {
         state.scanPollTimer = null
         scanBtn.disabled = false
         updateRescanBtn()
+        updateScanBtnVisibility()
         if (job.status === 'done') {
           toast(`Scan complete — ${job.total.toLocaleString()} files, ${(job.changed ?? 0).toLocaleString()} changed`, 'success')
           state.qualityIssues = null
@@ -2587,6 +2593,15 @@ searchEl.addEventListener('input', () => {
 })
 
 scanBtn.addEventListener('click', () => startScan())
+document.addEventListener('click', async (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-scan-now]')
+  if (!b) return
+  b.disabled = true
+  await startScan()
+  if (settingsModal.classList.contains('open')) showSettingsTab('background')
+  b.disabled = false
+})
+updateScanBtnVisibility()
 rescanFolderBtn.addEventListener('click', () => {
   if (state.selectedDirectory) startScan(state.selectedDirectory)
 })
