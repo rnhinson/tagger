@@ -10,6 +10,7 @@ import {
 } from './quality'
 import { APP_HTML } from './template'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
+import { openBulkRename } from './bulkrename'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1538,6 +1539,13 @@ function showRenameFolder() {
 }
 
 moveFolderBtn.addEventListener('click', showMoveFolder)
+
+// Bulk rename: list order = the view's order (counters number in that order).
+document.getElementById('bulk-rename-btn')!.addEventListener('click', () => {
+  const onPage = state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.id)
+  const ids = onPage.length === state.selectedIds.size ? onPage : [...state.selectedIds]
+  if (ids.length) openBulkRename(ids, refreshAfterStage)
+})
 
 // ─── Drag and drop: folders and tracks onto a folder in the Files tree ─────────
 // A drop stages a move (same as Move…); nothing touches disk until written.

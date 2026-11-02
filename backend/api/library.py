@@ -149,7 +149,9 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         # Group duplicates together so they're visually adjacent
         order = "ORDER BY LOWER(COALESCE(title,'')), LOWER(COALESCE(artist,'')), path"
     else:
-        order = "ORDER BY directory, disc_number, track_number, title"
+        # Disc/track numbers are text tags ("10", "2/12"): sort them as numbers.
+        order = ("ORDER BY directory, CAST(disc_number AS INTEGER), "
+                 "CAST(track_number AS INTEGER), filename")
 
     return where, params, order
 

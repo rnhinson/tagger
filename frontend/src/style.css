@@ -1086,3 +1086,31 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
   position: fixed; top: -100px; left: -100px; padding: 4px 10px; border-radius: var(--radius);
   background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap;
 }
+
+/* ─── Bulk rename (PowerRename-style) ─────────────────────────────────────────── */
+.pr-modal { width: min(1000px, 96vw); max-height: 90vh; }
+.pr-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.pr-controls input[type=text] { font-family: ui-monospace, monospace; }
+.pr-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; grid-column: 1 / -1; }
+.pr-select { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.pr-select select { padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+.pr-help-wrap { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.pr-help-wrap summary { cursor: pointer; }
+.pr-help { margin-top: 6px; border-collapse: collapse; }
+.pr-help td { padding: 2px 8px 2px 0; vertical-align: top; }
+#pr-error { grid-column: 1 / -1; margin: 0; }
+.pr-summary { padding: 8px 16px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); }
+.pr-bad { color: var(--danger); }
+.pr-body { padding: 0; }
+.pr-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: ui-monospace, monospace; }
+.pr-table th { position: sticky; top: 0; background: var(--surface); text-align: left; padding: 6px 8px; color: var(--text-muted); font-family: var(--font); font-weight: 600; border-bottom: 1px solid var(--border); }
+.pr-table td { padding: 3px 8px; vertical-align: top; word-break: break-all; }
+.pr-check { width: 28px; }
+.pr-folder td { color: var(--text-muted); font-family: var(--font); padding-top: 8px; }
+.pr-old { color: var(--text-muted); width: 50%; }
+.pr-rename .pr-new { color: var(--text); font-weight: 600; }
+.pr-conflict .pr-new, .pr-error .pr-new { color: var(--danger); }
+.pr-excluded .pr-new { text-decoration: line-through; color: var(--text-dim); font-weight: 400; }
+.pr-same { color: var(--text-dim); font-style: italic; }
+.pr-msg { font-family: var(--font); font-weight: 400; font-size: 11px; }
+@media (max-width: 700px) { .pr-controls { grid-template-columns: 1fr; } }

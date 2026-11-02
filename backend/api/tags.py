@@ -239,6 +239,123 @@ def move_to_folder(req: MoveTo):
             "staged": res["staged"]}
 
 
+class BulkRename(BaseModel):
+    track_ids: list[int]              # in list order (counters number in this order)
+    find: str = ""
+    replace: str = ""
+    regex: bool = False
+    case_sensitive: bool = False
+    match_all: bool = True
+    apply_to: str = "name"            # name | ext | both
+    transform: str = "none"           # none | lower | upper | title | capitalize
+    exclude: list[int] = []           # rows unticked in the preview
+
+
+def _plan_renames(conn, req: BulkRename) -> list[dict]:
+    """
+    The PowerRename-style plan for each track: its current name (as staged),
+    the new one, and whether it can be renamed. Raises HTTP 400 for a bad
+    search or template.
+    """
+    import os
+    from collections import Counter
+    from core import powerrename as pr
+
+    if req.apply_to not in ("name", "ext", "both"):
+        raise HTTPException(400, "apply_to must be name, ext or both")
+    if req.transform not in ("none", "lower", "upper", "title", "capitalize"):
+        raise HTTPException(400, "unknown text formatting")
+    opts = pr.Options(find=req.find, replace=req.replace, regex=req.regex,
+                      case_sensitive=req.case_sensitive, match_all=req.match_all,
+                      apply_to=req.apply_to, transform=req.transform)
+    try:
+        pattern = pr.compile_search(opts)
+        tpl = pr.parse_template(req.replace, req.regex)
+    except pr.RenameError as exc:
+        raise HTTPException(400, str(exc))
+
+    by_id = {r["id"]: r for r in _rows(conn, req.track_ids)}
+    rows = [by_id[t] for t in dict.fromkeys(req.track_ids) if t in by_id]
+    entries = staging.load(conn, [r["id"] for r in rows])
+    dirs = staging.load_dirs(conn)
+    items = []
+    for i, row in enumerate(rows):
+        cur = (entries.get(row["id"]) or {}).get("new_path") or row["path"]
+        folder, name = os.path.split(cur)
+        item = {"id": row["id"], "folder": folder, "old": name, "new": name, "status": "same", "message": None}
+        items.append(item)
+        if dirs and staging.moved_path(row["path"], dirs):
+            item.update(status="error", message="its folder is staged to move -- write that first")
+            continue
+        try:
+            new = pr.rename_one(name, opts, pattern, tpl, i)
+        except pr.RenameError as exc:
+            raise HTTPException(400, str(exc))
+        item["new"] = new
+        if new == name:
+            continue
+        problem = pr.check_name(new)
+        if problem:
+            item.update(status="error", message=problem)
+            continue
+        item["status"] = "rename"
+
+    # Clashes: two files ending up with one name (case-insensitively -- the
+    # share is SMB), or a name that's already taken on disk by another file.
+    final = Counter((it["folder"], it["new"].lower()) for it in items if it["status"] != "error")
+    moving_away = {os.path.join(it["folder"], it["old"]).lower(): it["id"]
+                   for it in items if it["status"] == "rename"}
+    for it in items:
+        if it["status"] != "rename":
+            continue
+        target = os.path.join(it["folder"], it["new"])
+        taker = moving_away.get(target.lower())
+        if final[(it["folder"], it["new"].lower())] > 1:
+            it.update(status="conflict", message="another file would get the same name")
+        elif taker is not None and taker != it["id"]:
+            it.update(status="conflict",
+                      message="takes the name of another file being renamed -- do it in two passes")
+        elif os.path.exists(target) and not _samefile(os.path.join(it["folder"], it["old"]), target):
+            it.update(status="conflict", message="a file with that name already exists")
+    return items
+
+
+def _samefile(a: str, b: str) -> bool:
+    import os
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+@router.post("/rename-preview")
+def bulk_rename_preview(req: BulkRename):
+    """Original and new name for each selected file -- nothing is staged."""
+    from collections import Counter
+    with db() as conn:
+        items = _plan_renames(conn, req)
+    counts = Counter(it["status"] for it in items)
+    return {"items": items, "counts": dict(counts)}
+
+
+@router.post("/rename")
+def bulk_rename(req: BulkRename):
+    """Stage the planned renames (minus excluded rows and anything flagged)."""
+    import os
+    skip = set(req.exclude)
+    with db() as conn:
+        items = _plan_renames(conn, req)
+        todo = [it for it in items if it["status"] == "rename" and it["id"] not in skip]
+        rows = {r["id"]: r for r in _rows(conn, [it["id"] for it in todo])}
+        step = staging.Step(conn, f"Rename {len(todo)} file{'s' if len(todo) != 1 else ''}")
+        for it in todo:
+            staging.stage(conn, rows[it["id"]], new_path=os.path.join(it["folder"], it["new"]), step=step)
+        res = _finish(conn, step, [it["id"] for it in todo])
+    blocked = [it for it in items if it["status"] in ("conflict", "error")]
+    return {"planned": len(todo), "skipped": len(blocked), "staged": res["staged"],
+            "moved": 0 if res["staged"] else res["applied"], "errors": res.get("errors", [])}
+
+
 @router.post("/bulk")
 def bulk_update_tags(update: BulkTagUpdate):
     updates = update.tags.model_dump(exclude_none=True)

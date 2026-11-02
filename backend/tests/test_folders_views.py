@@ -141,7 +141,7 @@ def test_track_ids_cover_every_page_in_view_order(client, lib):
     a, b, c, d = _rows(lib)
     r = client.get("/api/library/track-ids?sort=track_number").json()
     assert r["ids"] == [c, b, d, a]
-    assert client.get("/api/library/track-ids?quality=good").json()["ids"] == [a, b]
+    assert client.get("/api/library/track-ids?quality=good").json()["ids"] == [b, a]   # track 2, 10
 
 
 def test_summary_reports_shared_and_mixed_values_as_staged(client, lib):
@@ -176,3 +176,9 @@ def test_move_files_into_a_folder_validation(client, lib):
     assert r.status_code == 400 and "not found" in r.json()["detail"]
     r = client.post("/api/tags/move-to", json={"track_ids": [tid], "folder": str(lib / "Shared")}).json()
     assert r["planned"] == 0   # already there
+
+
+def test_default_order_is_numeric_by_track(client, lib):
+    ids = {n: _insert(lib / "Shared" / "Al" / f"{n}.mp3", track_number=str(n)) for n in (10, 2, 1)}
+    got = [t["id"] for t in client.get("/api/library/tracks").json()["tracks"]]
+    assert got == [ids[1], ids[2], ids[10]]

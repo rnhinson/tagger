@@ -42,6 +42,13 @@
   holding library roots can't be moved.
 - Staging no longer reloads the folder tree, and a reload after a write
   keeps open folders open.
+- **Rename files…** (PowerRename-style) for the selection: plain or regex
+  search, `$1` / `${name}` / `$0` captures, `${start=,increment=,padding=}`
+  counters, apply to name / extension / both, case formatting, and a live
+  before/after preview with per-row opt-out. Clashes (same new name, an
+  existing file, rename chains) are flagged and never staged.
+- The default track order sorts disc/track numbers as numbers (it put 10
+  before 2).
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root

@@ -36,7 +36,8 @@ def list_staged():
             return {"count": len(folders), "tracks": [], "dirs": folders}
         ph = ",".join("?" * len(entries))
         rows = conn.execute(
-            f"SELECT * FROM tracks WHERE id IN ({ph}) ORDER BY directory, disc_number, track_number, filename",
+            f"SELECT * FROM tracks WHERE id IN ({ph}) ORDER BY directory, CAST(disc_number AS INTEGER), "
+            "CAST(track_number AS INTEGER), filename",
             list(entries),
         ).fetchall()
     tracks = []
