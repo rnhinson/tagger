@@ -58,6 +58,7 @@ def test_folder_move_validation(client, lib):
         ({"src": str(a), "dst": str(lib / "Shared" / "B")}, "already exists"),
         ({"src": str(a), "dst": str(lib / "Elsewhere" / "A")}, "inside a library root"),
         ({"src": str(a), "dst": str(lib / "Libraries")}, "inside a library root"),
+        ({"src": str(lib / "Libraries"), "dst": str(lib / "Shared" / "L")}, "holds library roots"),
     ]
     for body, msg in bad:
         r = client.post("/api/fs/move", json=body)
@@ -140,7 +141,7 @@ def test_track_ids_cover_every_page_in_view_order(client, lib):
     a, b, c, d = _rows(lib)
     r = client.get("/api/library/track-ids?sort=track_number").json()
     assert r["ids"] == [c, b, d, a]
-    assert client.get("/api/library/track-ids?quality=good").json()["ids"] == [a, b]
+    assert client.get("/api/library/track-ids?quality=good").json()["ids"] == [b, a]   # track 2, 10
 
 
 def test_summary_reports_shared_and_mixed_values_as_staged(client, lib):
@@ -151,3 +152,33 @@ def test_summary_reports_shared_and_mixed_values_as_staged(client, lib):
     assert s["count"] == 2
     assert s["values"]["genre"] == "G" and s["values"]["album"] == "A"
     assert "title" in s["mixed"] and "genre" not in s["mixed"]
+
+
+# ── drag and drop: files into a folder ───────────────────────────────────────
+
+@needs_ffmpeg
+def test_move_files_into_a_folder(client, lib):
+    src, ids = _album(lib, "Shared", "Loose", n=2)
+    target = lib / "Libraries" / "Music - Christmas" / "Carols"
+    target.mkdir()
+    r = client.post("/api/tags/move-to", json={"track_ids": ids, "folder": str(target)}).json()
+    assert r["planned"] == 2 and r["staged"] is True
+    assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Move 2 files → Carols"
+    client.post("/api/staged/apply", json={})
+    assert (target / "01 t.mp3").exists() and (target / "02 t.mp3").exists()
+    assert (src / "cover.jpg").exists()   # only the dragged files move
+
+
+def test_move_files_into_a_folder_validation(client, lib):
+    tid = _insert(lib / "Shared" / "a.mp3", title="A")
+    assert client.post("/api/tags/move-to", json={"track_ids": [tid], "folder": "/etc"}).status_code == 400
+    r = client.post("/api/tags/move-to", json={"track_ids": [tid], "folder": str(lib / "Shared" / "nope")})
+    assert r.status_code == 400 and "not found" in r.json()["detail"]
+    r = client.post("/api/tags/move-to", json={"track_ids": [tid], "folder": str(lib / "Shared")}).json()
+    assert r["planned"] == 0   # already there
+
+
+def test_default_order_is_numeric_by_track(client, lib):
+    ids = {n: _insert(lib / "Shared" / "Al" / f"{n}.mp3", track_number=str(n)) for n in (10, 2, 1)}
+    got = [t["id"] for t in client.get("/api/library/tracks").json()["tracks"]]
+    assert got == [ids[1], ids[2], ids[10]]

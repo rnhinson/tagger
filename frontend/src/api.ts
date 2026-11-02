@@ -42,6 +42,26 @@ export interface StagedEntry {
   new_path: string | null
 }
 
+export interface BulkRenameRequest {
+  track_ids: number[]
+  find: string
+  replace: string
+  regex: boolean
+  case_sensitive: boolean
+  match_all: boolean
+  apply_to: 'name' | 'ext' | 'both'
+  transform: 'none' | 'lower' | 'upper' | 'title' | 'capitalize'
+}
+
+export interface RenameItem {
+  id: number
+  folder: string
+  old: string
+  new: string
+  status: 'rename' | 'same' | 'conflict' | 'error'
+  message: string | null
+}
+
 export interface StagedDir {
   src: string
   dst: string
@@ -277,6 +297,14 @@ export const api = {
     reorganize: (trackIds: number[]) =>
       request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
         'POST', '/api/tags/reorganize', { track_ids: trackIds }),
+    renamePreview: (req: BulkRenameRequest) =>
+      request<{ items: RenameItem[]; counts: Record<string, number> }>('POST', '/api/tags/rename-preview', req),
+    rename: (req: BulkRenameRequest & { exclude: number[] }) =>
+      request<{ planned: number; skipped: number; staged: boolean; moved: number; errors: WriteError[] }>(
+        'POST', '/api/tags/rename', req),
+    moveTo: (trackIds: number[], folder: string) =>
+      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
+        'POST', '/api/tags/move-to', { track_ids: trackIds, folder }),
     autonumber: (trackIds: number[]) =>
       request<EditResult & { numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
     findReplace: (trackIds: number[], field: string, find: string, replace: string) =>

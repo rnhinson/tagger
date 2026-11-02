@@ -36,6 +36,19 @@
   as one directory move (cover art and other files come along), undone as
   one. Destination must be inside a library root; library roots themselves
   can't be moved. Review warns when a folder leaves Shared (Lidarr).
+- **Drag and drop** in the Files tree: drag a folder onto a folder, or
+  tracks (the selection, across pages) onto a folder -- each drop is a
+  staged move. Hovering a closed folder while dragging opens it. Folders
+  holding library roots can't be moved.
+- Staging no longer reloads the folder tree, and a reload after a write
+  keeps open folders open.
+- **Rename files…** (PowerRename-style) for the selection: plain or regex
+  search, `$1` / `${name}` / `$0` captures, `${start=,increment=,padding=}`
+  counters, apply to name / extension / both, case formatting, and a live
+  before/after preview with per-row opt-out. Clashes (same new name, an
+  existing file, rename chains) are flagged and never staged.
+- The default track order sorts disc/track numbers as numbers (it put 10
+  before 2).
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root
