@@ -1328,3 +1328,13 @@ button.scan-status[hidden] { display: none; }
 .mb-cand-detail:empty { display: none; }
 .mb-cand-detail { padding: 0 8px 8px 24px; }
 .mb-cand-tracks { display: flex; gap: 8px; align-items: center; }
+
+/* ── Session expired (auth proxy redirect) ────────────────────────────────── */
+.session-expired {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px;
+  background: color-mix(in srgb, var(--danger) 85%, black); color: #fff; font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+}
+.scan-now-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#scan-btn[hidden] { display: none; }

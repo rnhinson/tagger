@@ -51,7 +51,9 @@ export async function renderBackground(el: HTMLElement): Promise<ScanJob | null>
   el.innerHTML = `
     <div class="settings-section">
       <div class="settings-section-title">Library scan</div>
-      ${active ? current(active) : '<div class="settings-hint">No scan running. <strong>Scan Library</strong> (top bar) starts one; the automatic interval is under Settings → Scan Options.</div>'}
+      ${active ? current(active) : `<div class="bg-card bg-idle"><div class="bg-card-head"><span class="ma-dim">No scan running.${jobs[0]?.finished_at ? ` Last: ${fmtTime(jobs[0].finished_at)}.` : ''}</span>
+        <button class="btn btn-primary btn-sm" data-scan-now>Scan library now</button></div>
+        <div class="settings-hint">Reads new and changed files and drops tracks whose files are gone. The automatic interval is under Settings → Scan Options.</div></div>`}
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Recent scans</div>

@@ -50,6 +50,14 @@ jobs:
             type=sha,prefix=main-,enable={{is_default_branch}}
             type=raw,value=latest
 
+      - name: Image version for the About page
+        id: ver
+        # The tag this image is pinned by: v1.2.3 on a release tag, else main-<short sha>
+        # (metadata-action's `version` output is "latest" here, which says nothing).
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then echo "v=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else echo "v=main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -59,6 +67,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            IMAGE_VERSION=${{ steps.meta.outputs.version }}
+            IMAGE_VERSION=${{ steps.ver.outputs.v }}
             GIT_SHA=${{ github.sha }}
             BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}

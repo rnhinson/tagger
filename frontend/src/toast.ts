@@ -1,6 +1,11 @@
 export type ToastLevel = 'info' | 'success' | 'error'
 
+let muted = false
+/** After the session expires, failures are the banner's job, not a toast per call. */
+export function muteErrorToasts() { muted = true }
+
 export function toast(message: string, level: ToastLevel = 'info', duration = 3500): void {
+  if (muted && level === 'error') return
   const container = getContainer()
   const el = document.createElement('div')
   el.className = `toast toast-${level}`
