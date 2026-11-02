@@ -74,3 +74,24 @@ def test_cover_write_read_roundtrip(make_audio, ext):
     assert result is not None
     mime, data = result
     assert data == _PNG
+
+
+@pytest.mark.parametrize("ext", FORMATS)
+def test_multi_value_tags_keep_every_value(make_audio, ext):
+    """Several native values (as Lidarr writes them) read back joined, and a
+    '; '-joined value writes back as separate native values."""
+    import mutagen
+    path = make_audio(ext)
+    f = mutagen.File(str(path), easy=True)
+    if f.tags is None:
+        f.add_tags()
+    f.tags["genre"] = ["Folk", "Celtic"]
+    f.save()
+    assert read_tags(path)["genre"] == "Folk; Celtic"        # not just "Folk"
+
+    write_tags(path, {"genre": "Trad; Folk ;", "artist": "Ann; Bob", "title": "A; B"})
+    raw = mutagen.File(str(path), easy=True).tags
+    assert list(raw["genre"]) == ["Trad", "Folk"]
+    assert list(raw["artist"]) == ["Ann", "Bob"]
+    assert list(raw["title"]) == ["A; B"]                    # single-value fields untouched
+    assert read_tags(path)["genre"] == "Trad; Folk"
