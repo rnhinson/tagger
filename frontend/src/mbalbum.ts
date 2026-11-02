@@ -5,6 +5,7 @@ import { api, MbCandidate, MbMatch, MbReleaseTrack } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration } from './util'
 import { editToast, errText } from './staged'
+import { state } from './state'
 
 const FIELDS: { key: string; label: string; on: boolean }[] = [
   { key: 'title', label: 'Title', on: true }, { key: 'artist', label: 'Artist', on: true },
@@ -25,10 +26,16 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
       </div>
       <div class="pr-controls">
         <form class="mb-search" id="mb-search">
-          <label class="field-label">Album<input id="mb-album" type="text" autocomplete="off" /></label>
-          <label class="field-label">Artist<input id="mb-artist" type="text" autocomplete="off" /></label>
-          <button class="btn btn-ghost" type="submit">Search</button>
+          <label class="field-label">Album<span class="mb-q-row"><input id="mb-album" type="text" autocomplete="off" />
+            <button type="button" class="btn btn-ghost btn-sm mb-q" data-by="album" title="Releases with this album title (and artist)">🔍</button></span></label>
+          <label class="field-label">Artist<span class="mb-q-row"><input id="mb-artist" type="text" autocomplete="off" />
+            <button type="button" class="btn btn-ghost btn-sm mb-q" data-by="artist" title="Releases by this artist">🔍</button></span></label>
+          <label class="field-label">Track<span class="mb-q-row"><input id="mb-track" type="text" autocomplete="off" list="mb-track-list" />
+            <button type="button" class="btn btn-ghost btn-sm mb-q" data-by="track" title="Releases that contain this track (by this artist)">🔍</button></span>
+            <datalist id="mb-track-list"></datalist></label>
+          <button type="submit" hidden></button>
         </form>
+        <div id="mb-context" class="ma-dim mb-context"></div>
         <div id="mb-error" class="review-error" hidden></div>
       </div>
       <div class="fix-confirm-body pr-body">
@@ -55,6 +62,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
 
   const $ = <T extends HTMLElement>(sel: string) => overlay.querySelector<T>(sel)!
   const albumEl = $<HTMLInputElement>('#mb-album'), artistEl = $<HTMLInputElement>('#mb-artist')
+  const trackEl = $<HTMLInputElement>('#mb-track'), contextEl = $('#mb-context')
   const candEl = $('#mb-candidates'), matchEl = $('#mb-match'), rowsEl = $('#mb-rows')
   const errEl = $('#mb-error'), sumEl = $('#mb-summary'), goBtn = $<HTMLButtonElement>('#mb-apply')
   let localCount = ids.length, match: MbMatch | null = null
@@ -71,15 +79,19 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   $('#mb-cancel').addEventListener('click', close)
   const fail = (e: unknown) => { errEl.textContent = errText(e); errEl.hidden = false }
 
-  async function search(first = false) {
+  async function search(first = false, by: 'album' | 'artist' | 'track' = 'album') {
     const t = ++searchToken
     errEl.hidden = true; parkMatch(); openId = null; quality.clear()
     goBtn.disabled = true; sumEl.textContent = ''
-    candEl.textContent = 'Searching MusicBrainz…'
+    candEl.textContent = 'Searching MusicBrainz…'; contextEl.textContent = ''
     try {
-      const r = await api.lookup.albumSearch(ids, first ? undefined : albumEl.value, first ? undefined : artistEl.value)
+      const r = await api.lookup.albumSearch(ids, first ? undefined : albumEl.value, first ? undefined : artistEl.value,
+                                              by, by === 'track' ? trackEl.value : undefined)
       if (t !== searchToken) return
       albumEl.value = r.album ?? ''; artistEl.value = r.artist ?? ''; localCount = r.local_tracks
+      contextEl.textContent = r.by === 'artist' ? `Releases by ${r.artist} — ranked by how well they fit your ${localCount} tracks`
+        : r.by === 'track' ? `Releases containing “${r.track}”${r.artist ? ` by ${r.artist}` : ''} — ranked by fit`
+        : `Releases named “${r.album}”${r.artist ? ` by ${r.artist}` : ''} — ranked by fit`
       cands = r.candidates
       renderCandidates()
       scoreAll(t)
@@ -170,7 +182,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     // aren't paired to anything. Nothing on either side is ever hidden.
     const num = (t: MbReleaseTrack) => `${m.release_tracks.some(x => x.disc > 1) ? `${t.disc}-` : ''}${t.position}`
     const yours = (it: MbMatch['items'][number]) => `
-      <div class="mb-side-title">${esc([it.disc_number && it.disc_number !== '1' ? it.disc_number + '-' : '', it.track_number ?? ''].join(''))} ${esc(it.title || '(no title)')}</div>
+      <div class="mb-side-title">${esc([it.disc_number && it.disc_number !== '1' ? it.disc_number + '-' : '', it.track_number ?? ''].join(''))} ${esc(it.title || '(no title)')}
+        ${it.title ? `<button type="button" class="mb-q-inline" data-find-track="${esc(it.title)}" title="Find releases containing this track">🔍</button>` : ''}</div>
       <div class="ma-dim">${esc(it.artist ?? '')}${it.artist ? ' · ' : ''}${fmtDuration(it.duration ?? 0)} · ${esc(it.filename)}</div>`
     const theirs = (t: MbReleaseTrack) => `
       <div class="mb-side-title">${num(t)}. ${esc(t.title)}</div>
@@ -249,6 +262,22 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     } catch (e) { toast(`Failed: ${errText(e)}`, 'error'); goBtn.disabled = false }
   })
 
-  $<HTMLFormElement>('#mb-search').addEventListener('submit', (e) => { e.preventDefault(); search() })
+  $<HTMLFormElement>('#mb-search').addEventListener('submit', (e) => {
+    e.preventDefault()
+    search(false, document.activeElement === trackEl ? 'track' : document.activeElement === artistEl && !albumEl.value ? 'artist' : 'album')
+  })
+  overlay.querySelectorAll<HTMLButtonElement>('.mb-q').forEach(b =>
+    b.addEventListener('click', () => search(false, b.dataset.by as 'album' | 'artist' | 'track')))
+  overlay.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-find-track]')
+    if (!b) return
+    e.stopPropagation()
+    trackEl.value = b.dataset.findTrack!
+    search(false, 'track')
+  })
+  // Track field: your selection's titles to pick from.
+  const titles = [...new Set(state.tracks.filter(t => ids.includes(t.id)).map(t => t.title).filter(Boolean) as string[])]
+  $('#mb-track-list').innerHTML = titles.map(t => `<option value="${esc(t)}"></option>`).join('')
+  trackEl.value = titles[0] ?? ''
   search(true)
 }

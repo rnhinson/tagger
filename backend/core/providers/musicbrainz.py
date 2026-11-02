@@ -146,32 +146,59 @@ _RELEASE_CACHE: dict[str, tuple[float, dict]] = {}
 _RELEASE_TTL = 900.0
 
 
-def search_releases(album: str, artist: str | None, limit: int = 15) -> list[dict]:
-    """Release candidates for an album title (+ artist), best first."""
-    params = {"release": album or "", "limit": limit}
+def _candidate(rel: dict, score: float | None = None) -> dict:
+    media = rel.get("medium-list") or []
+    return {
+        "mb_album_id": rel.get("id"),
+        "album": rel.get("title"),
+        "artist": rel.get("artist-credit-phrase"),
+        "date": rel.get("date"),
+        "country": rel.get("country"),
+        "formats": sorted({m.get("format") for m in media if m.get("format")}),
+        "discs": len(media) or None,
+        "tracks": int(rel["medium-track-count"]) if rel.get("medium-track-count") else
+                  sum(int(m.get("track-count") or 0) for m in media) or None,
+        "type": (rel.get("release-group") or {}).get("primary-type") or (rel.get("release-group") or {}).get("type"),
+        "score": score if score is not None else int(rel.get("ext:score", 0)) / 100.0,
+    }
+
+
+def search_releases(album: str | None, artist: str | None, limit: int = 15) -> list[dict]:
+    """Release candidates for an album title and/or artist, best first."""
+    params: dict = {"limit": limit}
+    if album:
+        params["release"] = album
     if artist:
         params["artist"] = artist
+    if len(params) == 1:
+        return []
     try:
         resp = _with_retry(musicbrainzngs.search_releases, **params)
     except Exception:
         return []
-    out = []
-    for rel in resp.get("release-list", []):
-        media = rel.get("medium-list") or []
-        out.append({
-            "mb_album_id": rel.get("id"),
-            "album": rel.get("title"),
-            "artist": rel.get("artist-credit-phrase"),
-            "date": rel.get("date"),
-            "country": rel.get("country"),
-            "formats": sorted({m.get("format") for m in media if m.get("format")}),
-            "discs": len(media) or None,
-            "tracks": int(rel["medium-track-count"]) if rel.get("medium-track-count") else
-                      sum(int(m.get("track-count") or 0) for m in media) or None,
-            "type": (rel.get("release-group") or {}).get("primary-type"),
-            "score": int(rel.get("ext:score", 0)) / 100.0,
-        })
-    return out
+    return [_candidate(rel) for rel in resp.get("release-list", [])]
+
+
+def releases_with_recording(title: str, artist: str | None, limit: int = 25) -> list[dict]:
+    """Releases containing a recording with this title (+ artist): 'which album is this track on?'"""
+    params = {"recording": title, "limit": limit}
+    if artist:
+        params["artist"] = artist
+    try:
+        resp = _with_retry(musicbrainzngs.search_recordings, **params)
+    except Exception:
+        return []
+    out, seen = [], set()
+    for rec in resp.get("recording-list", []):
+        score = int(rec.get("ext:score", 0)) / 100.0
+        for rel in rec.get("release-list", []):
+            if rel.get("id") in seen:
+                continue
+            seen.add(rel.get("id"))
+            c = _candidate(rel, score)
+            c["artist"] = c["artist"] or rec.get("artist-credit-phrase")
+            out.append(c)
+    return out[:40]
 
 
 def get_release(mb_album_id: str) -> dict | None:
