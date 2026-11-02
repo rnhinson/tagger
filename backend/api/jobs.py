@@ -34,7 +34,7 @@ async def start_scan(background_tasks: BackgroundTasks, directory: Optional[str]
         if not os.path.isdir(directory):
             raise HTTPException(404, "Directory not found")
 
-    job_id = create_scan_job()
+    job_id = create_scan_job(directory)
     background_tasks.add_task(run_scan_job, job_id, directory)
     return {"job_id": job_id, "directory": directory}
 
@@ -50,3 +50,12 @@ def get_job_status(job_id: str):
     if not job:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@router.post("/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Stop a running scan at its next file (what it read is kept; nothing is pruned)."""
+    from core.tasks import request_cancel
+    if not request_cancel(job_id):
+        raise HTTPException(409, "That scan isn't running")
+    return {"cancelling": True}

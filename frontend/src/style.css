@@ -1263,3 +1263,62 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .ro-lock { font-size: 11px; opacity: .8; }
 .row-readonly td { color: var(--text-muted); }
 .tag-form.form-readonly input:disabled, .tag-form.form-readonly textarea:disabled { opacity: .75; cursor: default; }
+
+/* ── MusicBrainz album match (mbalbum.ts) + lyrics (lyricsdialog.ts) ──────── */
+.mb-modal { width: min(1000px, 96vw); }
+.mb-search { display: flex; gap: 10px; align-items: flex-end; }
+.mb-search .field-label { flex: 1; }
+.mb-candidates { display: flex; flex-direction: column; }
+.mb-candidates[hidden] { display: none; }
+.mb-cand {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; text-align: left; padding: 8px 12px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--text); cursor: pointer; font: inherit;
+}
+.mb-cand:hover, .mb-cand.mb-picked { background: var(--accent-dim); }
+.mb-cand-title { font-size: 13px; font-weight: 600; }
+.mb-cand-tracks { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.mb-cand-tracks.mb-fit { color: var(--success); font-weight: 600; }
+.mb-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); margin-left: 6px; }
+.mb-release { padding: 8px 12px; font-size: 13px; }
+.mb-fields { padding: 0 12px 8px; flex-wrap: wrap; }
+.mb-table select { max-width: 100%; width: 100%; font-size: 12px; }
+.mb-table td { vertical-align: top; }
+.mb-score { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+.mb-good { color: var(--success); border-color: var(--success); }
+.mb-ok   { color: var(--text); }
+.mb-bad  { color: var(--danger); border-color: var(--danger); }
+.mb-none { color: var(--text-dim); }
+.mb-dup td { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.mb-unmatched { padding: 8px 12px; font-size: 12px; }
+.mb-unmatched .ma-dim { white-space: normal; }
+.ly-preview pre { margin: 0; max-height: 220px; overflow: auto; font-size: 12px; white-space: pre-wrap; color: var(--text-muted); }
+
+/* ── Settings page: tabs, Background, About ───────────────────────────────── */
+.settings-sidebar.settings-page { left: 0; width: auto; box-shadow: none; border-left: 0; }
+.settings-page .settings-sidebar-body { width: 100%; max-width: 860px; margin: 0 auto; }
+.settings-page .settings-sidebar-footer { width: 100%; max-width: 860px; margin: 0 auto; }
+.settings-pane[hidden], .settings-sidebar-footer[hidden] { display: none; }
+.settings-tabs { display: flex; gap: 2px; }
+.settings-tab {
+  background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-muted);
+  font: 600 13px var(--font); padding: 6px 12px; cursor: pointer;
+}
+.settings-tab:hover { color: var(--text); }
+.settings-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.bg-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); margin-left: 4px; vertical-align: middle; animation: bg-pulse 1.4s ease-in-out infinite; }
+.bg-dot[hidden] { display: none; }
+@keyframes bg-pulse { 50% { opacity: .3; } }
+.bg-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bg-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.bg-progress { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
+.bg-progress > div { height: 100%; background: var(--accent); transition: width .4s ease; }
+.bg-progress.bg-indeterminate > div { width: 30% !important; animation: bg-slide 1.2s ease-in-out infinite; }
+@keyframes bg-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+.bg-jobs td, .bg-jobs th { font-size: 12px; white-space: nowrap; }
+.about-title { font-size: 18px; font-weight: 700; }
+.about-table { border-collapse: collapse; font-size: 13px; }
+.about-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 4px 16px 4px 0; vertical-align: top; white-space: nowrap; }
+.about-table td { padding: 4px 0; }
+button.scan-status { background: transparent; border: 0; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+button.scan-status:hover { color: var(--text); background: var(--surface2); }
+button.scan-status[hidden] { display: none; }

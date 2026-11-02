@@ -144,7 +144,7 @@ def toggle_library(req: LibraryToggle, background_tasks: BackgroundTasks):
         return {"active": False, "removed": n}
     if active_scan():
         return {"active": True, "job_id": None}   # the running scan won't include it; next one will
-    job_id = create_scan_job()
+    job_id = create_scan_job(path)
     background_tasks.add_task(run_scan_job, job_id, path)
     return {"active": True, "job_id": job_id}
 

@@ -15,6 +15,9 @@ import { overlayStaged, editToast, openReview, openHistory, shortPath, errText }
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
+import { openMbAlbum } from './mbalbum'
+import { openLyrics } from './lyricsdialog'
+import { renderBackground, renderAbout, wireBackground } from './background'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1254,11 +1257,15 @@ fixAllBtn.addEventListener('click', async () => {
 
 function renderScanStatus() {
   const job = state.scanJob
-  if (!job || job.status === 'done' || job.status === 'error') { scanStatusEl.textContent = ''; return }
-  const pct = job.total ? Math.round((job.scanned / job.total) * 100) : 0
-  scanStatusEl.textContent = job.status === 'running'
-    ? `Scanning… ${job.scanned}/${job.total} (${pct}%)`
-    : 'Starting scan…'
+  const live = !!job && (job.status === 'running' || job.status === 'pending')
+  scanStatusEl.hidden = !live
+  document.getElementById('bg-dot')!.hidden = !live
+  if (!live) { scanStatusEl.textContent = ''; return }
+  const listing = job!.phase === 'listing' || (!job!.scanned && job!.phase !== 'reading')
+  const pct = job!.total && !listing ? Math.round((job!.scanned / job!.total) * 100) : 0
+  scanStatusEl.textContent = job!.status === 'pending' ? 'Starting scan…'
+    : listing ? `Finding files… ${job!.total ? job!.total.toLocaleString() : ''}`
+    : `Scanning… ${job!.scanned.toLocaleString()}/${job!.total.toLocaleString()} (${pct}%)`
 }
 
 // ─── Data loading ─────────────────────────────────────────────────────────────
@@ -1398,20 +1405,23 @@ function pollScan(jobId: string) {
       const job = await api.jobs.get(jobId)
       state.scanJob = job
       renderScanStatus()
-      if (job.status === 'done' || job.status === 'error') {
+      if (job.status !== 'running' && job.status !== 'pending') {
         clearInterval(state.scanPollTimer!)
         state.scanPollTimer = null
         scanBtn.disabled = false
         updateRescanBtn()
         if (job.status === 'done') {
-          toast(`Scan complete — ${job.scanned} tracks indexed`, 'success')
+          toast(`Scan complete — ${job.total.toLocaleString()} files, ${(job.changed ?? 0).toLocaleString()} changed`, 'success')
           state.qualityIssues = null
           await loadLibrary()
           await loadTree()
           await loadTracks()
           if (state.sidebarMode === 'quality') await renderQualityPanel()
+        } else if (job.status === 'cancelled') {
+          toast('Scan cancelled — what it read is kept', 'info')
+          await loadTracks()
         } else {
-          toast(`Scan error: ${job.error}`, 'error')
+          toast(`Scan ${job.status}: ${job.error ?? ''}`, 'error')
         }
         renderScanStatus()
       }
@@ -1726,6 +1736,14 @@ function showRenameFolder() {
 moveFolderBtn.addEventListener('click', showMoveFolder)
 
 // Bulk rename: list order = the view's order (counters number in that order).
+document.getElementById('mb-album-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openMbAlbum(ids, refreshAfterBulk)
+})
+document.getElementById('lyrics-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openLyrics(ids, refreshAfterBulk)
+})
 document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (ids.length) openMergeAlbums(ids, refreshAfterBulk)
@@ -2673,6 +2691,7 @@ async function openSettings() {
   logoutBtn.hidden = !authRequired
   refreshTrashStatus()
   settingsModal.classList.add('open')
+  showSettingsTab('settings')
 }
 
 const trashStatusEl = document.getElementById('trash-status')!
@@ -2741,7 +2760,45 @@ function renderAcoustidStatus(status: { acoustid_configured: boolean; fpcalc_ava
 
 function closeSettings() {
   settingsModal.classList.remove('open')
+  if (bgTimer) { clearInterval(bgTimer); bgTimer = null }
 }
+
+const paneBackground = document.getElementById('pane-background')!
+const paneAbout = document.getElementById('pane-about')!
+let bgTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshBackground() {
+  const active = await renderBackground(paneBackground)
+  if (active) {
+    state.scanJob = active
+    renderScanStatus()
+    if (!state.scanPollTimer) pollScan(active.id)   // a scan started elsewhere (auto, another tab)
+  }
+}
+
+function showSettingsTab(tab: string) {
+  settingsModal.querySelectorAll<HTMLElement>('.settings-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab))
+  settingsModal.querySelectorAll<HTMLElement>('.settings-pane').forEach(p => { p.hidden = p.id !== `pane-${tab}` })
+  document.getElementById('settings-footer')!.hidden = tab !== 'settings'
+  if (bgTimer) { clearInterval(bgTimer); bgTimer = null }
+  if (tab === 'background') { refreshBackground(); bgTimer = setInterval(refreshBackground, 1500) }
+  if (tab === 'about') renderAbout(paneAbout)
+}
+
+settingsModal.querySelector('.settings-tabs')!.addEventListener('click', (e) => {
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.settings-tab')
+  if (t) showSettingsTab(t.dataset.tab!)
+})
+wireBackground(paneBackground, refreshBackground)
+scanStatusEl.addEventListener('click', async () => {
+  if (!settingsModal.classList.contains('open')) await openSettings()
+  showSettingsTab('background')
+})
+// A scan already running when the page loads (auto-scan, another tab).
+api.jobs.list().then(jobs => {
+  const active = jobs.find(j => j.status === 'running' || j.status === 'pending')
+  if (active) { state.scanJob = active; renderScanStatus(); pollScan(active.id) }
+}).catch(() => { /* not signed in yet */ })
 
 document.getElementById('settings-btn')!.addEventListener('click', () => {
   settingsModal.classList.contains('open') ? closeSettings() : openSettings()

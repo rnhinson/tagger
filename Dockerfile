@@ -63,6 +63,12 @@ RUN mkdir -p /music /config
 ENV TAGGER_MUSIC_DIR=/music
 ENV TAGGER_CONFIG_DIR=/config
 
+# Build stamp for the About page (set by .github/workflows/publish.yml).
+ARG IMAGE_VERSION=""
+ARG GIT_SHA=""
+ARG BUILD_DATE=""
+ENV TAGGER_IMAGE_VERSION=$IMAGE_VERSION TAGGER_GIT_SHA=$GIT_SHA TAGGER_BUILD_DATE=$BUILD_DATE
+
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

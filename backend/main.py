@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 
@@ -20,6 +21,7 @@ from api.auth import router as auth_router
 from api.library import router as library_router
 from api.tags import router as tags_router
 from api.jobs import router as jobs_router
+from api.lyrics import router as lyrics_router
 from api.config import router as config_router
 from api.fs import router as fs_router
 from api.covers import router as covers_router
@@ -32,10 +34,11 @@ from api.staged import router as staged_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
-    from core.tasks import auto_scan_loop
+    from core.tasks import auto_scan_loop, mark_interrupted
 
     settings.config_dir.mkdir(parents=True, exist_ok=True)
     init_db()
+    mark_interrupted()
     task = asyncio.create_task(auto_scan_loop())
     try:
         yield
@@ -84,6 +87,34 @@ def health():
     return {"status": "ok", "version": app.version}
 
 
+_STARTED = time.time()
+
+
+@app.get("/api/about")
+def about():
+    """Version, build and runtime facts for the About page."""
+    import platform
+    import shutil
+    import mutagen
+    from core.database import db
+    from api.config import get_scan_dirs
+    with db() as conn:
+        tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        staged = conn.execute("SELECT COUNT(*) FROM staged").fetchone()[0]
+    return {
+        "version": app.version,
+        "image": os.environ.get("TAGGER_IMAGE_VERSION") or None,
+        "commit": os.environ.get("TAGGER_GIT_SHA") or None,
+        "built": os.environ.get("TAGGER_BUILD_DATE") or None,
+        "started": _STARTED,
+        "python": platform.python_version(),
+        "mutagen": mutagen.version_string,
+        "tools": {t: bool(shutil.which(t)) for t in ("ffmpeg", "rsgain", "fpcalc")},
+        "tracks": tracks, "staged": staged, "scan_dirs": get_scan_dirs(),
+        "source": "https://github.com/beartums/tagger",
+    }
+
+
 @app.exception_handler(Exception)
 async def _unhandled(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
@@ -94,6 +125,7 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(library_router, prefix="/api/library", tags=["library"])
 app.include_router(tags_router, prefix="/api/tags", tags=["tags"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(lyrics_router, prefix="/api/lyrics", tags=["lyrics"])
 app.include_router(config_router, prefix="/api/config", tags=["config"])
 app.include_router(fs_router, prefix="/api/fs", tags=["fs"])
 app.include_router(covers_router, prefix="/api/covers", tags=["covers"])

@@ -146,12 +146,21 @@ export interface ChangeLogEntry {
 
 export interface ScanJob {
   id: string
-  status: 'pending' | 'running' | 'done' | 'error'
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled' | 'interrupted'
   started_at: number | null
   finished_at: number | null
   total: number
   scanned: number
   error: string | null
+  directory?: string | null          // null = whole library
+  phase?: string | null              // listing | reading | pruning
+  changed?: number | null
+}
+
+export interface About {
+  version: string; image: string | null; commit: string | null; built: string | null; started: number
+  python: string; mutagen: string; tools: Record<string, boolean>; tracks: number; staged: number
+  scan_dirs: string[]; source: string
 }
 
 export interface TagUpdate {
@@ -214,6 +223,29 @@ export interface TreeEntry {
   name: string
   path: string
   has_dirs?: boolean
+}
+
+export interface MbCandidate {
+  mb_album_id: string; album: string; artist: string | null; date: string | null; country: string | null
+  formats: string[]; discs: number | null; tracks: number | null; type: string | null; score: number; tagged?: boolean
+}
+
+export interface MbReleaseTrack {
+  key: string; disc: number; position: number; number: string | null; title: string; artist: string | null
+  mb_artist_id: string | null; mb_track_id: string | null; duration: number | null
+}
+
+export interface MbMatch {
+  release: { mb_album_id: string; album: string; album_artist: string | null; date: string | null
+             year: string | null; original_year: string | null; country: string | null; discs: number }
+  release_tracks: MbReleaseTrack[]
+  items: { id: number; filename: string; title: string | null; artist: string | null; track_number: string | null
+           disc_number: string | null; duration: number | null; key: string | null; score: number }[]
+  unmatched: string[]
+}
+
+export interface LyricsItem {
+  id: number; title: string; artist: string | null; status: string; lyrics: string | null; error?: string
 }
 
 export interface MergeGroup {
@@ -381,7 +413,10 @@ export const api = {
         'POST', `/api/jobs/scan${directory ? '?directory=' + encodeURIComponent(directory) : ''}`),
     list: () => request<ScanJob[]>('GET', '/api/jobs'),
     get: (jobId: string) => request<ScanJob>('GET', `/api/jobs/${jobId}`),
+    cancel: (jobId: string) => request<{ cancelling: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
   },
+
+  about: () => request<About>('GET', '/api/about'),
 
   fs: {
     tree: (path?: string) =>
@@ -401,7 +436,21 @@ export const api = {
         'POST', '/api/config/rename-preview', { template, tags, ext, track_id: trackId }),
   },
 
+  lyrics: {
+    fetch: (trackIds: number[], prefer: string, overwrite: boolean) =>
+      request<{ items: LyricsItem[] }>('POST', '/api/lyrics/fetch', { track_ids: trackIds, prefer, overwrite }),
+    stage: (items: Record<number, string>) =>
+      request<EditResult & { changed: number }>('POST', '/api/lyrics/stage', { items }),
+  },
+
   lookup: {
+    albumSearch: (trackIds: number[], album?: string, artist?: string) =>
+      request<{ album: string | null; artist: string | null; local_tracks: number; candidates: MbCandidate[] }>(
+        'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist }),
+    albumMatch: (trackIds: number[], mbAlbumId: string) =>
+      request<MbMatch>('POST', '/api/lookup/album/match', { track_ids: trackIds, mb_album_id: mbAlbumId }),
+    albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean }) =>
+      request<EditResult & { changed: number; covers: number }>('POST', '/api/lookup/album/apply', body),
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
     infer: (trackId: number) =>

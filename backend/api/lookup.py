@@ -160,3 +160,144 @@ async def apply_cover_from_mb(track_id: int, mb_album_id: str):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+# ── Album-level match (core/albummatch.py) ────────────────────────────────────
+
+from typing import Optional
+
+from pydantic import BaseModel
+
+from core import albummatch, staging
+from core.providers import musicbrainz as mbp
+
+
+class AlbumSearch(BaseModel):
+    track_ids: list[int]
+    album: Optional[str] = None      # override the selection's own values
+    artist: Optional[str] = None
+
+
+def _selection(conn, ids: list[int]) -> list[dict]:
+    """The selected tracks as staged (what a match should compare against)."""
+    from api.tags import _rows
+    rows = _rows(conn, ids)
+    entries = staging.load(conn, [r["id"] for r in rows])
+    return [staging.effective(r, entries.get(r["id"])) for r in rows]
+
+
+def _common(tracks: list[dict], field: str) -> str | None:
+    vals = [t.get(field) for t in tracks if t.get(field)]
+    return max(set(vals), key=vals.count) if vals else None
+
+
+@router.post("/album/search")
+async def album_search(req: AlbumSearch):
+    """Release candidates for the selection; one its files already name comes first."""
+    with db() as conn:
+        tracks = _selection(conn, req.track_ids)
+    if not tracks:
+        raise HTTPException(400, "No tracks")
+    album = req.album if req.album is not None else _common(tracks, "album")
+    artist = req.artist if req.artist is not None else (_common(tracks, "album_artist") or _common(tracks, "artist"))
+    if not album:
+        raise HTTPException(400, "No album name to search for -- type one")
+    found = await asyncio.to_thread(mbp.search_releases, album, artist)
+    tagged = _common(tracks, "mb_album_id")
+    if tagged and _UUID_RE.match(tagged):
+        found = [r for r in found if r["mb_album_id"] != tagged]
+        rel = await asyncio.to_thread(mbp.get_release, tagged)
+        if rel:
+            found.insert(0, {"mb_album_id": tagged, "album": rel["album"], "artist": rel["album_artist"],
+                             "date": rel["date"], "country": rel["country"], "formats": [],
+                             "discs": rel["discs"], "tracks": len(rel["tracks"]), "type": None,
+                             "score": 1.0, "tagged": True})
+    return {"album": album, "artist": artist, "local_tracks": len(tracks), "candidates": found}
+
+
+class AlbumMatch(BaseModel):
+    track_ids: list[int]
+    mb_album_id: str
+
+
+def _release(mb_album_id: str) -> dict:
+    if not _UUID_RE.match(mb_album_id):
+        raise HTTPException(400, "Invalid MusicBrainz album id")
+    rel = mbp.get_release(mb_album_id)
+    if not rel:
+        raise HTTPException(502, "MusicBrainz didn't return that release")
+    return rel
+
+
+@router.post("/album/match")
+async def album_match(req: AlbumMatch):
+    """Proposed pairing of the selection with one release, with each pair's tag changes."""
+    rel = await asyncio.to_thread(_release, req.mb_album_id)
+    with db() as conn:
+        tracks = _selection(conn, req.track_ids)
+    pairs = albummatch.match(tracks, rel["tracks"])
+    items = []
+    for t in sorted(tracks, key=lambda t: (albummatch._int(t.get("disc_number")) or 1,
+                                           albummatch._int(t.get("track_number")), t["filename"])):
+        key, sc = pairs[t["id"]]
+        items.append({"id": t["id"], "filename": t["filename"], "title": t.get("title"),
+                      "artist": t.get("artist"), "track_number": t.get("track_number"),
+                      "disc_number": t.get("disc_number"), "duration": t.get("duration"),
+                      "key": key, "score": sc})
+    used = {i["key"] for i in items if i["key"]}
+    release = {k: v for k, v in rel.items() if k != "tracks"}
+    return {"release": release, "release_tracks": rel["tracks"], "items": items,
+            "unmatched": [t["key"] for t in rel["tracks"] if t["key"] not in used]}
+
+
+class AlbumApply(BaseModel):
+    mb_album_id: str
+    pairs: dict[int, str]                    # track id -> release track key
+    fields: list[str] = list(albummatch.FIELDS)
+    original_year: bool = True
+    cover: bool = False
+
+
+@router.post("/album/apply")
+async def album_apply(req: AlbumApply):
+    """Stage the chosen pairs' tags as one step; cover art (optional) is written now."""
+    from api.tags import _finish, _rows
+    rel = await asyncio.to_thread(_release, req.mb_album_id)
+    by_key = {t["key"]: t for t in rel["tracks"]}
+    fields = [f for f in req.fields if f in albummatch.FIELDS]
+    if not fields:
+        raise HTTPException(400, "No fields chosen")
+    errors: list[dict] = []
+    with db() as conn:
+        rows = {r["id"]: r for r in _rows(conn, list(req.pairs))}
+        entries = staging.load(conn, list(rows))
+        todo = []
+        for tid, key in req.pairs.items():
+            row, mb = rows.get(tid), by_key.get(key)
+            if not row or not mb:
+                errors.append({"id": tid, "error": "unknown track or release track"})
+                continue
+            eff = staging.effective(row, entries.get(tid))
+            tags = albummatch.tags_for(rel, mb, req.original_year)
+            change = {f: tags[f] for f in fields if f in tags and (eff.get(f) or "") != tags[f]}
+            if change:
+                todo.append((row, change))
+        res: dict = {"staged": True}
+        if todo:
+            step = staging.Step(conn, f"MusicBrainz: {rel['album']} ({len(todo)} tracks)")
+            for row, change in todo:
+                staging.stage_edit(conn, row, change, step)
+            res = _finish(conn, step, [r["id"] for r, _ in todo])
+    covered = 0
+    if req.cover and rows:
+        try:
+            mime, data = await asyncio.to_thread(_fetch_caa, req.mb_album_id)
+            for row in rows.values():
+                try:
+                    write_cover(row["path"], mime, data)
+                    covered += 1
+                except Exception as e:  # noqa: BLE001 -- report per file
+                    errors.append({"id": row["id"], "error": f"cover: {e}"})
+        except Exception as e:  # noqa: BLE001
+            errors.append({"id": None, "error": f"cover art: {e}"})
+    return {**res, "changed": len(todo), "covers": covered, "errors": errors + res.get("errors", [])}

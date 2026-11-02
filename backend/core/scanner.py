@@ -43,12 +43,18 @@ def _excluded(path: str, patterns: list[str]) -> bool:
 READER_VERSION = 1
 
 
+class ScanCancelled(Exception):
+    """Raised when should_stop() turns true. Files read so far are kept; nothing is pruned."""
+
+
 def scan_library(
     progress_cb: Callable[[int, int], None] | None = None,
     scan_tags: list[str] | None = None,
     music_dirs: list[str] | None = None,
     prune_under: list[str] | None = None,
     exclude: list[str] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    phase_cb: Callable[[str], None] | None = None,
 ) -> tuple[int, int]:
     """
     Scan the music directories and upsert changed/new tracks into the DB.
@@ -65,6 +71,10 @@ def scan_library(
 
     patterns = exclude or []
 
+    stop = should_stop or (lambda: False)
+    if phase_cb:
+        phase_cb("listing")
+
     # Collect all audio files first so we know the total
     all_files: list[str] = []
     for music_dir in music_dirs:
@@ -73,13 +83,19 @@ def scan_library(
         for root, dirs, files in os.walk(music_dir):
             # Prune excluded directories so we don't descend into them.
             dirs[:] = [d for d in dirs if not _excluded(os.path.join(root, d), patterns)]
+            if stop():
+                raise ScanCancelled()
             for fname in sorted(files):
                 fpath = os.path.join(root, fname)
                 if is_audio_file(fpath) and not _excluded(fpath, patterns):
                     all_files.append(fpath)
+                    if progress_cb and len(all_files) % 500 == 0:
+                        progress_cb(0, len(all_files))   # still listing: a running count
 
     total = len(all_files)
     upserted = 0
+    if phase_cb:
+        phase_cb("reading")
     now = time.time()
 
     conn = get_conn()
@@ -95,6 +111,9 @@ def scan_library(
             existing = {}
 
         for i, fpath in enumerate(all_files):
+            if stop():
+                conn.commit()           # keep what was read; skip pruning
+                raise ScanCancelled()
             try:
                 stat = os.stat(fpath)
                 mtime = stat.st_mtime
@@ -190,6 +209,8 @@ def scan_library(
             conn.execute(f"PRAGMA user_version = {READER_VERSION}")
             conn.commit()
 
+        if phase_cb:
+            phase_cb("pruning")
         # Remove DB rows for files that no longer exist on disk. A targeted
         # rescan only prunes within the scanned roots.
         scanned = set(all_files)
