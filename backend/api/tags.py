@@ -198,6 +198,47 @@ def reorganize(req: Reorganize):
             "staged": res["staged"]}
 
 
+class MoveTo(BaseModel):
+    track_ids: list[int]
+    folder: str
+
+
+@router.post("/move-to")
+def move_to_folder(req: MoveTo):
+    """Stage moving the selected files into a folder (drag and drop), names kept."""
+    import os
+    from core.fileops import root_for
+
+    if not req.track_ids:
+        raise HTTPException(400, "No track IDs provided")
+    folder = os.path.normpath(req.folder)
+    roots = get_library_roots()
+    root = root_for(folder, roots)
+    if root is None:
+        raise HTTPException(400, "destination must be inside a library root")
+    if not os.path.isdir(folder):
+        raise HTTPException(400, "folder not found")
+    planned: list[int] = []
+    errors = []
+    with db() as conn:
+        rows = _rows(conn, req.track_ids)
+        staged_dirs = staging.load_dirs(conn)
+        step = staging.Step(conn, f"Move {len(rows)} file{'s' if len(rows) != 1 else ''} → {os.path.basename(folder)}")
+        for row in rows:
+            if staged_dirs and staging.moved_path(row["path"], staged_dirs):
+                errors.append({"id": row["id"], "error": "its folder is staged to move -- write that first"})
+                continue
+            dest = os.path.join(folder, row["filename"])
+            if dest == row["path"]:
+                continue
+            staging.stage(conn, row, new_path=dest, step=step)
+            planned.append(row["id"])
+        res = _finish(conn, step, planned)
+    moved = 0 if res["staged"] else res["applied"]
+    return {"planned": len(planned), "moved": moved, "errors": errors + res.get("errors", []),
+            "staged": res["staged"]}
+
+
 @router.post("/bulk")
 def bulk_update_tags(update: BulkTagUpdate):
     updates = update.tags.model_dump(exclude_none=True)

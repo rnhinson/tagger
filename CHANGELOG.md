@@ -36,6 +36,12 @@
   as one directory move (cover art and other files come along), undone as
   one. Destination must be inside a library root; library roots themselves
   can't be moved. Review warns when a folder leaves Shared (Lidarr).
+- **Drag and drop** in the Files tree: drag a folder onto a folder, or
+  tracks (the selection, across pages) onto a folder -- each drop is a
+  staged move. Hovering a closed folder while dragging opens it. Folders
+  holding library roots can't be moved.
+- Staging no longer reloads the folder tree, and a reload after a write
+  keeps open folders open.
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root

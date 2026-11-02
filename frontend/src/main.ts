@@ -201,6 +201,7 @@ function renderDirNode(node: DirNode, depth: number): HTMLElement {
   const row = document.createElement('div')
   row.className = 'tree-row' + (state.selectedDirectory === node.path ? ' active' : '')
   row.dataset.path = node.path
+  row.draggable = isMovableFolder(node.path)
   row.style.paddingLeft = `${12 + depth * 14}px`
 
   const arrow = document.createElement('span')
@@ -484,6 +485,7 @@ function renderTracks() {
     const selected = state.selectedIds.has(t.id)
     const tr = document.createElement('tr')
     tr.dataset.id = String(t.id)
+    tr.draggable = true
     if (selected) tr.classList.add('selected')
     if (t.staged) {
       tr.classList.add('row-staged')
@@ -1110,7 +1112,16 @@ async function loadLibrary() {
   }
 }
 
+function expandedPaths(node: DirNode | null, out: string[] = []): string[] {
+  if (!node) return out
+  if (node.expanded && node.path) out.push(node.path)
+  for (const c of node.children ?? []) expandedPaths(c, out)
+  return out
+}
+
 async function loadTree() {
+  // Reloading after a write: re-open what was open (folders that moved away just stay shut).
+  const reopen = expandedPaths(state.rootNode).sort((a, b) => a.length - b.length)
   try {
     const result = await api.fs.tree()
     const name = result.path
@@ -1122,6 +1133,10 @@ async function loadTree() {
       children: result.dirs.map(d => ({ name: d.name, path: d.path, hasDirs: d.has_dirs, children: null, loading: false, expanded: false })),
       loading:  false,
       expanded: true,
+    }
+    for (const path of reopen) {
+      const node = findDirNode(path)
+      if (node && node !== state.rootNode && !node.expanded) await expandDirNode(node)
     }
     renderFilesPanel()
   } catch (e) {
@@ -1181,9 +1196,7 @@ async function loadTracks() {
 
 function updateRescanBtn() {
   rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
-  const movable = state.selectedDirectory !== null
-    && !state.musicDirs.includes(state.selectedDirectory)
-    && !state.libraryRoots.includes(state.selectedDirectory)
+  const movable = isMovableFolder(state.selectedDirectory)
   moveFolderBtn.disabled = renameFolderBtn.disabled = !movable
 }
 
@@ -1415,6 +1428,12 @@ async function organizeFiles() {
 
 // ─── Folder move / rename ───────────────────────────────────────────────────────
 
+function isMovableFolder(path: string | null): boolean {
+  return path !== null && path !== ''
+    && !state.musicDirs.includes(path)
+    && !state.libraryRoots.some(r => r === path || r.startsWith(path + '/'))
+}
+
 function rootOf(path: string): string | undefined {
   return [...state.libraryRoots].sort((a, b) => b.length - a.length)
     .find(r => path.startsWith(r + '/'))
@@ -1424,8 +1443,13 @@ async function afterFolderStage(res: import('./api').EditResult, what: string) {
   if (res.staged) toast(`Staged ${what} — Review to write`, 'info')
   else if (res.errors?.length) toast(`${what} failed: ${res.errors[0].error}`, 'error')
   else toast(`Done: ${what}`, 'success')
-  if (!res.staged) { state.rootNode = null; state.selectedDirectory = null; await loadTree() }
+  if (res.staged) { await refreshAfterStage(); return }
+  if (state.selectedDirectory && !(await dirExists(state.selectedDirectory))) state.selectedDirectory = null
   await refreshAfterWrite()
+}
+
+async function dirExists(path: string): Promise<boolean> {
+  try { await api.fs.tree(path); return true } catch { return false }
 }
 
 function showMoveFolder() {
@@ -1514,6 +1538,104 @@ function showRenameFolder() {
 }
 
 moveFolderBtn.addEventListener('click', showMoveFolder)
+
+// ─── Drag and drop: folders and tracks onto a folder in the Files tree ─────────
+// A drop stages a move (same as Move…); nothing touches disk until written.
+
+const DND_DIR = 'application/x-tagger-dir'
+const DND_TRACKS = 'application/x-tagger-tracks'
+let dragExpandTimer: ReturnType<typeof setTimeout> | null = null
+let dragOverRow: HTMLElement | null = null
+
+function dragBadge(e: DragEvent, text: string) {
+  const el = document.createElement('div')
+  el.className = 'drag-badge'
+  el.textContent = text
+  document.body.appendChild(el)
+  e.dataTransfer!.setDragImage(el, -10, -10)
+  setTimeout(() => el.remove(), 0)
+}
+
+dirTreeEl.addEventListener('dragstart', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
+  if (!row?.dataset.path || !row.draggable) { e.preventDefault(); return }
+  e.dataTransfer!.setData(DND_DIR, row.dataset.path)
+  e.dataTransfer!.effectAllowed = 'move'
+  dragBadge(e, '📁 ' + row.dataset.path.split('/').pop())
+})
+
+trackTbody.addEventListener('dragstart', (e) => {
+  const tr = (e.target as HTMLElement).closest<HTMLTableRowElement>('tr')
+  if (!tr?.dataset.id) return
+  const id = parseInt(tr.dataset.id, 10)
+  // Dragging an unselected row moves just that row; a selected one, the selection.
+  if (!state.selectedIds.has(id)) {
+    state.selectedIds.clear()
+    state.selectedIds.add(id)
+    renderTracks()
+    renderEditor()
+  }
+  const ids = [...state.selectedIds]
+  e.dataTransfer!.setData(DND_TRACKS, JSON.stringify(ids))
+  e.dataTransfer!.effectAllowed = 'move'
+  dragBadge(e, `♪ ${ids.length} track${ids.length !== 1 ? 's' : ''}`)
+})
+
+function clearDropTarget() {
+  dragOverRow?.classList.remove('drop-target')
+  dragOverRow = null
+  if (dragExpandTimer) { clearTimeout(dragExpandTimer); dragExpandTimer = null }
+}
+
+dirTreeEl.addEventListener('dragover', (e) => {
+  const types = e.dataTransfer?.types ?? []
+  if (!types.includes(DND_DIR) && !types.includes(DND_TRACKS)) return
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
+  if (!row?.dataset.path) { clearDropTarget(); return }
+  e.preventDefault()
+  e.dataTransfer!.dropEffect = 'move'
+  if (row === dragOverRow) return
+  clearDropTarget()
+  dragOverRow = row
+  row.classList.add('drop-target')
+  // Hover a closed folder to open it, so drops can go deep.
+  const node = findDirNode(row.dataset.path)
+  if (node && !node.expanded) {
+    dragExpandTimer = setTimeout(() => { expandDirNode(node) }, 700)
+  }
+})
+
+dirTreeEl.addEventListener('dragleave', (e) => {
+  if (!dirTreeEl.contains(e.relatedTarget as Node)) clearDropTarget()
+})
+
+dirTreeEl.addEventListener('drop', async (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.tree-row')
+  const target = row?.dataset.path
+  clearDropTarget()
+  if (!target) return
+  e.preventDefault()
+  const dir = e.dataTransfer!.getData(DND_DIR)
+  const tracks = e.dataTransfer!.getData(DND_TRACKS)
+  try {
+    if (dir) {
+      const name = dir.split('/').pop()!
+      if (target === dir || target.startsWith(dir + '/') || dir.slice(0, dir.lastIndexOf('/')) === target) return
+      const res = await api.fs.move(dir, `${target}/${name}`)
+      await afterFolderStage(res, `move of ${name} → ${target.split('/').pop()}`)
+    } else if (tracks) {
+      const ids = JSON.parse(tracks) as number[]
+      const res = await api.tags.moveTo(ids, target)
+      const errNote = res.errors.length ? ` — ${res.errors.length} skipped: ${res.errors[0].error}` : ''
+      if (!res.planned && !res.errors.length) toast('Already in that folder', 'info')
+      else if (res.staged) toast(`Staged moving ${res.planned} track${res.planned !== 1 ? 's' : ''} → ${target.split('/').pop()} — Review to write${errNote}`, res.planned ? 'info' : 'error')
+      else toast(`Moved ${res.moved} track${res.moved !== 1 ? 's' : ''}${errNote}`, res.moved ? 'success' : 'error')
+      await (res.staged ? refreshAfterStage() : refreshAfterWrite())
+    }
+  } catch (err) {
+    toast(`Can't move there: ${errText(err)}`, 'error')
+  }
+})
 renameFolderBtn.addEventListener('click', showRenameFolder)
 
 // ─── Album flows: auto-number & find/replace ────────────────────────────────────
@@ -1680,6 +1802,13 @@ async function refreshReviewButton() {
 }
 
 /** Reload everything an edit, write or undo can change. */
+/** After staging only: nothing on disk moved, so leave the tree alone. */
+async function refreshAfterStage() {
+  await loadTracks()
+  renderEditor()
+  await refreshUndoButton()
+}
+
 async function refreshAfterWrite() {
   state.qualityIssues = null
   if (state.sidebarMode === 'tags') await loadLibrary()

@@ -104,6 +104,8 @@ def stage_dir(conn, src: str, dst: str, step: "Step | None" = None) -> None:
         raise PlanError("that is where it already is")
     if src in {str(r) for r in roots} or src in {os.path.normpath(d) for d in get_music_dirs()}:
         raise PlanError("a library root can't be moved or renamed")
+    if any(_under(str(r), src) for r in roots):
+        raise PlanError("this folder holds library roots; it can't be moved or renamed")
     if _under(dst, src):
         raise PlanError("can't move a folder inside itself")
     root = root_for(dst, roots)

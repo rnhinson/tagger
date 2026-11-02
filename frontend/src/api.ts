@@ -277,6 +277,9 @@ export const api = {
     reorganize: (trackIds: number[]) =>
       request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
         'POST', '/api/tags/reorganize', { track_ids: trackIds }),
+    moveTo: (trackIds: number[], folder: string) =>
+      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
+        'POST', '/api/tags/move-to', { track_ids: trackIds, folder }),
     autonumber: (trackIds: number[]) =>
       request<EditResult & { numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
     findReplace: (trackIds: number[], field: string, find: string, replace: string) =>
