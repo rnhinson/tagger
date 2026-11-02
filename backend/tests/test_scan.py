@@ -113,3 +113,19 @@ def test_newer_reader_rereads_unchanged_files_once(temp_db, tmp_path):
     with db() as conn:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == scanner.READER_VERSION
     assert scan_library(music_dirs=[str(root)]) == (1, 0)     # and only once
+
+
+@pytest.mark.skipif(not FFMPEG, reason="ffmpeg not available")
+def test_reread_scan_still_prunes_vanished_files(temp_db, tmp_path):
+    root = tmp_path / "music"
+    root.mkdir()
+    f = root / "1.mp3"
+    subprocess.run([FFMPEG, "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.3",
+                    "-c:a", "libmp3lame", "-y", str(f)], check=True, capture_output=True)
+    scan_library(music_dirs=[str(root)])
+    with db() as conn:   # a row whose file is gone, and a pending re-read
+        conn.execute("INSERT INTO tracks (path, filename, directory, format, scanned_at) "
+                     "VALUES (?, 'gone.mp3', ?, 'mp3', 1)", (str(root / "gone.mp3"), str(root)))
+        conn.execute("PRAGMA user_version = 0")
+    assert scan_library(music_dirs=[str(root)]) == (1, 1)          # re-read the one file
+    assert _count() == 1 and _count("WHERE filename = 'gone.mp3'") == 0   # and pruned the dead row
