@@ -27,8 +27,22 @@ export const COL_DEFS: ColDef[] = [
   { key: 'channels',     label: 'Channels',     cls: 'col-chan',   render: t => fmtChannels(t.channels) },
   { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
   { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
-    const match = state.musicDirs.find(d => t.directory === d || t.directory.startsWith(d + '/'))
-    const dir = match ?? t.directory
-    return esc(dir.split('/').filter(Boolean).pop() ?? dir)
+    const rel = sourcePath(t.directory)
+    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>`
   }},
 ]
+
+/**
+ * The folder from the library's name down to the album: with roots
+ * /music/Shared and /music/Libraries/*, ".../Libraries/Music - Christmas/A/B"
+ * -> "Music - Christmas/A/B". Outside every root: relative to the music dir.
+ */
+export function sourcePath(dir: string): string {
+  let best = ''
+  for (const r of state.libraryRoots) {
+    if ((dir === r || dir.startsWith(r + '/')) && r.length > best.length) best = r
+  }
+  const base = best ? best.slice(0, best.lastIndexOf('/'))
+    : state.musicDirs.find(d => dir === d || dir.startsWith(d + '/')) ?? ''
+  return base && dir.startsWith(base + '/') ? dir.slice(base.length + 1) : dir
+}

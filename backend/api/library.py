@@ -48,15 +48,20 @@ def _tracks(conn, rows) -> list[dict]:
     Track rows as dicts, each with its staged changes (or null). A track under
     a staged folder move gets that folder's destination as its new path.
     """
+    import os
     entries = staging.load(conn, [r["id"] for r in rows])
     dirs = staging.load_dirs(conn)
+    writable: dict[str, bool] = {}
     out = []
     for r in rows:
         e = entries.get(r["id"])
         moved = staging.moved_path(r["path"], dirs) if dirs else None
         if moved:
             e = {**(e or {"tags": {}}), "new_path": moved, "via_folder": True}
-        out.append({**dict(r), "staged": e})
+        d = r["directory"]
+        if d not in writable:
+            writable[d] = os.access(d, os.W_OK)
+        out.append({**dict(r), "staged": e, "read_only": not writable[d]})
     return out
 
 
@@ -370,7 +375,10 @@ def selection_summary(sel: Selection):
             mixed.append(f)
         else:
             values[f] = seen.pop() if seen else ""
-    return {"count": len(rows), "values": values, "mixed": mixed}
+    import os
+    ro_dirs = {d for d in {r["directory"] for r in rows} if not os.access(d, os.W_OK)}
+    ro = sum(1 for r in rows if r["directory"] in ro_dirs)
+    return {"count": len(rows), "values": values, "mixed": mixed, "read_only": ro}
 
 
 def _m3u(tracks: list[dict]) -> str:

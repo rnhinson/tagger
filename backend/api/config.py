@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from core.config import settings
@@ -28,6 +29,8 @@ class AppSettings(BaseModel):
     # Folders rename templates are relative to (globs allowed). Empty = the
     # TAGGER_LIBRARY_ROOTS env var, else the music directories.
     library_roots: list[str] = []
+    # Library roots switched off: not scanned, their tracks not in the DB.
+    inactive_libraries: list[str] = []
 
 
 def get_music_dirs() -> list[str]:
@@ -41,6 +44,20 @@ def get_music_dirs() -> list[str]:
             seen.add(d)
             dirs.append(d)
     return dirs
+
+
+def get_scan_dirs() -> list[str]:
+    """
+    What a full scan walks. With library roots configured: the active roots
+    only -- so a read-only reference mount beside them (e.g. the pre-tidy
+    original) isn't scanned and can't be edited by accident. Without roots:
+    the music directories, as before.
+    """
+    s = _load()
+    if not (s.library_roots or settings.library_roots):
+        return get_music_dirs()
+    off = {os.path.normpath(p) for p in s.inactive_libraries}
+    return [str(r) for r in get_library_roots() if str(r) not in off]
 
 
 def get_library_root_patterns() -> list[str]:
@@ -76,6 +93,60 @@ def get_settings():
         "env_library_roots": settings.library_roots,
         "effective_library_roots": [str(r) for r in get_library_roots()],
     }
+
+
+@router.get("/libraries")
+def list_libraries():
+    """Every library root: on/off, writable, tracks in the DB."""
+    from core.database import db
+    s = _load()
+    off = {os.path.normpath(p) for p in s.inactive_libraries}
+    out = []
+    with db() as conn:
+        for r in get_library_roots():
+            p = str(r)
+            n = conn.execute(
+                "SELECT COUNT(*) FROM tracks WHERE directory = ? OR substr(directory, 1, ?) = ?",
+                (p, len(p) + 1, p + "/"),
+            ).fetchone()[0]
+            out.append({"path": p, "name": r.name, "parent": str(r.parent), "active": p not in off,
+                        "writable": os.access(p, os.W_OK), "tracks": n})
+    return out
+
+
+class LibraryToggle(BaseModel):
+    path: str
+    active: bool
+
+
+@router.post("/libraries")
+def toggle_library(req: LibraryToggle, background_tasks: BackgroundTasks):
+    """
+    Switch a library off (its tracks leave the DB now, staged changes with
+    them) or back on (a scan of just that library starts).
+    """
+    from core.database import db
+    from core.tasks import active_scan, create_scan_job, run_scan_job
+    path = os.path.normpath(req.path)
+    if path not in {str(r) for r in get_library_roots()}:
+        raise HTTPException(400, "not a library root")
+    s = _load()
+    off = [p for p in s.inactive_libraries if os.path.normpath(p) != path]
+    if not req.active:
+        off.append(path)
+    _save(s.model_copy(update={"inactive_libraries": off}))
+    if not req.active:
+        with db() as conn:
+            n = conn.execute(
+                "DELETE FROM tracks WHERE directory = ? OR substr(directory, 1, ?) = ?",
+                (path, len(path) + 1, path + "/"),
+            ).rowcount
+        return {"active": False, "removed": n}
+    if active_scan():
+        return {"active": True, "job_id": None}   # the running scan won't include it; next one will
+    job_id = create_scan_job()
+    background_tasks.add_task(run_scan_job, job_id, path)
+    return {"active": True, "job_id": job_id}
 
 
 @router.patch("")

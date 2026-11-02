@@ -92,7 +92,7 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
     full set of configured music directories is scanned.
     """
     from core.scanner import scan_library
-    from api.config import _load as load_app_settings, get_music_dirs
+    from api.config import _load as load_app_settings, get_scan_dirs
 
     _update_job(job_id, status="running")
 
@@ -101,7 +101,7 @@ async def run_scan_job(job_id: str, directory: str | None = None) -> None:
         music_dirs = [directory]
         prune_under: list[str] | None = [directory]
     else:
-        music_dirs = get_music_dirs()
+        music_dirs = get_scan_dirs()
         prune_under = None
 
     def progress(scanned: int, total: int) -> None:

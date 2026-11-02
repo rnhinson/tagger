@@ -23,8 +23,13 @@ export const APP_HTML = `
     </div>
     <div class="settings-sidebar-body">
       <div class="settings-section">
+        <div class="settings-section-title">Libraries</div>
+        <p class="settings-hint">With library roots set (below), a full scan covers only the libraries switched on here. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written.</p>
+        <ul id="libraries-list" class="libraries-list"></ul>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Music Directories</div>
-        <p class="settings-hint">Directories scanned for audio files. The default from <code>TAGGER_MUSIC_DIR</code> is always included.</p>
+        <p class="settings-hint">Directories scanned for audio files when no library roots are set. The default from <code>TAGGER_MUSIC_DIR</code> is always included.</p>
         <div id="music-dirs-default" class="music-dir-row music-dir-default"></div>
         <ul id="music-dirs-list" class="music-dirs-list"></ul>
         <div class="music-dir-add-row">

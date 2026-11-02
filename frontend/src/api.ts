@@ -2,6 +2,7 @@
 
 export interface Track {
   id: number
+  read_only?: boolean
   path: string
   filename: string
   directory: string
@@ -225,6 +226,10 @@ export interface MergeAlbumsRequest {
   album: string; album_artist: string; year: string; discs: 'keep' | 'per_album'; move: boolean
 }
 
+export interface LibraryInfo {
+  path: string; name: string; parent: string; active: boolean; writable: boolean; tracks: number
+}
+
 export interface TagValue {
   value: string
   track_count: number
@@ -283,7 +288,7 @@ export const api = {
     },
     formats: () => request<string[]>('GET', '/api/library/formats'),
     summary: (ids: number[]) =>
-      request<{ count: number; values: Record<string, string>; mixed: string[] }>(
+      request<{ count: number; values: Record<string, string>; mixed: string[]; read_only: number }>(
         'POST', '/api/library/summary', { track_ids: ids }),
     search: (q: string, limit = 50, offset = 0) =>
       request<TrackList>('GET', `/api/library/search?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
@@ -387,6 +392,9 @@ export const api = {
 
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
+    libraries: () => request<LibraryInfo[]>('GET', '/api/config/libraries'),
+    setLibrary: (path: string, active: boolean) =>
+      request<{ active: boolean; removed?: number; job_id?: string | null }>('POST', '/api/config/libraries', { path, active }),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
     renamePreview: (template: string, tags?: Record<string, string>, ext?: string, trackId?: number) =>
       request<{ ok: boolean; preview?: string; path?: string; error?: string }>(

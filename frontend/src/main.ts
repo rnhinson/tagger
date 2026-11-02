@@ -2,7 +2,7 @@ import './style.css'
 import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS } from './state'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths } from './state'
 import { COL_DEFS } from './columns'
 import {
   trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
@@ -34,6 +34,20 @@ const tagEditor      = document.getElementById('tag-editor')!
 const tagForm        = document.getElementById('tag-form') as HTMLFormElement
 // Genre on a multi-track selection: chips (add/remove values per track)
 // instead of one string that would overwrite every track's genres.
+// Read-only tracks (e.g. a reference mount): say so, and don't offer Save.
+const readOnlyNote = document.createElement('div')
+readOnlyNote.className = 'readonly-note'
+readOnlyNote.hidden = true
+tagForm.prepend(readOnlyNote)
+const saveBtn = tagForm.querySelector<HTMLButtonElement>('button[type=submit]')!
+function setReadOnly(n: number, of: number) {
+  readOnlyNote.hidden = n === 0
+  readOnlyNote.textContent = n === of
+    ? `🔒 Read-only — ${of === 1 ? 'this file is' : `these ${of.toLocaleString()} files are`} on a read-only folder and can't be changed.`
+    : `🔒 ${n.toLocaleString()} of ${of.toLocaleString()} selected tracks are read-only and can't be changed. Deselect them to save.`
+  saveBtn.disabled = n > 0
+}
+
 const genreChips = new ValueChips('genres')
 const genreInput = tagForm.elements.namedItem('genre') as HTMLInputElement
 genreInput.closest('.field-label')!.after(genreChips.el)
@@ -449,7 +463,13 @@ function renderColHeaders() {
       label += state.sortDir === 'asc' ? ' ↑' : ' ↓'
     }
     th.textContent = label
-    th.addEventListener('click', () => {
+    th.dataset.col = col.key
+    const grip = document.createElement('span')
+    grip.className = 'col-resizer'
+    grip.title = 'Drag to resize · double-click to reset all widths'
+    th.appendChild(grip)
+    th.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).classList.contains('col-resizer')) return
       if (state.sortKey === col.key) {
         state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'
       } else {
@@ -463,7 +483,73 @@ function renderColHeaders() {
     trackTheadRow.appendChild(th)
   }
   selectAll()?.addEventListener('change', onSelectAll)
+  applyColWidths()
 }
+
+// ─── Column resizing ──────────────────────────────────────────────────────────
+// Dragging a header's right edge sets that column's width in px. The first
+// drag freezes every column at its current width (fixed layout), so one
+// column grows or shrinks without the others reflowing; the table can then
+// be wider than the pane and scrolls sideways. Double-click resets.
+
+let colWidths = loadColWidths()
+const trackTable = trackTheadRow.closest('table') as HTMLTableElement
+
+function dataThs(): HTMLTableCellElement[] {
+  return [...trackTheadRow.querySelectorAll<HTMLTableCellElement>('th')]
+}
+
+function applyColWidths() {
+  const ths = dataThs()
+  if (!Object.keys(colWidths).length) {
+    trackTable.style.tableLayout = ''; trackTable.style.width = ''
+    ths.forEach(th => { th.style.width = '' })
+    return
+  }
+  let total = 0
+  for (const th of ths) {
+    const key = th.dataset.col
+    // Unsized columns (new, or the check/quality cells) keep their current width.
+    const w = (key && colWidths[key]) || th.getBoundingClientRect().width || 80
+    th.style.width = `${w}px`
+    total += w
+  }
+  trackTable.style.tableLayout = 'fixed'
+  trackTable.style.width = `${total}px`
+}
+
+trackTheadRow.addEventListener('mousedown', (e) => {
+  const grip = e.target as HTMLElement
+  if (!grip.classList.contains('col-resizer')) return
+  e.preventDefault()
+  const th = grip.parentElement as HTMLTableCellElement
+  if (!Object.keys(colWidths).length) {
+    for (const h of dataThs()) if (h.dataset.col) colWidths[h.dataset.col] = Math.round(h.getBoundingClientRect().width)
+    applyColWidths()
+  }
+  const key = th.dataset.col!
+  const startX = e.clientX, startW = th.getBoundingClientRect().width
+  document.body.classList.add('col-resizing')
+  const move = (ev: MouseEvent) => {
+    colWidths[key] = Math.max(40, Math.round(startW + ev.clientX - startX))
+    applyColWidths()
+  }
+  const up = () => {
+    document.removeEventListener('mousemove', move)
+    document.removeEventListener('mouseup', up)
+    document.body.classList.remove('col-resizing')
+    saveColWidths(colWidths)
+  }
+  document.addEventListener('mousemove', move)
+  document.addEventListener('mouseup', up)
+})
+
+trackTheadRow.addEventListener('dblclick', (e) => {
+  if (!(e.target as HTMLElement).classList.contains('col-resizer')) return
+  colWidths = {}
+  saveColWidths(colWidths)
+  applyColWidths()
+})
 
 function renderTracks() {
   trackTbody.innerHTML = ''
@@ -734,11 +820,15 @@ const compilationCheckbox = () => tagForm.elements.namedItem('compilation') as H
 let formToken = 0
 async function fillEditorForm() {
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
-  if (sel.length === state.selectedIds.size) { populateForm(sel); return }
+  if (sel.length === state.selectedIds.size) {
+    setReadOnly(sel.filter(t => t.read_only).length, sel.length)
+    populateForm(sel); return
+  }
   const token = ++formToken
   try {
     const sum = await api.library.summary([...state.selectedIds])
     if (token !== formToken) return
+    setReadOnly(sum.read_only ?? 0, sum.count)
     const fake = {} as Record<string, string | null>
     for (const [k, v] of Object.entries(sum.values)) fake[k] = v
     // Two pseudo-tracks that differ exactly on the mixed fields.
@@ -2438,6 +2528,44 @@ function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
   return document.querySelectorAll<HTMLInputElement>('#scan-tags-list input[data-tag]')
 }
 
+const librariesListEl = document.getElementById('libraries-list') as HTMLUListElement
+
+async function renderLibraries() {
+  try {
+    const libs = await api.settings.libraries()
+    librariesListEl.innerHTML = libs.length ? libs.map(l => `
+      <li class="library-row${l.active ? '' : ' library-off'}">
+        <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
+          <span>${l.writable ? '' : '🔒 '}${esc(l.name)}</span></label>
+        <span class="library-meta" title="${esc(l.path)}">${l.active ? `${l.tracks.toLocaleString()} tracks` : 'off'}</span>
+      </li>`).join('')
+      : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
+  } catch (e) {
+    librariesListEl.innerHTML = `<li class="settings-hint">Failed to load libraries: ${esc(String(e))}</li>`
+  }
+}
+
+librariesListEl.addEventListener('change', async (e) => {
+  const cb = e.target as HTMLInputElement
+  if (!cb.dataset.path) return
+  cb.disabled = true
+  try {
+    const r = await api.settings.setLibrary(cb.dataset.path, cb.checked)
+    if (r.active) {
+      toast(r.job_id ? 'Library on — scanning it now' : 'Library on — it will be included in the next scan', 'success')
+      if (r.job_id) pollScan(r.job_id)
+    } else {
+      toast(`Library off — ${(r.removed ?? 0).toLocaleString()} tracks removed from Tagger (files untouched)`, 'success')
+      state.tagValues = new Map()
+      await refreshAfterBulk()
+    }
+  } catch (err) {
+    toast(`Failed: ${err}`, 'error'); cb.checked = !cb.checked
+  } finally {
+    await renderLibraries()
+  }
+})
+
 async function openSettings() {
   try {
     const [s, status, rgStatus] = await Promise.all([
@@ -2463,6 +2591,7 @@ async function openSettings() {
     getScanTagCheckboxes().forEach(cb => {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
+    renderLibraries()
     musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
     localMusicDirs = [...(s.music_dirs ?? [])]
     renderMusicDirsList()
