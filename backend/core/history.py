@@ -41,13 +41,19 @@ def snapshot(row) -> dict:
     return {k: row[k] for k in _ALL_COLUMNS}
 
 
-def log_change(conn, kind: str, summary: str, snapshots: list[dict]) -> int | None:
-    """Record an undoable change within the caller's transaction. Returns its id."""
-    if not snapshots:
+def log_change(conn, kind: str, summary: str, snapshots: list[dict],
+               dirs: list[dict] | None = None) -> int | None:
+    """
+    Record an undoable change within the caller's transaction. Returns its id.
+    `dirs` are whole-folder moves ({src, dst}) made by the change; undo moves
+    each folder back in one piece before restoring the tracks.
+    """
+    if not snapshots and not dirs:
         return None
+    data = {"tracks": snapshots, **({"dirs": dirs} if dirs else {})}
     cur = conn.execute(
         "INSERT INTO change_log (ts, kind, summary, data, undone) VALUES (?, ?, ?, ?, 0)",
-        (time.time(), kind, summary, json.dumps({"tracks": snapshots})),
+        (time.time(), kind, summary, json.dumps(data)),
     )
     return cur.lastrowid
 
@@ -77,6 +83,7 @@ def undo_change(conn, change_id: int) -> dict:
     _check_newest(conn, change_id, {t["id"] for t in tracks})
     errors: list[dict] = []
     if row["kind"] == "tag_edit":
+        _undo_dir_moves(conn, payload.get("dirs", []), errors)
         restored = _undo_tag_edits(conn, tracks, errors)
     elif row["kind"] == "remove":
         restored = _undo_removes(conn, tracks)
@@ -98,6 +105,37 @@ def _check_newest(conn, change_id: int, ids: set[int]) -> None:
     for c in later:
         if ids & {t["id"] for t in json.loads(c["data"]).get("tracks", [])}:
             raise ValueError(f"Undo the later change first: {c['summary']}")
+
+
+def repoint_tracks(conn, src: str, dst: str) -> None:
+    """Rewrite the paths of every track under folder src to sit under dst."""
+    n = len(src) + 1
+    conn.execute(
+        "UPDATE tracks SET path = ? || substr(path, ?), directory = ? || substr(directory, ?) "
+        "WHERE directory = ? OR substr(directory, 1, ?) = ?",
+        (dst, n, dst, n, src, n, src + "/"),
+    )
+
+
+def _undo_dir_moves(conn, dirs: list[dict], errors: list[dict]) -> None:
+    """Move folders back whole (newest first), so cover art etc. comes along."""
+    from api.config import get_library_roots
+    from core.fileops import move_dir
+
+    roots = None
+    for d in reversed(dirs):
+        src, dst = d["src"], d["dst"]
+        if Path(src).exists() and not Path(dst).exists():
+            continue  # already back
+        try:
+            move_dir(dst, src)
+        except (MoveError, OSError) as exc:
+            errors.append({"dir": src, "name": Path(src).name, "error": f"move back failed: {exc}"})
+            continue
+        repoint_tracks(conn, dst, src)
+        conn.commit()
+        roots = roots or get_library_roots()
+        prune_empty_dirs(Path(dst).parent, root_for(dst, roots) or settings.music_dir)
 
 
 def _undo_tag_edits(conn, snapshots: list[dict], errors: list[dict]) -> int:

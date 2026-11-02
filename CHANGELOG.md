@@ -12,6 +12,30 @@
 - The track list shows staged values in place (amber, with the on-file value
   on hover); rows with a planned move are marked.
 - **History** dialog: every change, undo any of them newest-first per track.
+- **Undo staged steps.** Each staging action (save, bulk edit, organize,
+  find/replace, auto-number) is a step, labelled by the fields it changed;
+  ↶ undoes the newest staged step first, and Review has *Undo last step*.
+  Writing or discarding a track drops it from the steps.
+
+### Browsing (beartums fork)
+- The Tags panel is a tree: tag (Artist, Album Artist, Album, Genre, Year,
+  Composer) → its values with counts → (for artists) albums. `(none)` lists
+  tracks missing that tag. `GET /api/library/tag-values`, and `tag`/`value`
+  filters on `/tracks` and the M3U export.
+- Folder tree shows an open/close arrow only on folders with subfolders.
+- **Sorting and the Quality/Format filters run on the server** over the whole
+  view (every page), and combine with search. Numbers sort as numbers.
+- **Select all N in this view**: after selecting the page, one click selects
+  every track in the folder/tag/search across pages. The editor shows the
+  values the whole selection shares (`POST /api/library/summary`).
+- **Saving sends only the fields you changed** -- the form can stand for
+  tracks on other pages, so re-sending untouched fields would overwrite them.
+
+### Folders (beartums fork)
+- **Move…** and **Rename…** a folder from the Files panel: staged, written
+  as one directory move (cover art and other files come along), undone as
+  one. Destination must be inside a library root; library roots themselves
+  can't be moved. Review warns when a folder leaves Shared (Lidarr).
 
 ### Safe moves (beartums fork)
 - **Library roots**: rename templates are relative to the deepest root

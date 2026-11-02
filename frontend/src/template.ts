@@ -139,7 +139,9 @@ export const APP_HTML = `
       </nav>
       <nav id="panel-files" class="sidebar-panel" hidden>
         <div class="nav-toolbar">
-          <button id="rescan-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rescan just the selected folder" disabled>Rescan folder</button>
+          <button id="rescan-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rescan just the selected folder" disabled>Rescan</button>
+          <button id="move-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Move the selected folder (and everything in it) — staged for review" disabled>Move…</button>
+          <button id="rename-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rename the selected folder — staged for review" disabled>Rename…</button>
         </div>
         <div id="dir-tree" class="dir-tree"></div>
       </nav>
@@ -187,6 +189,7 @@ export const APP_HTML = `
       </div>
       <div id="bulk-actions" class="bulk-actions" hidden>
         <span id="selection-count" class="selection-count"></span>
+        <button id="select-view-btn" class="btn btn-link btn-sm" hidden></button>
         <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
         <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
         <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>

@@ -82,7 +82,7 @@ def get_settings():
 def update_settings(update: AppSettings):
     merged = _load().model_copy(update=update.model_dump(exclude_unset=True))
     _save(merged)
-    return merged
+    return get_settings()
 
 
 _SAMPLE_TRACK = {
