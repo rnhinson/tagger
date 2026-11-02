@@ -106,9 +106,9 @@ def scan_library(
             for row in conn.execute("SELECT path, mtime FROM tracks")
         }
         # A newer tag reader re-reads every file once, even unchanged ones.
+        # (`existing` must stay intact: pruning vanished files below walks it.
+        # Emptying it here made the 2026-11-02 re-read scan prune nothing.)
         reread = conn.execute("PRAGMA user_version").fetchone()[0] < READER_VERSION
-        if reread:
-            existing = {}
 
         for i, fpath in enumerate(all_files):
             if stop():
@@ -118,7 +118,7 @@ def scan_library(
                 stat = os.stat(fpath)
                 mtime = stat.st_mtime
 
-                if existing.get(fpath) != mtime:
+                if reread or existing.get(fpath) != mtime:
                     want_extended = scan_tags is None or "lyrics" in scan_tags or "compilation" in scan_tags
                     tags = read_tags(fpath, extended=want_extended)
                     if scan_tags is not None:
