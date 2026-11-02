@@ -1219,3 +1219,17 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .pn-change { color: var(--success); }
 .pn-same { color: var(--text-dim); }
 .pn-nomatch .pn-file { color: var(--text-dim); }
+
+/* ── Merge albums (mergealbums.ts) ────────────────────────────────────────── */
+.ma-fields { display: flex; gap: 10px; }
+.ma-fields .field-label { flex: 2; }
+.ma-fields .ma-year { flex: 0 0 80px; }
+.ma-groups { list-style: none; margin: 0; padding: 0; }
+.ma-group { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.ma-group.ma-target { background: var(--accent-dim); }
+.ma-info { flex: 1; min-width: 0; }
+.ma-title { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ma-dim { font-size: 12px; font-weight: 400; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ma-move { display: flex; gap: 2px; }
+.ma-pick { display: flex; cursor: pointer; }
+.ma-clashes { padding: 8px 12px; font-size: 12px; }

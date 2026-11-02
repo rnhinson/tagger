@@ -522,3 +522,124 @@ def parse_names(req: NameParse):
             staging.stage_edit(conn, by_id[i["id"]], i["changes"], step)
         res = _finish(conn, step, [i["id"] for i in todo])
     return {"ok": True, "changed": len(todo), **res, "errors": res.get("errors", [])}
+
+
+class AlbumMerge(BaseModel):
+    track_ids: list[int]
+    target: Optional[str] = None        # group key whose folder files move into (default: the biggest)
+    order: list[str] = []               # group keys in disc order (default: as listed)
+    album: Optional[str] = None         # the merged album's tags; None/"" = leave as is
+    album_artist: Optional[str] = None
+    year: Optional[str] = None
+    discs: str = "keep"                 # keep | per_album
+    move: bool = False
+    preview: bool = True
+
+
+def _merge_plan(conn, req: AlbumMerge) -> dict:
+    """Group the selection into albums and plan each track's tags and path."""
+    import os
+
+    rows = _rows(conn, req.track_ids)
+    entries = staging.load(conn, [r["id"] for r in rows])
+    staged_dirs = staging.load_dirs(conn)
+    groups: dict[str, dict] = {}
+    for row in rows:
+        eff = staging.effective(row, entries.get(row["id"]))
+        album, aa = eff.get("album") or "", eff.get("album_artist") or ""
+        key = "\n".join((row["directory"], album, aa))
+        g = groups.setdefault(key, {"key": key, "directory": row["directory"], "album": album,
+                                    "album_artist": aa, "artists": set(), "years": set(),
+                                    "discs": set(), "rows": []})
+        g["artists"].add(eff.get("artist") or "")
+        g["years"].add(eff.get("year") or "")
+        g["discs"].add(_disc(eff.get("disc_number")))
+        g["rows"].append((row, eff))
+    listed = sorted(groups.values(), key=lambda g: (g["directory"].casefold(), g["album"].casefold()))
+    order = [groups[k] for k in req.order if k in groups] + [g for g in listed if g["key"] not in req.order]
+    if len(order) < 2:
+        raise HTTPException(400, "Select tracks from at least two albums")
+    # Default target: the album with the most tracks (ties: the first listed).
+    target = groups.get(req.target) or max(order, key=lambda g: len(g["rows"]))
+
+    disc_map, nxt = {}, 1
+    for g in order:
+        for d in sorted(g["discs"]):
+            disc_map[(g["key"], d)] = str(nxt)
+            nxt += 1
+
+    tags_set = {k: v.strip() for k, v in (("album", req.album), ("album_artist", req.album_artist),
+                                          ("year", req.year)) if v and v.strip()}
+    plan, clashes, taken = [], [], set()
+    for g in order:
+        for row, eff in sorted(g["rows"], key=lambda re_: (_disc(re_[1].get("disc_number")),
+                                                          _num(re_[1].get("track_number")), re_[0]["filename"])):
+            tags = {k: v for k, v in tags_set.items() if (eff.get(k) or "") != v}
+            if req.discs == "per_album":
+                d = disc_map[(g["key"], _disc(eff.get("disc_number")))]
+                if (eff.get("disc_number") or "") != d:
+                    tags["disc_number"] = d
+            new_path = None
+            if req.move and g["directory"] != target["directory"]:
+                dest = os.path.join(target["directory"], row["filename"])
+                why = None
+                if staged_dirs and staging.moved_path(row["path"], staged_dirs):
+                    why = "its folder is staged to move"
+                elif dest in taken or (os.path.exists(dest) and not _samefile(dest, row["path"])):
+                    why = "a file with this name is already there"
+                if why:
+                    clashes.append({"id": row["id"], "filename": row["filename"], "error": why})
+                else:
+                    new_path = dest
+                    taken.add(dest)
+            if tags or new_path:
+                plan.append({"row": row, "tags": tags, "new_path": new_path, "group": g["key"]})
+
+    def summary(g):
+        return {"key": g["key"], "directory": g["directory"], "album": g["album"],
+                "album_artist": g["album_artist"], "tracks": len(g["rows"]),
+                "artists": sorted(a for a in g["artists"] if a)[:5],
+                "year": next((y for y in sorted(g["years"]) if y), ""),
+                "discs": sorted(g["discs"]),
+                "new_discs": [disc_map[(g["key"], d)] for d in sorted(g["discs"])]}
+    return {"groups": [summary(g) for g in order], "target": target["key"], "plan": plan,
+            "clashes": clashes}
+
+
+def _disc(v) -> int:
+    n = _num(v)
+    return n if n > 0 else 1
+
+
+def _num(v) -> int:
+    try:
+        return int(str(v or "").split("/")[0])
+    except ValueError:
+        return 0
+
+
+@router.post("/merge-albums")
+def merge_albums(req: AlbumMerge):
+    """
+    Make the selected tracks one album: the chosen album / album artist / year
+    on every track, discs optionally renumbered album by album (1..n in the
+    order given), files optionally moved into the target album's folder.
+    Preview, or stage it all as one step.
+    """
+    if req.discs not in ("keep", "per_album"):
+        raise HTTPException(400, "discs must be keep or per_album")
+    with db() as conn:
+        p = _merge_plan(conn, req)
+        out = {"groups": p["groups"], "target": p["target"], "clashes": p["clashes"],
+               "tracks": len(p["plan"]), "moves": sum(1 for x in p["plan"] if x["new_path"])}
+        if req.preview or not p["plan"]:
+            return out
+        name = (req.album or "").strip() or next(g["album"] for g in p["groups"] if g["key"] == p["target"])
+        step = staging.Step(conn, f"Merge {len(p['groups'])} albums into {name or '(no album)'} ({len(p['plan'])} tracks)")
+        for x in p["plan"]:
+            if x["tags"]:
+                staging.stage_edit(conn, x["row"], x["tags"], step)
+            if x["new_path"]:
+                staging.stage(conn, x["row"], new_path=x["new_path"], step=step)
+        res = _finish(conn, step, [x["row"]["id"] for x in p["plan"]])
+    return {**out, **res, "errors": res.get("errors", [])}

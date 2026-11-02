@@ -14,6 +14,7 @@ import { openCleanup } from './cleanup'
 import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
+import { openMergeAlbums } from './mergealbums'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1577,6 +1578,10 @@ function showRenameFolder() {
 moveFolderBtn.addEventListener('click', showMoveFolder)
 
 // Bulk rename: list order = the view's order (counters number in that order).
+document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openMergeAlbums(ids, refreshAfterBulk)
+})
 document.getElementById('parse-names-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (ids.length) openParseNames(ids, refreshAfterBulk)

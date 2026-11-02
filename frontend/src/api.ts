@@ -215,6 +215,16 @@ export interface TreeEntry {
   has_dirs?: boolean
 }
 
+export interface MergeGroup {
+  key: string; directory: string; album: string; album_artist: string; tracks: number
+  artists: string[]; year: string; discs: number[]; new_discs: string[]
+}
+
+export interface MergeAlbumsRequest {
+  track_ids: number[]; target: string | null; order: string[]; preview: boolean
+  album: string; album_artist: string; year: string; discs: 'keep' | 'per_album'; move: boolean
+}
+
 export interface TagValue {
   value: string
   track_count: number
@@ -318,6 +328,10 @@ export const api = {
         'POST', '/api/tags/parse-preview', { track_ids: trackIds, pattern }),
     parseNames: (trackIds: number[], pattern: string, exclude: number[]) =>
       request<EditResult & { changed: number }>('POST', '/api/tags/parse', { track_ids: trackIds, pattern, exclude }),
+    mergeAlbums: (body: MergeAlbumsRequest) =>
+      request<EditResult & { groups: MergeGroup[]; target: string; tracks: number; moves: number;
+                             clashes: { id: number; filename: string; error: string }[] }>(
+        'POST', '/api/tags/merge-albums', body),
     editValues: (trackIds: number[], field: string, add: string[], remove: string[]) =>
       request<EditResult & { changed: number }>('POST', '/api/tags/values', { track_ids: trackIds, field, add, remove }),
     replaygain: (trackIds: number[], albumMode = false) =>
