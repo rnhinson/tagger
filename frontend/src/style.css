@@ -961,7 +961,9 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 
 /* ─── Track quality dot ─────────────────────────────────────────────────────── */
 
-.col-quality { width: 20px; padding: 0 4px 0 8px; }
+.col-quality { width: 24px; padding: 0 4px 0 8px; }
+/* The dot never truncates: no stray "…" from the table's ellipsis rule. */
+.track-table td.col-quality { overflow: visible; text-overflow: clip; max-width: none; cursor: help; }
 
 .quality-dot {
   display: inline-block;
