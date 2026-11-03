@@ -5,7 +5,7 @@ import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
 import { COL_DEFS, orderedCols } from './columns'
 import {
-  trackQuality, QUALITY_TITLES, QUALITY_ISSUES,
+  trackQuality, qualityTitle, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
 } from './quality'
 import { APP_HTML } from './template'
@@ -471,7 +471,7 @@ function navigateTrack(dir: 1 | -1) {
 // ─── Track table ──────────────────────────────────────────────────────────────
 
 function renderColHeaders() {
-  const qualityTh = state.visibleCols.has('quality') ? '<th class="col-quality"></th>' : ''
+  const qualityTh = state.visibleCols.has('quality') ? '<th class="col-quality" title="Tag quality — green: all key tags · yellow: missing album, year or track # · red: missing title or artist. Hover a dot for details."></th>' : ''
   trackTheadRow.innerHTML = `${qualityTh}<th class="col-check"><input type="checkbox" id="select-all" /></th>`
   for (const col of orderedCols()) {
     if (col.key === 'quality') continue
@@ -660,7 +660,7 @@ function renderTracks() {
     }
     const q = trackQuality(t)
     const qualityCell = state.visibleCols.has('quality')
-      ? `<td class="col-quality"><span class="quality-dot quality-dot-${q}" title="${QUALITY_TITLES[q]}"></span></td>`
+      ? `<td class="col-quality" title="${esc(qualityTitle(t))}"><span class="quality-dot quality-dot-${q}"></span></td>`
       : ''
     // Read-only: no checkbox -- it can be opened (view only), never bulk-selected.
     const check = t.read_only ? '<span class="ro-lock" title="Read-only — view only">🔒</span>'

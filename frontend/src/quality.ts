@@ -8,6 +8,15 @@ export function trackQuality(t: Track): 'good' | 'fair' | 'poor' {
   return 'good'
 }
 
+/** The dot's tooltip: the rating and exactly which key tags are missing. */
+export function qualityTitle(t: Track): string {
+  const missing = ([['title', t.title], ['artist', t.artist], ['album', t.album], ['year', t.year],
+    ['track #', t.track_number]] as [string, unknown][]).filter(([, v]) => !v).map(([k]) => k)
+  const q = trackQuality(t)
+  if (q === 'good') return 'Good: title, artist, album, year and track # all present'
+  return `${q === 'poor' ? 'Poor' : 'Fair'}: missing ${missing.join(', ')}`
+}
+
 export const QUALITY_TITLES = {
   good: 'All key tags present',
   fair: 'Missing some tags (album, year, or track #)',
