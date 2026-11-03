@@ -182,3 +182,30 @@ def test_default_order_is_numeric_by_track(client, lib):
     ids = {n: _insert(lib / "Shared" / "Al" / f"{n}.mp3", track_number=str(n)) for n in (10, 2, 1)}
     got = [t["id"] for t in client.get("/api/library/tracks").json()["tracks"]]
     assert got == [ids[1], ids[2], ids[10]]
+
+
+def test_album_list_groups_by_folder_with_shared_tags_and_expected(client, lib):
+    d1, d2 = lib / "Shared" / "VA" / "Hits", lib / "Shared" / "Ann" / "Solo"
+    _insert(d1 / "01.mp3", album="Hits", artist="Ann", album_artist="Various", year="2001", track_number="1/3", genre="Pop")
+    _insert(d1 / "02.mp3", album="Hits", artist="Bob", album_artist="Various", year="2001", track_number="2/3", genre="Rock")
+    _insert(d2 / "01.mp3", album="Solo", artist="Ann", track_number="1")
+    albums = client.get("/api/library/album-list").json()
+    hits = next(a for a in albums if a["album"] == "Hits")
+    assert (hits["tracks"], hits["expected"], hits["discs"]) == (2, 3, 1)          # one row, not one per artist
+    assert hits["album_artist"] == "Various" and hits["year"] == "2001"
+    assert hits["genre"] is None and set(hits["mixed"]) == {"artist", "genre"}
+    assert sorted(hits["values"]["genre"]) == ["Pop", "Rock"]
+    solo = next(a for a in albums if a["album"] == "Solo")
+    assert solo["expected"] is None and solo["artist"] == "Ann"
+    only = client.get("/api/library/album-list", params={"tag": "genre", "value": "Rock"}).json()
+    assert [a["album"] for a in only] == ["Hits"] and only[0]["tracks"] == 1           # follows the view's filters
+
+
+def test_tracks_flag_missing_files(client, lib):
+    d = lib / "Shared" / "M"
+    d.mkdir(parents=True)
+    (d / "here.mp3").write_bytes(b"x")
+    here = _insert(d / "here.mp3")
+    gone = _insert(d / "gone.mp3")
+    by = {t["id"]: t["missing"] for t in client.get("/api/library/tracks").json()["tracks"]}
+    assert by[here] is False and by[gone] is True

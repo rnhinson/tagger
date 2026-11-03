@@ -197,7 +197,8 @@ export const APP_HTML = `
           </div>
           <div class="view-toggle">
             <button id="view-list-btn" class="btn btn-ghost btn-sm active" title="Track list">Tracks</button>
-            <button id="view-albums-btn" class="btn btn-ghost btn-sm" title="Album grid">Albums</button>
+            <button id="view-albums-btn" class="btn btn-ghost btn-sm" title="Albums in the current view">Albums</button>
+            <span id="album-style" class="album-style" hidden><button class="btn btn-ghost btn-sm" data-style="list" title="Album list">☰</button><button class="btn btn-ghost btn-sm" data-style="tiles" title="Album tiles">▦</button></span>
           </div>
         </div>
       </div>
@@ -226,6 +227,7 @@ export const APP_HTML = `
         <div id="track-loading" class="track-loading" hidden>Loading…</div>
       </div>
       <div id="album-grid" class="album-grid" style="display:none"></div>
+      <div id="album-list" class="album-list" style="display:none"></div>
       <div id="pagination" class="pagination" hidden></div>
     </main>
 
@@ -249,6 +251,7 @@ export const APP_HTML = `
         </div>
         <ul id="lookup-results" class="lookup-results"></ul>
       </div>
+      <div id="editor-file" class="editor-file" hidden></div>
       <form id="tag-form" class="tag-form" autocomplete="off">
         <div class="cover-section">
           <div class="cover-preview" id="cover-preview">

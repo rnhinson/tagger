@@ -3,6 +3,7 @@
 export interface Track {
   id: number
   read_only?: boolean
+  missing?: boolean                  // the file isn't at its scanned path any more
   path: string
   filename: string
   directory: string
@@ -117,6 +118,13 @@ export interface Album {
   album_artist: string | null
   track_count: number
   cover_track_id: number
+}
+
+export interface AlbumRow {
+  album: string; directory: string; tracks: number; expected: number | null; discs: number
+  album_artist: string | null; artist: string | null; year: string | null; genre: string | null
+  format: string | null; bitrate: number | null; cover_track_id: number; mixed: string[]
+  values: Record<string, string[]>     // distinct values of each mixed field, most common first
 }
 
 export interface AppSettings {
@@ -356,6 +364,10 @@ export const api = {
         'POST', '/api/library/value-counts', { track_ids: ids, field }),
     tagValues: (field: string) =>
       request<TagValue[]>('GET', `/api/library/tag-values?field=${encodeURIComponent(field)}`),
+    albumList: (params: Record<string, string | number> = {}) => {
+      const qs = new URLSearchParams(params as Record<string, string>).toString()
+      return request<AlbumRow[]>('GET', `/api/library/album-list${qs ? '?' + qs : ''}`)
+    },
     albums: (artist?: string) =>
       request<Album[]>('GET', `/api/library/albums${artist ? '?artist=' + encodeURIComponent(artist) : ''}`),
     exportM3uUrl: (params: Record<string, string | number> = {}) => {

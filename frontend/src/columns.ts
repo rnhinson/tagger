@@ -11,7 +11,8 @@ export interface ColDef {
 
 export const COL_DEFS: ColDef[] = [
   { key: 'quality',      label: 'Quality',      cls: 'col-quality', render: () => '' },
-  { key: 'title',        label: 'Title',        cls: 'col-title',  render: t => esc(t.title || t.filename) },
+  { key: 'title',        label: 'Title',        cls: 'col-title',  render: t =>
+    `<span title="${esc(t.path)}">${t.missing ? '<span class="missing-mark" title="File not found on disk — moved or deleted since the last scan">⚠</span> ' : ''}${esc(t.title || t.filename)}</span>` },
   { key: 'artist',       label: 'Artist',       cls: 'col-artist', render: t => t.artist       ? `<span class="tag-link" data-artist="${esc(t.artist)}">${esc(t.artist)}</span>` : '' },
   { key: 'album',        label: 'Album',        cls: 'col-album',  render: t => t.album        ? `<span class="tag-link" data-artist="${esc(t.artist||'')}" data-album="${esc(t.album)}">${esc(t.album)}</span>` : '' },
   { key: 'album_artist', label: 'Album Artist', cls: 'col-aa',     render: t => t.album_artist ? `<span class="tag-link" data-artist="${esc(t.album_artist)}">${esc(t.album_artist)}</span>` : '' },
