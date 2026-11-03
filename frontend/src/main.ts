@@ -1,5 +1,5 @@
 import './style.css'
-import { api, Track, Artist, Album, LookupResult, AppSettings, setUnauthorizedHandler, onSessionExpired } from './api'
+import { api, Track, Artist, Album, AlbumRow, LookupResult, AppSettings, setUnauthorizedHandler, onSessionExpired } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
@@ -395,12 +395,82 @@ function renderAlbumGrid() {
   }
 }
 
+// ─── Album list (default album view) ─────────────────────────────────────────
+// One row per folder + album in the current view (same filters as the track
+// list), with tracks present vs expected and every tag the tracks share.
+
+const albumListEl = document.getElementById('album-list')!
+const albumStyleEl = document.getElementById('album-style')!
+let albumStyle: 'list' | 'tiles' = 'list'
+try { if (localStorage.getItem('tagger.albumStyle') === 'tiles') albumStyle = 'tiles' } catch { /* storage blocked */ }
+
+function renderAlbumView() { if (albumStyle === 'list') renderAlbumList(); else renderAlbumGrid() }
+
+async function renderAlbumList() {
+  albumListEl.innerHTML = '<div class="album-empty">Loading albums…</div>'
+  let rows: AlbumRow[]
+  try { rows = await api.library.albumList(viewParams()) } catch (e) { albumListEl.innerHTML = `<div class="album-empty">${esc(String(e))}</div>`; return }
+  if (!rows.length) { albumListEl.innerHTML = '<div class="album-empty">No albums found.</div>'; return }
+  const hover = (r: AlbumRow, f: string) => esc(`Not the same on every track:\n${(r.values[f] ?? []).join('\n')}`)
+  const v = (r: AlbumRow, f: keyof AlbumRow) => r.mixed.includes(f as string)
+    ? `<span class="al-mixed" title="${hover(r, f as string)}">mixed</span>` : esc(String(r[f] ?? ''))
+  // No album artist and the track artists differ: the most common one, "+N".
+  const artist = (r: AlbumRow) => r.album_artist ? esc(r.album_artist)
+    : r.mixed.includes('artist') ? `<span title="${hover(r, 'artist')}">${esc(r.values.artist?.[0] ?? '')} <span class="al-mixed">+${(r.values.artist?.length ?? 1) - 1}</span></span>`
+    : esc(r.artist ?? '')
+  const tracks = (r: AlbumRow) => {
+    if (r.expected == null) return `${r.tracks}`
+    const cls = r.tracks < r.expected ? 'al-short' : r.tracks > r.expected ? 'al-over' : 'al-full'
+    return `<span class="${cls}" title="${r.tracks} present of ${r.expected} expected (from “n/N” track numbers)">${r.tracks} / ${r.expected}</span>`
+  }
+  albumListEl.innerHTML = `<table class="track-table album-table"><thead><tr>
+      <th class="al-cover"></th><th>Album</th><th title="Album artist, or the track artists when there is none">Artist</th><th class="al-num">Tracks</th><th class="al-num">Discs</th>
+      <th>Year</th><th>Genre</th><th>Format</th><th>Folder</th></tr></thead><tbody>
+    ${rows.map((r, i) => `<tr data-i="${i}" title="${esc(r.directory)}">
+      <td class="al-cover"><img loading="lazy" src="${coverUrl(r.cover_track_id)}" alt="" onerror="this.style.visibility='hidden'" /></td>
+      <td>${esc(r.album || '(no album)')}</td><td>${artist(r)}</td><td class="al-num">${tracks(r)}</td>
+      <td class="al-num">${r.discs > 1 ? r.discs : ''}</td><td>${v(r, 'year')}</td><td>${v(r, 'genre')}</td>
+      <td>${v(r, 'format')}${r.bitrate ? ` <span class="al-dim">${Math.round(r.bitrate / 1000)}k</span>` : ''}</td>
+      <td class="al-dim">${esc(shortPath(r.directory))}</td></tr>`).join('')}
+    </tbody></table>`
+  albumListEl.querySelector('tbody')!.addEventListener('click', async (e) => {
+    const tr = (e.target as HTMLElement).closest<HTMLElement>('tr[data-i]')
+    if (!tr) return
+    const r = rows[Number(tr.dataset.i)]
+    // Open the album: its folder in the Files tab, tracks in the list. (The
+    // track view filters by folder only in Files mode.)
+    state.viewMode = 'list'
+    state.sidebarMode = 'files'
+    state.selectedArtist = null; state.selectedAlbum = null; state.selectedTag = null; state.query = ''; searchEl.value = ''
+    state.selectedDirectory = r.directory
+    state.selectedIds.clear(); state.page = 0
+    if (!state.rootNode) await loadTree()
+    renderSidebarTabs()
+    renderFilesPanel()
+    renderViewMode()
+    await loadTracks()
+    renderEditor()
+  })
+}
+
+albumStyleEl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-style]')
+  if (!b) return
+  albumStyle = b.dataset.style as 'list' | 'tiles'
+  try { localStorage.setItem('tagger.albumStyle', albumStyle) } catch { /* storage blocked */ }
+  renderViewMode()
+})
+
 function renderViewMode() {
-  tableWrapEl.style.display  = state.viewMode === 'list'   ? ''     : 'none'
-  albumGridEl.style.display  = state.viewMode === 'albums' ? 'grid' : 'none'
+  const albums = state.viewMode === 'albums'
+  tableWrapEl.style.display  = state.viewMode === 'list' ? '' : 'none'
+  albumGridEl.style.display  = albums && albumStyle === 'tiles' ? 'grid' : 'none'
+  albumListEl.style.display  = albums && albumStyle === 'list' ? '' : 'none'
+  albumStyleEl.hidden = !albums
+  albumStyleEl.querySelectorAll<HTMLElement>('[data-style]').forEach(b => b.classList.toggle('active', b.dataset.style === albumStyle))
   viewListBtn.classList.toggle('active',   state.viewMode === 'list')
   viewAlbumsBtn.classList.toggle('active', state.viewMode === 'albums')
-  if (state.viewMode === 'albums') renderAlbumGrid()
+  if (albums) renderAlbumView()
 }
 
 // ─── Column picker ────────────────────────────────────────────────────────────
@@ -667,6 +737,7 @@ function renderTracks() {
       : `<input type="checkbox"${selected ? ' checked' : ''} />`
     let cells = `${qualityCell}<td class="col-check">${check}</td>`
     if (t.read_only) tr.classList.add('row-readonly')
+    if (t.missing) tr.classList.add('row-missing')
     for (const col of visibleCols) {
       if (col.key === 'quality') continue
       const was = t._orig && col.key in t._orig ? t._orig[col.key] : undefined
@@ -739,6 +810,20 @@ function renderPagination() {
 
 // ─── Tag editor ───────────────────────────────────────────────────────────────
 
+const editorFileEl = document.getElementById('editor-file')!
+
+/** The selected file's name and full path (and a warning when it's gone). */
+function renderEditorFile(t: Track | null) {
+  editorFileEl.hidden = !t
+  if (!t) return
+  editorFileEl.classList.toggle('editor-file-missing', !!t.missing)
+  editorFileEl.innerHTML = `
+    ${t.missing ? '<div class="editor-file-warn">⚠ File not found on disk — moved or deleted since the last scan. Tag edits can\'t be written; rescan or put the file back.</div>' : ''}
+    <div class="editor-file-name" title="${esc(t.filename)}">${esc(t.filename)}</div>
+    <div class="editor-file-path" title="${esc(t.path)}">${esc(t.directory)}</div>
+    ${t.staged?.new_path ? `<div class="editor-file-move" title="${esc(t.staged.new_path)}">→ ${esc(shortPath(t.staged.new_path))}</div>` : ''}`
+}
+
 function renderEditor() {
   if (state.selectedIds.size === 0) { tagEditor.hidden = true; editorResizer.hidden = true; lookupPanel.hidden = true; state.pendingCoverAlbumId = null; state.pendingLookupResult = null; playerEl.pause(); playerEl.hidden = true; editorRenamePreviewEl.hidden = true; return }
   tagEditor.hidden = false
@@ -751,6 +836,7 @@ function renderEditor() {
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
   const n = state.selectedIds.size
   editorTitle.textContent = n === 1 && sel.length === 1 ? (sel[0].title || sel[0].filename) : `${n.toLocaleString()} tracks`
+  renderEditorFile(n === 1 && sel.length === 1 ? sel[0] : null)
   fillEditorForm()
   updateCoverPreview()
   updatePlayer()
@@ -1383,6 +1469,7 @@ async function loadTracks() {
     state.total  = result.total
     renderTracks()
     renderPagination()
+    if (state.viewMode === 'albums' && albumStyle === 'list') renderAlbumList()   // same filters as the tracks
   } catch (e) {
     toast(`Failed to load tracks: ${e}`, 'error')
     trackLoading.hidden = true
@@ -1504,7 +1591,7 @@ async function saveTags(e: Event) {
         state.pendingLookupResult = null
         state.coverBust++
         updateCoverPreview()
-        if (state.viewMode === 'albums') renderAlbumGrid()
+        if (state.viewMode === 'albums') renderAlbumView()
         // Cover art is written straight away; it isn't staged.
         editToast(res, `${what} (cover art written)`)
       } catch {
@@ -2405,7 +2492,7 @@ coverInput.addEventListener('change', async () => {
     await Promise.all(ids.map(id => api.covers.update(id, file)))
     state.coverBust++
     updateCoverPreview()
-    if (state.viewMode === 'albums') renderAlbumGrid()
+    if (state.viewMode === 'albums') renderAlbumView()
     toast(`Cover art updated`, 'success')
   } catch (err) {
     toast(`Failed to update cover: ${err}`, 'error')

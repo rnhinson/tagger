@@ -52,6 +52,7 @@ def _tracks(conn, rows) -> list[dict]:
     entries = staging.load(conn, [r["id"] for r in rows])
     dirs = staging.load_dirs(conn)
     writable: dict[str, bool] = {}
+    present: dict[str, set] = {}   # folder -> file names on disk (missing-file flag)
     out = []
     for r in rows:
         e = entries.get(r["id"])
@@ -61,7 +62,12 @@ def _tracks(conn, rows) -> list[dict]:
         d = r["directory"]
         if d not in writable:
             writable[d] = os.access(d, os.W_OK)
-        out.append({**dict(r), "staged": e, "read_only": not writable[d]})
+            try:                     # one listing per folder, not a stat per file
+                present[d] = set(os.listdir(d))
+            except OSError:
+                present[d] = set()
+        out.append({**dict(r), "staged": e, "read_only": not writable[d],
+                    "missing": r["filename"] not in present[d]})
     return out
 
 
@@ -517,6 +523,58 @@ def list_artists():
             """
         ).fetchall()
     return [_row(r) for r in rows]
+
+
+def _total(v) -> int | None:
+    """The "of N" in a track/disc number like "3/12"."""
+    parts = str(v or "").split("/")
+    return int(parts[1]) if len(parts) == 2 and parts[1].strip().isdigit() else None
+
+
+@router.get("/album-list")
+def album_list(view: View = Depends()):
+    """
+    Albums in the current view (same filters as /tracks), one row per folder +
+    album: tracks present vs expected (from "n/N" track numbers, per disc),
+    and each tag every track shares -- or null + listed in `mixed`.
+    """
+    where, params, _order = _track_filters(view)
+    fields = ("album_artist", "artist", "year", "genre", "format")
+    with db() as conn:
+        rows = conn.execute(
+            f"SELECT id, album, directory, track_number, disc_number, bitrate, "
+            f"{', '.join(fields)} FROM tracks {where}", params).fetchall()
+    groups: dict[tuple, list] = {}
+    for r in rows:
+        groups.setdefault((r["directory"], r["album"] or ""), []).append(r)
+    out = []
+    for (directory, album), tracks in groups.items():
+        row: dict = {"album": album, "directory": directory, "tracks": len(tracks),
+                     "cover_track_id": min(t["id"] for t in tracks), "mixed": [], "values": {}}
+        for f in fields:
+            counts: dict[str, int] = {}
+            for t in tracks:
+                counts[t[f] or ""] = counts.get(t[f] or "", 0) + 1
+            if len(counts) == 1:
+                row[f] = next(iter(counts)) or None
+            else:
+                row[f] = None
+                row["mixed"].append(f)
+                # most common first, for "The Beatles +1" and the hover list
+                row["values"][f] = [v or "(blank)" for v, _ in sorted(counts.items(), key=lambda kv: -kv[1])][:8]
+        discs: dict[int, int | None] = {}
+        for t in tracks:
+            first = str(t["disc_number"] or "").split("/")[0].strip()
+            d = int(first) if first.isdigit() else 1
+            tot = _total(t["track_number"])
+            discs[d] = max(filter(None, (discs.get(d), tot)), default=None)
+        row["discs"] = len(discs)
+        row["expected"] = sum(discs.values()) if discs and all(discs.values()) else None
+        bitrates = [t["bitrate"] for t in tracks if t["bitrate"]]
+        row["bitrate"] = round(sum(bitrates) / len(bitrates)) if bitrates else None
+        out.append(row)
+    out.sort(key=lambda a: ((a["album_artist"] or a["artist"] or "").casefold(), a["album"].casefold(), a["directory"]))
+    return out
 
 
 @router.get("/albums")
