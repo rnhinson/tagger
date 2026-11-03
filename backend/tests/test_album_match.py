@@ -78,3 +78,26 @@ def test_quality_counts_unmatched_tracks_as_zero(client, lib, monkeypatch):
     a = _insert(lib / "Shared" / "x" / "1.mp3", title="Come Together", track_number="1", duration=259.0)
     r = client.post("/api/lookup/album/score", json={"track_ids": [a], "mb_album_id": REL_ID}).json()
     assert (r["matched"], r["local"], r["release_tracks"]) == (1, 1, 3) and r["quality"] > 0.9
+
+
+def test_number_and_length_alone_never_pair_without_a_title_match():
+    local = [{"id": 1, "title": "Her Majesty", "track_number": "1", "duration": 259.9},   # #1 + Come Together's length
+             {"id": 2, "title": "", "filename": "02 - Somthing.mp3", "track_number": "", "duration": None}]
+    m = albummatch.match(local, RELEASE["tracks"])
+    assert m[1] == (None, 0.0)          # right number and length, wrong song
+    assert m[2][0] == "1-2"             # untitled: compared by file name
+
+
+def test_search_by_artist_and_by_track(client, lib, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mbp, "search_releases", lambda album, artist, limit=15: calls.append(("rel", album, artist)) or
+                        [{"mb_album_id": "a", "album": "X", "artist": artist, "tracks": 3, "score": 1.0}])
+    monkeypatch.setattr(mbp, "releases_with_recording", lambda title, artist: calls.append(("rec", title, artist)) or
+                        [{"mb_album_id": "b", "album": "Y", "artist": artist, "tracks": 9, "score": 0.9}])
+    a = _insert(lib / "Shared" / "x" / "1.mp3", title="Something", artist="The Beatles", album="Abbey Road")
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "artist"}).json()
+    assert r["by"] == "artist" and calls[-1] == ("rec", "Something", "The Beatles")   # by your titles
+    assert r["candidates"][0]["titles_found"] == 1
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "track", "track": "Something"}).json()
+    assert r["by"] == "track" and r["track"] == "Something" and calls[-1] == ("rec", "Something", "The Beatles")
+    assert client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "track"}).status_code == 400

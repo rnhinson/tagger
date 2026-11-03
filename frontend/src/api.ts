@@ -240,7 +240,8 @@ export interface MbMatch {
              year: string | null; original_year: string | null; country: string | null; discs: number }
   release_tracks: MbReleaseTrack[]
   items: { id: number; filename: string; title: string | null; artist: string | null; track_number: string | null
-           disc_number: string | null; duration: number | null; key: string | null; score: number }[]
+           disc_number: string | null; duration: number | null; key: string | null; score: number
+           title_similarity: number | null }[]
   unmatched: string[]
 }
 
@@ -461,9 +462,9 @@ export const api = {
   },
 
   lookup: {
-    albumSearch: (trackIds: number[], album?: string, artist?: string) =>
-      request<{ album: string | null; artist: string | null; local_tracks: number; candidates: MbCandidate[] }>(
-        'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist }),
+    albumSearch: (trackIds: number[], album?: string, artist?: string, by: 'album' | 'artist' | 'track' = 'album', track?: string) =>
+      request<{ album: string | null; artist: string | null; track?: string; by: string; local_tracks: number; candidates: MbCandidate[] }>(
+        'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist, by, track }),
     albumScore: (trackIds: number[], mbAlbumId: string) =>
       request<{ mb_album_id: string; quality: number; matched: number; local: number; release_tracks: number }>(
         'POST', '/api/lookup/album/score', { track_ids: trackIds, mb_album_id: mbAlbumId }),

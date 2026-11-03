@@ -168,6 +168,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from difflib import SequenceMatcher
+
 from core import albummatch, staging
 from core.providers import musicbrainz as mbp
 
@@ -176,6 +178,8 @@ class AlbumSearch(BaseModel):
     track_ids: list[int]
     album: Optional[str] = None      # override the selection's own values
     artist: Optional[str] = None
+    by: str = "album"                # album | artist (releases by the artist) | track (releases containing it)
+    track: Optional[str] = None      # title for by="track"
 
 
 def _selection(conn, ids: list[int]) -> list[dict]:
@@ -191,6 +195,34 @@ def _common(tracks: list[dict], field: str) -> str | None:
     return max(set(vals), key=vals.count) if vals else None
 
 
+def _artist_releases(artist: str, tracks: list[dict]) -> list[dict]:
+    """
+    "Which of this artist's releases holds these tracks?" A bare artist search
+    returns whatever MusicBrainz scores highest (often obscure uploads), so
+    instead look up releases by the artist containing each of your titles
+    (up to 6) and order them by how many of your titles each holds.
+    """
+    titles = list(dict.fromkeys(albummatch.local_title(t) for t in tracks if albummatch.local_title(t)))[:6]
+    if not titles:
+        return mbp.search_releases(None, artist, 40)
+    hits: dict[str, int] = {}
+    cands: dict[str, dict] = {}
+    want = albummatch._norm(artist)
+    for title in titles:
+        for c in mbp.releases_with_recording(title, artist):
+            # MusicBrainz's artist filter is fuzzy: drop covers / other artists.
+            got = albummatch._norm(c.get("artist"))
+            if got and want not in got and SequenceMatcher(None, want, got).ratio() < 0.6:
+                continue
+            hits[c["mb_album_id"]] = hits.get(c["mb_album_id"], 0) + 1
+            cands.setdefault(c["mb_album_id"], c)
+    ranked = sorted(cands.values(), key=lambda c: (-hits[c["mb_album_id"]], c.get("type") != "Album",
+                                                   abs((c.get("tracks") or 999) - len(tracks))))
+    for c in ranked:
+        c["titles_found"] = hits[c["mb_album_id"]]
+    return ranked[:40]
+
+
 @router.post("/album/search")
 async def album_search(req: AlbumSearch):
     """Release candidates for the selection; one its files already name comes first."""
@@ -200,6 +232,18 @@ async def album_search(req: AlbumSearch):
         raise HTTPException(400, "No tracks")
     album = req.album if req.album is not None else _common(tracks, "album")
     artist = req.artist if req.artist is not None else (_common(tracks, "album_artist") or _common(tracks, "artist"))
+    if req.by == "track":
+        title = (req.track or "").strip()
+        if not title:
+            raise HTTPException(400, "No track title to search for")
+        found = await asyncio.to_thread(mbp.releases_with_recording, title, artist)
+        return {"album": album, "artist": artist, "track": title, "by": "track",
+                "local_tracks": len(tracks), "candidates": found}
+    if req.by == "artist":
+        if not artist:
+            raise HTTPException(400, "No artist to search for -- type one")
+        found = await asyncio.to_thread(_artist_releases, artist, tracks)
+        return {"album": album, "artist": artist, "by": "artist", "local_tracks": len(tracks), "candidates": found}
     if not album:
         raise HTTPException(400, "No album name to search for -- type one")
     found = await asyncio.to_thread(mbp.search_releases, album, artist)
@@ -212,7 +256,7 @@ async def album_search(req: AlbumSearch):
                              "date": rel["date"], "country": rel["country"], "formats": [],
                              "discs": rel["discs"], "tracks": len(rel["tracks"]), "type": None,
                              "score": 1.0, "tagged": True})
-    return {"album": album, "artist": artist, "local_tracks": len(tracks), "candidates": found}
+    return {"album": album, "artist": artist, "by": "album", "local_tracks": len(tracks), "candidates": found}
 
 
 class AlbumMatch(BaseModel):
@@ -240,7 +284,9 @@ async def album_match(req: AlbumMatch):
     for t in sorted(tracks, key=lambda t: (albummatch._int(t.get("disc_number")) or 1,
                                            albummatch._int(t.get("track_number")), t["filename"])):
         key, sc = pairs[t["id"]]
+        mb = next((r for r in rel["tracks"] if r["key"] == key), None)
         items.append({"id": t["id"], "filename": t["filename"], "title": t.get("title"),
+                      "title_similarity": round(albummatch.title_similarity(t, mb), 3) if mb else None,
                       "artist": t.get("artist"), "track_number": t.get("track_number"),
                       "disc_number": t.get("disc_number"), "duration": t.get("duration"),
                       "key": key, "score": sc})
