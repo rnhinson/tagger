@@ -140,6 +140,7 @@ export interface AppSettings {
   auto_scan_minutes: number
   stage_changes: boolean
   library_roots: string[]
+  layout_libraries: string[]
   library_templates: Record<string, string>
   default_music_dir?: string
   env_library_roots?: string[]
@@ -273,7 +274,8 @@ export interface MergeAlbumsRequest {
 
 export interface LibraryInfo {
   path: string; name: string; parent: string; active: boolean; writable: boolean; tracks: number
-  template: string                   // the library's layout ('' = none, not checked)
+  layout: boolean                    // checked against a layout (Quality → Not in layout)
+  template: string                   // its own layout ('' = the standard one)
 }
 
 export interface TagValue {

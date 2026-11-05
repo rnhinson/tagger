@@ -31,7 +31,9 @@ class AppSettings(BaseModel):
     library_roots: list[str] = []
     # Library roots switched off: not scanned, their tracks not in the DB.
     inactive_libraries: list[str] = []
-    # Library root -> the layout its files should follow (core/layout.py).
+    # Libraries checked against a layout (core/layout.py): the standard one
+    # (rename_template), or the library's own override below.
+    layout_libraries: list[str] = []
     library_templates: dict[str, str] = {}
 
 
@@ -113,6 +115,7 @@ def list_libraries():
             ).fetchone()[0]
             out.append({"path": p, "name": r.name, "parent": str(r.parent), "active": p not in off,
                         "writable": os.access(p, os.W_OK), "tracks": n,
+                        "layout": p in {os.path.normpath(x) for x in s.layout_libraries},
                         "template": s.library_templates.get(p, "")})
     return out
 
@@ -164,6 +167,8 @@ def update_settings(update: AppSettings):
             except (KeyError, ValueError, IndexError) as exc:
                 raise HTTPException(400, f"Layout for {Path(root).name}: invalid template ({exc})")
         sent["library_templates"] = layouts
+    if "layout_libraries" in sent:
+        sent["layout_libraries"] = sorted({os.path.normpath(p) for p in sent["layout_libraries"]})
     merged = _load().model_copy(update=sent)
     _save(merged)
     return get_settings()

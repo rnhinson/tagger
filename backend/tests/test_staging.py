@@ -478,7 +478,9 @@ def test_undo_with_the_file_gone_stays_not_undone(client, lib):
 # ── library layouts ──────────────────────────────────────────────────────────
 
 def _layout(client, lib, template="{album_artist_the}/{album} ({year})/{track_number:02d} {title}"):
-    r = client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): template}})
+    """Check Shared against a layout: its own override of the standard one."""
+    r = client.patch("/api/config", json={"layout_libraries": [str(lib / "Shared")],
+                                          "library_templates": {str(lib / "Shared"): template}})
     assert r.status_code == 200
     return r
 
@@ -500,8 +502,8 @@ def test_not_in_layout_lists_misfiled_tracks_with_their_layout_path(client, lib)
 
 def test_layouts_are_listed_per_library_and_validated(client, lib):
     _layout(client, lib, "{album}/{title}")
-    libs = {l["name"]: l["template"] for l in client.get("/api/config/libraries").json()}
-    assert libs == {"Shared": "{album}/{title}", "Music - Christmas": ""}
+    libs = {l["name"]: (l["layout"], l["template"]) for l in client.get("/api/config/libraries").json()}
+    assert libs == {"Shared": (True, "{album}/{title}"), "Music - Christmas": (False, "")}
     r = client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): "{nope}"}})
     assert r.status_code == 400 and "Shared" in r.json()["detail"]
     assert client.get("/api/config").json()["library_templates"] == {str(lib / "Shared"): "{album}/{title}"}
@@ -529,3 +531,23 @@ def test_rename_on_save_follows_the_library_layout(client, lib):
     client.patch("/api/config", json={"rename_on_save": True})
     client.patch(f"/api/tags/{tid}", json={"title": "U"})
     assert client.get(f"/api/library/track/{tid}").json()["staged"]["new_path"] == str(lib / "Shared" / "Band, The" / "U.mp3")
+
+
+def test_checked_library_uses_the_standard_layout_unless_overridden(client, lib):
+    xmas = lib / "Libraries" / "Music - Christmas"
+    client.patch("/api/config", json={"rename_template": "{album}/{title}",
+                                      "layout_libraries": [str(xmas)]})
+    tid = _insert(xmas / "loose.mp3", title="T", album="A")
+    shared = _insert(lib / "Shared" / "loose.mp3", title="S", album="A")   # unchecked
+    tracks = client.get("/api/library/tracks", params={"issue": "not_in_layout"}).json()["tracks"]
+    assert [t["id"] for t in tracks] == [tid] and tracks[0]["layout_path"] == str(xmas / "A" / "T.mp3")
+
+    client.patch("/api/config", json={"library_templates": {str(xmas): "{title}"}})
+    assert client.get(f"/api/library/track/{tid}").json()["path"] == str(xmas / "loose.mp3")
+    tracks = client.get("/api/library/tracks", params={"issue": "not_in_layout"}).json()["tracks"]
+    assert tracks[0]["layout_path"] == str(xmas / "T.mp3")
+
+    # an override on an unchecked library isn't compared
+    client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): "{title}"}})
+    assert client.get("/api/library/issues").json()["not_in_layout"] == 1
+    assert shared

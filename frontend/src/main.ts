@@ -2723,7 +2723,6 @@ function renderMusicDirsList() {
     musicDirsListEl.appendChild(li)
   }
 }
-const renameTemplateWrap  = document.getElementById('rename-template-wrap')!
 const acoustidStatusEl  = document.getElementById('acoustid-status')!
 
 function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
@@ -2740,14 +2739,44 @@ async function renderLibraries() {
         <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
           <span>${l.writable ? '' : '🔒 '}${esc(l.name)}</span></label>
         <span class="library-meta" title="${esc(l.path)}">${l.active ? `${l.tracks.toLocaleString()} tracks` : 'off'}</span>
-        <input class="library-layout" type="text" data-layout="${esc(l.path)}" value="${esc(l.template)}"
-          placeholder="Layout — e.g. {album_artist_the}/{album} ({year})/{track_number:02d} {title}" spellcheck="false" />
+        <div class="library-layout" data-path="${esc(l.path)}" data-override="${esc(l.template)}">
+          <label class="settings-toggle"><input type="checkbox" data-layout-check ${l.layout ? 'checked' : ''} /><span>Check layout</span></label>
+          ${layoutTextHtml(l.template)}
+        </div>
       </li>`).join('')
       : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
   } catch (e) {
     librariesListEl.innerHTML = `<li class="settings-hint">Failed to load libraries: ${esc(String(e))}</li>`
   }
 }
+
+/** A library's layout, read-only: its own (✎ to edit) or the standard one, muted. */
+function layoutTextHtml(override: string): string {
+  const shown = override || renameTemplateInput.value.trim()
+  return `<code class="library-layout-text${override ? '' : ' library-layout-std'}"
+      title="${override ? 'This library\'s own layout' : 'The standard layout (Layout, below)'}">${esc(shown) || '—'}</code>
+    <button type="button" class="btn btn-ghost btn-sm library-layout-edit" title="Give this library its own layout">✎</button>`
+}
+
+// ✎ swaps the text for an input in place; "Standard" drops the override.
+librariesListEl.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement
+  const box = t.closest<HTMLElement>('.library-layout')
+  if (!box) return
+  if (t.closest('.library-layout-edit')) {
+    const text = box.querySelector('.library-layout-text')!
+    const edit = document.createElement('span')
+    edit.className = 'library-layout-editing'
+    edit.innerHTML = `<input type="text" spellcheck="false" data-layout-input value="${esc(box.dataset.override || renameTemplateInput.value.trim())}" />
+      <button type="button" class="btn btn-ghost btn-sm library-layout-reset" title="Use the standard layout">Standard</button>`
+    text.replaceWith(edit)
+    box.querySelector('.library-layout-edit')!.remove()
+    edit.querySelector('input')!.focus()
+  } else if (t.closest('.library-layout-reset')) {
+    box.dataset.override = ''
+    box.querySelector('.library-layout-editing')!.outerHTML = layoutTextHtml('')
+  }
+})
 
 librariesListEl.addEventListener('change', async (e) => {
   const cb = e.target as HTMLInputElement
@@ -2790,7 +2819,6 @@ async function openSettings() {
       : 'No root folder exists yet — organizing is refused.'
 
     renameTemplateInput.value = s.rename_template
-    renameTemplateWrap.style.display = s.rename_on_save ? '' : 'none'
     updateRenamePreview()
     getScanTagCheckboxes().forEach(cb => {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
@@ -2934,11 +2962,11 @@ logoutBtn.addEventListener('click', async () => {
   }
 })
 
-renameOnSaveInput.addEventListener('change', () => {
-  renameTemplateWrap.style.display = renameOnSaveInput.checked ? '' : 'none'
+renameTemplateInput.addEventListener('input', () => {
+  updateRenamePreview()
+  // libraries following the standard layout show it as you type
+  librariesListEl.querySelectorAll('.library-layout-std').forEach(c => { c.textContent = renameTemplateInput.value.trim() || '—' })
 })
-
-renameTemplateInput.addEventListener('input', updateRenamePreview)
 
 document.getElementById('music-dir-add-btn')!.addEventListener('click', () => {
   const val = musicDirInput.value.trim()
@@ -2978,10 +3006,16 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
   }
   // Layouts: only when the library list loaded (else leave them as they are).
-  const layoutInputs = librariesListEl.querySelectorAll<HTMLInputElement>('input[data-layout]')
-  if (layoutInputs.length) {
-    update.library_templates = Object.fromEntries(
-      [...layoutInputs].map(i => [i.dataset.layout!, i.value.trim()]).filter(([, v]) => v))
+  // An override equal to the standard layout isn't one -- it follows the standard.
+  const layoutBoxes = [...librariesListEl.querySelectorAll<HTMLElement>('.library-layout')]
+  if (layoutBoxes.length) {
+    const std = renameTemplateInput.value.trim()
+    update.layout_libraries = layoutBoxes
+      .filter(b => b.querySelector<HTMLInputElement>('[data-layout-check]')!.checked).map(b => b.dataset.path!)
+    update.library_templates = Object.fromEntries(layoutBoxes.map(b => {
+      const v = (b.querySelector<HTMLInputElement>('[data-layout-input]')?.value ?? b.dataset.override ?? '').trim()
+      return [b.dataset.path!, v === std ? '' : v]
+    }).filter(([, v]) => v))
   }
   try {
     const saved = await api.settings.update(update)
@@ -2990,6 +3024,8 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     renameOnSave = saved.rename_on_save
     renameTemplate = saved.rename_template
     stageChanges = saved.stage_changes ?? true
+    state.qualityIssues = null   // layouts may have changed what is "Not in layout"
+    if (state.sidebarMode === 'quality') renderQualityPanel()
     // Refresh lookup status after saving
     const status = await api.lookup.status()
     lookupBtn.title = status.method === 'acoustid'
