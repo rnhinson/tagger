@@ -6,6 +6,10 @@ change. Undo replays that snapshot: rewriting tags to disk, moving renamed files
 back, and re-inserting removed rows. Cover-art and ReplayGain writes are not
 tracked.
 
+Undo checks the files, not just the rows: a track whose file is gone (or whose
+tags can't be written back) is reported as missing and its row is left alone,
+so the DB never claims a restore that didn't happen on disk.
+
 Undo goes newest-first per track: a change can't be undone while a later,
 still-applied change touched the same tracks (its snapshot would be stale).
 Each track is committed on its own; a change is only marked undone when every
@@ -88,7 +92,7 @@ def undo_change(conn, change_id: int) -> dict:
     elif row["kind"] == "remove":
         restored = _undo_removes(conn, tracks)
     elif row["kind"] == "delete_files":
-        restored = _undo_deletes(conn, tracks)
+        restored = _undo_deletes(conn, tracks, errors)
     else:
         raise ValueError(f"Cannot undo change of kind {row['kind']!r}")
 
@@ -162,10 +166,21 @@ def _undo_tag_edits(conn, snapshots: list[dict], errors: list[dict]) -> int:
                 continue
             vacated.add(Path(cur_path).parent)
 
+        name = snap.get("title") or snap["filename"]
+        if not Path(old_path).exists():
+            errors.append({"id": snap["id"], "name": name, "error": f"file missing: {cur_path}"})
+            continue
         try:
             write_tags(old_path, {k: snap.get(k) for k in _WRITABLE})
-        except Exception:
-            pass  # file may be unreadable; still restore the DB row
+        except Exception as exc:
+            # The file may have moved back already: record where it is, so a
+            # retry starts from there. The tags stay as they were.
+            dest = Path(old_path)
+            conn.execute("UPDATE tracks SET path = ?, filename = ?, directory = ? WHERE id = ?",
+                         (old_path, dest.name, str(dest.parent), snap["id"]))
+            conn.commit()
+            errors.append({"id": snap["id"], "name": name, "error": f"tag write failed: {exc}"})
+            continue
 
         set_cols = ["path", "filename", "directory", *_WRITABLE, "tagged_at"]
         conn.execute(
@@ -197,7 +212,7 @@ def _undo_removes(conn, snapshots: list[dict]) -> int:
     return len(snapshots)
 
 
-def _undo_deletes(conn, snapshots: list[dict]) -> int:
+def _undo_deletes(conn, snapshots: list[dict], errors: list[dict]) -> int:
     """Restore files moved to trash, then re-insert their rows."""
     restored = 0
     for snap in snapshots:
@@ -206,6 +221,11 @@ def _undo_deletes(conn, snapshots: list[dict]) -> int:
         if trash and Path(trash).exists():
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(trash, str(dest))
+        elif not dest.exists():   # trash emptied, and nobody put it back
+            errors.append({"id": snap["id"], "name": snap.get("title") or snap["filename"],
+                           "error": "file missing: no copy left in the trash"})
+            continue
         _reinsert(conn, snap)
+        conn.commit()
         restored += 1
     return restored

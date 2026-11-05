@@ -31,6 +31,8 @@ class AppSettings(BaseModel):
     library_roots: list[str] = []
     # Library roots switched off: not scanned, their tracks not in the DB.
     inactive_libraries: list[str] = []
+    # Library root -> the layout its files should follow (core/layout.py).
+    library_templates: dict[str, str] = {}
 
 
 def get_music_dirs() -> list[str]:
@@ -110,7 +112,8 @@ def list_libraries():
                 (p, len(p) + 1, p + "/"),
             ).fetchone()[0]
             out.append({"path": p, "name": r.name, "parent": str(r.parent), "active": p not in off,
-                        "writable": os.access(p, os.W_OK), "tracks": n})
+                        "writable": os.access(p, os.W_OK), "tracks": n,
+                        "template": s.library_templates.get(p, "")})
     return out
 
 
@@ -151,7 +154,17 @@ def toggle_library(req: LibraryToggle, background_tasks: BackgroundTasks):
 
 @router.patch("")
 def update_settings(update: AppSettings):
-    merged = _load().model_copy(update=update.model_dump(exclude_unset=True))
+    from core.naming import render_template
+    sent = update.model_dump(exclude_unset=True)
+    if "library_templates" in sent:
+        layouts = {os.path.normpath(k): v.strip() for k, v in sent["library_templates"].items() if v.strip()}
+        for root, template in layouts.items():
+            try:
+                render_template(template, _SAMPLE_TRACK, ".flac")
+            except (KeyError, ValueError, IndexError) as exc:
+                raise HTTPException(400, f"Layout for {Path(root).name}: invalid template ({exc})")
+        sent["library_templates"] = layouts
+    merged = _load().model_copy(update=sent)
     _save(merged)
     return get_settings()
 

@@ -70,6 +70,25 @@
   undo stays retryable instead of being marked done.
 - Settings PATCH only changes the fields sent (it used to reset the rest to
   defaults).
+- **Write checks the files first.** If any staged track's file (or a staged
+  folder) is gone from disk, nothing is written and one message lists them:
+  rescan or restore. Previously each track failed on its own.
+- **Undo checks the files, not just the DB.** A track whose file is missing
+  (or whose tags can't be written back) is left as it is and listed; the
+  change stays not-undone, so Undo can run again once the files are back.
+  Undoing a delete whose trash copy is gone no longer re-adds the row.
+- Template output keeps dots in the last part ("Vol. 2.mp3", not "Vol.mp3").
+
+### Library layouts (beartums fork)
+- **Per-library layout** (Settings → Libraries): the folder/file template each
+  library root should follow. Rename on save uses it; a library without one
+  uses the rename template and isn't checked.
+- Quality → **Not in layout** lists tracks whose path differs from their
+  library's layout, with the path the layout gives. **Re-file selected**
+  stages moves for the chosen tracks only, reviewed before anything moves.
+- Template variables `{artist_the}`, `{album_artist_the}`, `{album_the}`:
+  a leading The/A/An moves to the end ("The Pogues" → "Pogues, The"), as
+  Lidarr names folders.
 
 ### Audio quality
 - Per-file **spectrogram** in the tag editor, rendered on demand by ffmpeg and

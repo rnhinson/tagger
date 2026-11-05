@@ -31,6 +31,7 @@ export const APP_HTML = `
       <div class="settings-section">
         <div class="settings-section-title">Libraries</div>
         <p class="settings-hint">With library roots set (below), a full scan covers only the libraries switched on here. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written.</p>
+        <p class="settings-hint"><strong>Layout</strong>: the folder/file layout a library should follow, relative to it. Tracks elsewhere are listed under Quality → <em>Not in layout</em>, to re-file one by one. Empty: not checked. Rename on save uses it too. Variables as in the rename template, plus <code>{artist_the}</code> <code>{album_artist_the}</code> <code>{album_the}</code> ("The Pogues" → "Pogues, The", as Lidarr names folders). Saved with <strong>Save</strong>.</p>
         <ul id="libraries-list" class="libraries-list"></ul>
       </div>
       <div class="settings-section">
@@ -126,7 +127,7 @@ export const APP_HTML = `
         <p class="settings-hint">When enabled, saving a track's tags also plans a move to the path built from the template below, inside the track's library root.</p>
         <label class="field-label" id="rename-template-wrap">Template
           <input id="setting-rename-template" type="text" />
-          <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {track_number:02d} {disc_number} — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code></span>
+          <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("Pogues, The") — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code>. A library with a layout (Libraries, above) uses its layout instead.</span>
           <div id="rename-preview" class="rename-preview"></div>
         </label>
       </div>
@@ -163,6 +164,7 @@ export const APP_HTML = `
         <div class="nav-toolbar" id="quality-toolbar" hidden>
           <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
           <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
+          <button id="refile-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Stage moving the selected tracks to the path their library layout gives — reviewed before anything moves" hidden>Re-file selected</button>
         </div>
         <ul id="quality-list" class="nav-list"></ul>
       </nav>

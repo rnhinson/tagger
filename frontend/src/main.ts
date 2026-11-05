@@ -12,7 +12,7 @@ import { APP_HTML } from './template'
 import { ValueChips } from './chips'
 import { muteErrorToasts } from './toast'
 import { openCleanup } from './cleanup'
-import { overlayStaged, editToast, openReview, openHistory, shortPath, errText } from './staged'
+import { overlayStaged, editToast, undoToast, missingText, openReview, openHistory, shortPath, errText } from './staged'
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
@@ -105,6 +105,7 @@ let spectrogramAvailable = false
 // Rename settings mirrored client-side for the editor's live save-path preview.
 let renameOnSave = false
 let renameTemplate = ''
+let stageChanges = true
 const lookupBtn        = document.getElementById('lookup-btn') as HTMLButtonElement
 const lookupPanel      = document.getElementById('lookup-panel')!
 const lookupResults    = document.getElementById('lookup-results')!
@@ -821,7 +822,8 @@ function renderEditorFile(t: Track | null) {
     ${t.missing ? '<div class="editor-file-warn">⚠ File not found on disk — moved or deleted since the last scan. Tag edits can\'t be written; rescan or put the file back.</div>' : ''}
     <div class="editor-file-name" title="${esc(t.filename)}">${esc(t.filename)}</div>
     <div class="editor-file-path" title="${esc(t.path)}">${esc(t.directory)}</div>
-    ${t.staged?.new_path ? `<div class="editor-file-move" title="${esc(t.staged.new_path)}">→ ${esc(shortPath(t.staged.new_path))}</div>` : ''}`
+    ${t.staged?.new_path ? `<div class="editor-file-move" title="${esc(t.staged.new_path)}">→ ${esc(shortPath(t.staged.new_path))}</div>` : ''}
+    ${t.layout_path && !t.staged?.new_path ? `<div class="editor-file-layout" title="${esc(t.layout_path)}">Layout puts it at ${esc(shortPath(t.layout_path))}</div>` : ''}`
 }
 
 function renderEditor() {
@@ -1319,6 +1321,7 @@ autoFixBtn.addEventListener('click', async () => {
 
 const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
 const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElement
+const refileBtn      = document.getElementById('refile-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
 
 dedupeBtn.addEventListener('click', async () => {
@@ -1338,6 +1341,32 @@ dedupeBtn.addEventListener('click', async () => {
     toast(`Dedupe failed: ${e}`, 'error')
   } finally {
     dedupeBtn.disabled = false
+  }
+})
+
+// "Not in layout" view: stage moves for the CHOSEN tracks only -- never the
+// whole list in one click (that was the 11-01 Organize incident).
+refileBtn.addEventListener('click', async () => {
+  const ids = [...state.selectedIds]
+  if (!ids.length) { toast('Select the tracks to re-file first', 'info'); return }
+  const n = `${ids.length} track${ids.length !== 1 ? 's' : ''}`
+  if (!confirm(stageChanges
+    ? `Stage moving ${n} to the path its library layout gives? Nothing moves until you write it from Review.`
+    : `Move ${n} to the path its library layout gives now? (Undo is in History.)`)) return
+  refileBtn.disabled = true
+  try {
+    const res = await api.tags.refile(ids)
+    const errNote = res.errors.length ? ` — ${res.errors.length} skipped: ${res.errors[0].error}` : ''
+    if (res.missing) toast(`Nothing written: ${missingText(res.errors)}`, 'error')
+    else if (res.staged) toast(`Staged re-filing ${res.planned} track${res.planned !== 1 ? 's' : ''} — Review to write${errNote}`, res.planned ? 'info' : 'error')
+    else toast(`Re-filed ${res.moved} track${res.moved !== 1 ? 's' : ''}${errNote}`, res.moved ? 'success' : 'error')
+    state.qualityIssues = null
+    await (res.staged ? refreshAfterStage() : refreshAfterWrite())
+    await renderQualityPanel()
+  } catch (e) {
+    toast(`Re-file failed: ${errText(e)}`, 'error')
+  } finally {
+    refileBtn.disabled = false
   }
 })
 
@@ -1717,6 +1746,7 @@ function rootOf(path: string): string | undefined {
 
 async function afterFolderStage(res: import('./api').EditResult, what: string) {
   if (res.staged) toast(`Staged ${what} — Review to write`, 'info')
+  else if (res.missing) toast(`Nothing written: ${missingText(res.errors ?? [])}`, 'error')
   else if (res.errors?.length) toast(`${what} failed: ${res.errors[0].error}`, 'error')
   else toast(`Done: ${what}`, 'success')
   if (res.staged) { await refreshAfterStage(); return }
@@ -1926,7 +1956,8 @@ dirTreeEl.addEventListener('drop', async (e) => {
       const ids = JSON.parse(tracks) as number[]
       const res = await api.tags.moveTo(ids, target)
       const errNote = res.errors.length ? ` — ${res.errors.length} skipped: ${res.errors[0].error}` : ''
-      if (!res.planned && !res.errors.length) toast('Already in that folder', 'info')
+      if (res.missing) toast(`Nothing written: ${missingText(res.errors)}`, 'error')
+      else if (!res.planned && !res.errors.length) toast('Already in that folder', 'info')
       else if (res.staged) toast(`Staged moving ${res.planned} track${res.planned !== 1 ? 's' : ''} → ${target.split('/').pop()} — Review to write${errNote}`, res.planned ? 'info' : 'error')
       else toast(`Moved ${res.moved} track${res.moved !== 1 ? 's' : ''}${errNote}`, res.moved ? 'success' : 'error')
       await (res.staged ? refreshAfterStage() : refreshAfterWrite())
@@ -2149,12 +2180,7 @@ async function undoLast() {
       await refreshAfterWrite()
       return
     }
-    const res = await api.library.undo(target.id)
-    if (res.errors?.length) {
-      toast(`Undo incomplete — ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
-    } else {
-      toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
-    }
+    undoToast(await api.library.undo(target.id))
     state.qualityIssues = null
     if (state.sidebarMode === 'tags') await loadLibrary()
     await loadTracks()
@@ -2615,8 +2641,10 @@ qualityListEl.addEventListener('click', async (e) => {
   state.selectedIssue = state.selectedIssue === issue ? null : issue
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
   const isDupes = state.selectedIssue === 'duplicate_tracks'
+  const isLayout = state.selectedIssue === 'not_in_layout'
   dedupeBtn.hidden = !isDupes
-  fixAllBtn.hidden = isDupes
+  refileBtn.hidden = !isLayout
+  fixAllBtn.hidden = isDupes || isLayout
   state.selectedIds.clear()
   state.page = 0
   await renderQualityPanel()
@@ -2712,6 +2740,8 @@ async function renderLibraries() {
         <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
           <span>${l.writable ? '' : '🔒 '}${esc(l.name)}</span></label>
         <span class="library-meta" title="${esc(l.path)}">${l.active ? `${l.tracks.toLocaleString()} tracks` : 'off'}</span>
+        <input class="library-layout" type="text" data-layout="${esc(l.path)}" value="${esc(l.template)}"
+          placeholder="Layout — e.g. {album_artist_the}/{album} ({year})/{track_number:02d} {title}" spellcheck="false" />
       </li>`).join('')
       : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
   } catch (e) {
@@ -2947,12 +2977,19 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     scan_exclude:      scanExcludeInput.value.split('\n').map(x => x.trim()).filter(Boolean),
     auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
   }
+  // Layouts: only when the library list loaded (else leave them as they are).
+  const layoutInputs = librariesListEl.querySelectorAll<HTMLInputElement>('input[data-layout]')
+  if (layoutInputs.length) {
+    update.library_templates = Object.fromEntries(
+      [...layoutInputs].map(i => [i.dataset.layout!, i.value.trim()]).filter(([, v]) => v))
+  }
   try {
     const saved = await api.settings.update(update)
     state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
     state.libraryRoots = saved.effective_library_roots ?? state.libraryRoots
     renameOnSave = saved.rename_on_save
     renameTemplate = saved.rename_template
+    stageChanges = saved.stage_changes ?? true
     // Refresh lookup status after saving
     const status = await api.lookup.status()
     lookupBtn.title = status.method === 'acoustid'
@@ -2961,7 +2998,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     toast('Settings saved', 'success')
     closeSettings()
   } catch (e) {
-    toast(`Failed to save settings: ${e}`, 'error')
+    toast(`Failed to save settings: ${errText(e)}`, 'error')
   }
 })
 
@@ -3033,6 +3070,7 @@ async function startApp() {
     state.musicDirs = [s.default_music_dir ?? '', ...s.music_dirs].filter(Boolean)
     renameOnSave = s.rename_on_save
     renameTemplate = s.rename_template
+    stageChanges = s.stage_changes ?? true
   }).catch(() => {})
   api.tags.replaygainStatus().then(s => {
     replaygainAvailable = s.available

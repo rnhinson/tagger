@@ -90,3 +90,15 @@ def test_is_audio_file(name, expected):
 ])
 def test_detect_format(name, fmt):
     assert _detect_format(name) == fmt
+
+
+def test_render_the_variables_match_lidarr():
+    tags = {**SAMPLE, "artist": "The Pogues", "album_artist": "A Tribe Called Quest (US)", "album": "The Album"}
+    out = render_template("{artist_the}/{album_artist_the}/{album_the}/{title}", tags, ".mp3")
+    assert out == "Pogues, The/Tribe Called Quest, A (US)/Album, The/So What.mp3"
+    assert render_template("{artist_the}", {"artist": "Theatre"}, ".mp3") == "Theatre.mp3"   # a word, not an article
+    assert render_template("{artist_the}", {"artist": "The"}, ".mp3") == "The.mp3"
+
+
+def test_render_keeps_dots_in_the_last_part():
+    assert render_template("{title}", {"title": "Vol. 2"}, ".mp3") == "Vol. 2.mp3"

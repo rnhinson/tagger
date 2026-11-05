@@ -304,7 +304,7 @@ def test_undo_staged_steps_newest_first(client, lib):
     client.post("/api/tags/reorganize", json={"track_ids": [a]})                  # step 3
 
     c = client.get("/api/staged/count").json()
-    assert c["steps"] == 3 and c["last_step"]["summary"].startswith("Organize")
+    assert c["steps"] == 3 and c["last_step"]["summary"].startswith("Re-file")
 
     assert client.post("/api/staged/undo").json()["restored"] == 1
     assert _staged(client, a) == {"tags": {"genre": "Soundtrack"}, "new_path": None}
@@ -385,7 +385,7 @@ def test_actions_group_lines_by_step_newest_first(client, lib):
     client.patch(f"/api/tags/{a}", json={"genre": "Jazz", "year": "2001"})
     client.post("/api/tags/reorganize", json={"track_ids": [a]})
     r = client.get("/api/staged/actions").json()
-    assert [s["summary"] for s in r["steps"]] == ["Organize 1 files", "Edited genre, year — A", "Set genre on 2 tracks"]
+    assert [s["summary"] for s in r["steps"]] == ["Re-file 1 file to the library layout", "Edited genre, year — A", "Set genre on 2 tracks"]
     org, edit, bulk = r["steps"]
     assert [l["kind"] for l in org["lines"]] == ["path"] and org["lines"][0]["new"].endswith("/X/Al/01 A.mp3")
     assert {(l["field"], l["old"], l["new"]) for l in edit["lines"]} == {("genre", "Folk", "Jazz"), ("year", None, "2001")}
@@ -443,3 +443,89 @@ def test_migration_adds_after_to_an_existing_steps_table(tmp_path, monkeypatch):
     con = sqlite3.connect(tmp_path / "library.db")
     assert "after" in {r[1] for r in con.execute("PRAGMA table_info(staged_steps)")}
     assert con.execute("SELECT summary, after FROM staged_steps").fetchall() == [("old", None)]
+
+
+# ── files must exist: write and undo check the disk, not just the DB ─────────
+
+@needs_ffmpeg
+def test_write_refuses_everything_when_a_file_is_missing(client, lib):
+    here = _insert(_mp3(lib / "Shared" / "here.mp3", title="Old"), title="Old")
+    gone = _insert(lib / "Shared" / "gone.mp3", title="Gone")
+    client.patch(f"/api/tags/{here}", json={"title": "New"})
+    client.patch(f"/api/tags/{gone}", json={"title": "New"})
+    res = client.post("/api/staged/apply", json={}).json()
+    assert res["applied"] == 0 and res["missing"] == 1
+    assert res["errors"] == [{"id": gone, "name": "Gone", "error": "file missing"}]
+    assert read_tags(str(lib / "Shared" / "here.mp3"))["title"] == "Old"   # nothing written
+    assert client.get("/api/staged/count").json()["count"] == 2              # all still staged
+
+
+@needs_ffmpeg
+def test_undo_with_the_file_gone_stays_not_undone(client, lib):
+    src = _mp3(lib / "Shared" / "x.mp3")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    cid = client.post("/api/staged/apply", json={}).json()["change_id"]
+    moved = lib / "Shared" / "A" / "Al" / "01 T.mp3"
+    moved.unlink()   # deleted behind Tagger's back
+
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["restored"] == 0 and res["errors"][0]["error"] == f"file missing: {moved}"
+    assert client.get(f"/api/library/track/{tid}").json()["path"] == str(moved)   # row untouched
+    assert client.get("/api/library/history").json()[0]["undone"] == 0
+
+
+# ── library layouts ──────────────────────────────────────────────────────────
+
+def _layout(client, lib, template="{album_artist_the}/{album} ({year})/{track_number:02d} {title}"):
+    r = client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): template}})
+    assert r.status_code == 200
+    return r
+
+
+def test_not_in_layout_lists_misfiled_tracks_with_their_layout_path(client, lib):
+    _layout(client, lib)
+    good = _insert(lib / "Shared" / "Pogues, The" / "Rum (1985)" / "01 Sally.mp3",
+                   title="Sally", album="Rum", album_artist="The Pogues", year="1985", track_number="1")
+    bad = _insert(lib / "Shared" / "The Pogues" / "Rum" / "Sally 2.mp3",
+                  title="Sally 2", album="Rum", album_artist="The Pogues", year="1985", track_number="2")
+    xmas = _insert(lib / "Libraries" / "Music - Christmas" / "anywhere.mp3", title="X")   # no layout: not checked
+    assert client.get("/api/library/issues").json()["not_in_layout"] == 1
+    tracks = client.get("/api/library/tracks", params={"issue": "not_in_layout"}).json()["tracks"]
+    assert [t["id"] for t in tracks] == [bad]
+    assert tracks[0]["layout_path"] == str(lib / "Shared" / "Pogues, The" / "Rum (1985)" / "02 Sally 2.mp3")
+    by = {t["id"]: t["layout_path"] for t in client.get("/api/library/tracks").json()["tracks"]}
+    assert by[good] is None and by[xmas] is None
+
+
+def test_layouts_are_listed_per_library_and_validated(client, lib):
+    _layout(client, lib, "{album}/{title}")
+    libs = {l["name"]: l["template"] for l in client.get("/api/config/libraries").json()}
+    assert libs == {"Shared": "{album}/{title}", "Music - Christmas": ""}
+    r = client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): "{nope}"}})
+    assert r.status_code == 400 and "Shared" in r.json()["detail"]
+    assert client.get("/api/config").json()["library_templates"] == {str(lib / "Shared"): "{album}/{title}"}
+
+
+@needs_ffmpeg
+def test_refile_stages_the_move_to_the_layout(client, lib):
+    _layout(client, lib)
+    src = _mp3(lib / "Shared" / "loose.mp3")
+    tid = _insert(src, title="Sally", album="Rum", album_artist="The Pogues", year="1985", track_number="1")
+    res = client.post("/api/tags/reorganize", json={"track_ids": [tid]}).json()
+    assert res["planned"] == 1 and res["staged"] is True
+    dest = lib / "Shared" / "Pogues, The" / "Rum (1985)" / "01 Sally.mp3"
+    assert client.get("/api/staged").json()["tracks"][0]["new_path"] == str(dest)
+    assert src.exists()                                   # nothing moves until written
+    client.post("/api/staged/apply", json={})
+    assert dest.exists()
+    assert client.get("/api/library/issues").json()["not_in_layout"] == 0
+
+
+@needs_ffmpeg
+def test_rename_on_save_follows_the_library_layout(client, lib):
+    _layout(client, lib, "{artist_the}/{title}")
+    tid = _insert(_mp3(lib / "Shared" / "x.mp3"), title="T", artist="The Band")
+    client.patch("/api/config", json={"rename_on_save": True})
+    client.patch(f"/api/tags/{tid}", json={"title": "U"})
+    assert client.get(f"/api/library/track/{tid}").json()["staged"]["new_path"] == str(lib / "Shared" / "Band, The" / "U.mp3")
