@@ -4,6 +4,7 @@ export interface Track {
   id: number
   read_only?: boolean
   missing?: boolean                  // the file isn't at its scanned path any more
+  layout_path?: string | null        // where its library's layout puts it, when that's elsewhere
   path: string
   filename: string
   directory: string
@@ -100,6 +101,7 @@ export interface EditResult {
   staged: boolean
   applied?: number
   errors?: WriteError[]
+  missing?: number                   // files gone from disk: nothing was written
 }
 
 export interface TrackList {
@@ -138,6 +140,7 @@ export interface AppSettings {
   auto_scan_minutes: number
   stage_changes: boolean
   library_roots: string[]
+  library_templates: Record<string, string>
   default_music_dir?: string
   env_library_roots?: string[]
   effective_library_roots?: string[]
@@ -225,6 +228,7 @@ export interface IssueCount {
   missing_track_number: number
   duplicate_tracks: number
   missing_files: number
+  not_in_layout: number
 }
 
 export interface TreeEntry {
@@ -269,6 +273,7 @@ export interface MergeAlbumsRequest {
 
 export interface LibraryInfo {
   path: string; name: string; parent: string; active: boolean; writable: boolean; tracks: number
+  template: string                   // the library's layout ('' = none, not checked)
 }
 
 export interface TagValue {
@@ -414,8 +419,11 @@ export const api = {
     rename: (req: BulkRenameRequest & { exclude: number[] }) =>
       request<{ planned: number; skipped: number; staged: boolean; moved: number; errors: WriteError[] }>(
         'POST', '/api/tags/rename', req),
+    refile: (trackIds: number[]) =>
+      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[]; missing?: number }>(
+        'POST', '/api/tags/reorganize', { track_ids: trackIds }),
     moveTo: (trackIds: number[], folder: string) =>
-      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[] }>(
+      request<{ planned: number; moved: number; staged: boolean; errors: WriteError[]; missing?: number }>(
         'POST', '/api/tags/move-to', { track_ids: trackIds, folder }),
     autonumber: (trackIds: number[]) =>
       request<EditResult & { numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
@@ -430,7 +438,7 @@ export const api = {
     actions: () => request<{ count: number; steps: StagedAction[]; other: StagedLine[] }>('GET', '/api/staged/actions'),
     undo: () => request<{ summary: string; restored: number }>('POST', '/api/staged/undo'),
     apply: (trackIds?: number[]) =>
-      request<{ applied: number; folders?: number; errors: WriteError[]; change_id: number | null }>(
+      request<{ applied: number; folders?: number; errors: WriteError[]; missing?: number; change_id: number | null }>(
         'POST', '/api/staged/apply', { track_ids: trackIds ?? null }),
     discard: (trackIds?: number[], dirs?: string[]) =>
       request<{ discarded: number }>('POST', '/api/staged/discard',

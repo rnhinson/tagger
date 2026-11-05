@@ -24,7 +24,8 @@ def _finish(conn, step: staging.Step, ids: list[int]) -> dict:
     if load_settings().stage_changes:
         return {"staged": True}
     res = staging.apply(conn, ids, summary)
-    return {"staged": False, "applied": res["applied"], "errors": res["errors"]}
+    return {"staged": False, "applied": res["applied"], "errors": res["errors"],
+            "missing": res.get("missing", 0)}
 
 
 def _rows(conn, ids: list[int]) -> list:
@@ -164,14 +165,16 @@ class Reorganize(BaseModel):
 @router.post("/reorganize")
 def reorganize(req: Reorganize):
     """
-    Plan a move for each selected file to the rename template, relative to its
-    own library root (core/fileops.py), and stage it -- nothing moves until the
-    staged changes are written. Uses the tags as staged.
+    Re-file: plan a move for each selected file to its library's layout (else
+    the rename template), relative to its own library root (core/fileops.py),
+    and stage it -- nothing moves until the staged changes are written. Uses
+    the tags as staged.
 
-    Not offered in the UI (removed 2026-11-02: a whole-selection re-file from
-    the template is too easy to fire by accident). Kept for the tests that
-    exercise staged moves + undo, and for a future CLI.
+    The UI offers it only as "Re-file selected" in the Quality panel's "Not in
+    layout" view, for tracks chosen there. The old whole-selection Organize
+    button was removed 2026-11-02: too easy to fire by accident.
     """
+    from core.layout import template_for
     if not req.track_ids:
         raise HTTPException(400, "No track IDs provided")
     app = load_settings()
@@ -184,14 +187,15 @@ def reorganize(req: Reorganize):
         errors += [{"id": t, "error": "not found"} for t in req.track_ids if t not in found]
         pending = staging.load(conn, list(found))
         staged_dirs = staging.load_dirs(conn)
-        step = staging.Step(conn, f"Organize {len(rows)} files")
+        step = staging.Step(conn, f"Re-file {len(rows)} file{'s' if len(rows) != 1 else ''} to the library layout")
         for row in rows:
             if staged_dirs and staging.moved_path(row["path"], staged_dirs):
                 errors.append({"id": row["id"], "error": "its folder is staged to move -- write that first"})
                 continue
             try:
                 dest = staging.plan_path(
-                    row, staging.effective(row, pending.get(row["id"])), app.rename_template, roots,
+                    row, staging.effective(row, pending.get(row["id"])),
+                    template_for(row["path"], roots, app.rename_template), roots,
                 )
             except staging.PlanError as exc:
                 errors.append({"id": row["id"], "error": str(exc)})
@@ -204,7 +208,7 @@ def reorganize(req: Reorganize):
         res = _finish(conn, step, planned)
     moved = 0 if res["staged"] else res["applied"]
     return {"planned": len(planned), "moved": moved, "errors": errors + res.get("errors", []),
-            "staged": res["staged"]}
+            "staged": res["staged"], "missing": res.get("missing", 0)}
 
 
 class MoveTo(BaseModel):
@@ -245,7 +249,7 @@ def move_to_folder(req: MoveTo):
         res = _finish(conn, step, planned)
     moved = 0 if res["staged"] else res["applied"]
     return {"planned": len(planned), "moved": moved, "errors": errors + res.get("errors", []),
-            "staged": res["staged"]}
+            "staged": res["staged"], "missing": res.get("missing", 0)}
 
 
 class BulkRename(BaseModel):
@@ -361,7 +365,7 @@ def bulk_rename(req: BulkRename):
             staging.stage(conn, rows[it["id"]], new_path=os.path.join(it["folder"], it["new"]), step=step)
         res = _finish(conn, step, [it["id"] for it in todo])
     blocked = [it for it in items if it["status"] in ("conflict", "error")]
-    return {"planned": len(todo), "skipped": len(blocked), "staged": res["staged"],
+    return {"planned": len(todo), "skipped": len(blocked), "staged": res["staged"], "missing": res.get("missing", 0),
             "moved": 0 if res["staged"] else res["applied"], "errors": res.get("errors", [])}
 
 

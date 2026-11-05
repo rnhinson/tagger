@@ -29,7 +29,10 @@ export const COL_DEFS: ColDef[] = [
   { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
   { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
     const rel = sourcePath(t.directory)
-    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>`
+    // In the "Not in layout" view: where the library's layout would put it.
+    const layout = state.selectedIssue === 'not_in_layout' && t.layout_path
+      ? `<div class="layout-path" title="${esc(t.layout_path)}">→ ${esc(sourcePath(t.layout_path))}</div>` : ''
+    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>${layout}`
   }},
 ]
 

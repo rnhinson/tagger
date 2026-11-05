@@ -31,10 +31,31 @@ export function shortPath(p: string): string {
   return root ? p.slice(root.length + 1) : p
 }
 
+/** "3 files missing (a, b, c) — rescan or restore": one message for a stale DB. */
+export function missingText(errors: WriteError[]): string {
+  const names = errors.map(e => e.name ?? e.dir ?? '?')
+  const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3}` : '')
+  return `${names.length} file${names.length !== 1 ? 's' : ''} missing (${shown}) — rescan or restore`
+}
+
+/** Toast for a history undo: done, files missing (left as they are), or failed. */
+export function undoToast(res: { restored: number; errors?: WriteError[] }) {
+  const gone = (res.errors ?? []).filter(e => e.error.startsWith('file missing'))
+  if (gone.length) {
+    toast(`Undo incomplete — ${missingText(gone)}. Those tracks were left as they are; Undo again once the files are back.`, 'error')
+  } else if (res.errors?.length) {
+    toast(`Undo incomplete — ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
+  } else {
+    toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
+  }
+}
+
 /** Toast for an editing call: "Staged …" or "Saved …", plus any write errors. */
 export function editToast(res: EditResult | undefined, what: string) {
   if (!res || res.staged) {
     toast(`Staged ${what} — Review to write`, 'info')
+  } else if (res.missing) {
+    toast(`Nothing written: ${missingText(res.errors ?? [])}`, 'error')
   } else if (res.errors?.length) {
     toast(`Saved ${what}; ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
   } else {
@@ -215,7 +236,10 @@ export async function openReview(onChanged: () => Promise<void>) {
         for (const e of res.errors as WriteError[]) failures.set(e.dir ? `dir:${e.dir}` : `id:${e.id}`, e.error)
         const done = `Wrote ${res.applied} track${res.applied !== 1 ? 's' : ''}`
           + (res.folders ? ` · moved ${res.folders} folder${res.folders !== 1 ? 's' : ''}` : '')
-        if (res.errors.length) {
+        if (res.missing) {
+          toast(`Nothing written: ${missingText(res.errors)}. Discard their changes, or rescan, then write again.`, 'error')
+          await render()
+        } else if (res.errors.length) {
           toast(`${done}; ${res.errors.length} need attention`, 'error')
           await render()
         } else {
@@ -271,12 +295,7 @@ export async function openHistory(onChanged: () => Promise<void>) {
       b.addEventListener('click', async () => {
         b.disabled = true
         try {
-          const res = await api.library.undo(Number(b.dataset.id))
-          if (res.errors?.length) {
-            toast(`Undo incomplete — ${res.errors.length} failed: ${res.errors[0].error}`, 'error')
-          } else {
-            toast(`Undone — restored ${res.restored} track${res.restored !== 1 ? 's' : ''}`, 'success')
-          }
+          undoToast(await api.library.undo(Number(b.dataset.id)))
           await onChanged()
           await render()
         } catch (e) {

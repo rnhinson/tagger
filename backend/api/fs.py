@@ -105,7 +105,8 @@ def _stage_folder(src: str, dst: str, summary: str) -> dict:
         if load_settings().stage_changes:
             return {"staged": True}
         res = staging.apply(conn, ids=[], dirs=[os.path.normpath(src)], summary=summary)
-        return {"staged": False, "applied": res["folders"], "errors": res["errors"]}
+        return {"staged": False, "applied": res["folders"], "errors": res["errors"],
+                "missing": res.get("missing", 0)}
 
 
 @router.post("/move")

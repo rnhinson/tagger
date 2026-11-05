@@ -1251,6 +1251,10 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .library-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
 .library-off .settings-toggle span { color: var(--text-muted); }
 .library-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.library-row { flex-wrap: wrap; }
+.library-layout { flex-basis: 100%; font-family: ui-monospace, monospace; font-size: 11px; margin: 2px 0 4px 22px; }
+.layout-path { color: var(--accent); font-size: 11px; }
+.editor-file-layout { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .readonly-note {
   font-size: 12px; padding: 6px 8px; border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);

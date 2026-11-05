@@ -358,13 +358,16 @@ def plan_path(row, tags: dict, template: str, roots: list[Path]) -> str:
 def stage_edit(conn, row, tags: dict, step: Step | None = None) -> None:
     """Stage a tag edit; with rename-on-save, also stage the matching path."""
     from api.config import _load as load_settings, get_library_roots
+    from core.layout import template_for
 
     stage(conn, row, tags, step=step)
     app = load_settings()
     if app.rename_on_save and not moved_path(row["path"], load_dirs(conn)):
         entry = load(conn, [row["id"]]).get(row["id"])
+        roots = get_library_roots()
         try:
-            dest = plan_path(row, effective(row, entry), app.rename_template, get_library_roots())
+            dest = plan_path(row, effective(row, entry),
+                             template_for(row["path"], roots, app.rename_template), roots)
         except PlanError:
             return  # leave the file where it is
         stage(conn, row, new_path=dest, step=step)
@@ -409,6 +412,16 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None,
         r["id"]: r
         for r in conn.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", list(entries)).fetchall()
     } if entries else {}
+    # Every file and folder must still be where the scan found it. If any is
+    # gone the DB is stale (moved or deleted behind Tagger's back): write
+    # nothing and say so once, rather than failing track by track.
+    missing = [{"id": tid, "name": r["title"] or r["filename"], "error": "file missing"}
+               for tid, r in rows.items() if not Path(r["path"]).exists()]
+    missing += [{"dir": s, "name": Path(s).name, "error": "folder missing"}
+                for s in staged_dirs if not Path(s).is_dir()]
+    if missing:
+        return {"applied": 0, "folders": 0, "errors": missing, "missing": len(missing), "change_id": None}
+
     # Two tracks headed for the same file: refuse both.
     dests = Counter(e["new_path"] for e in entries.values() if e["new_path"])
     roots = get_library_roots()

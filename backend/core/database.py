@@ -15,6 +15,9 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     # has_value(column, v): v is one of the ';'-separated values in column.
     conn.create_function("has_value", 2, has_value_sql, deterministic=True)
+    # layout_path(path, title, ...): where the library's layout puts a track.
+    from core.layout import COLUMNS, sql_function
+    conn.create_function("layout_path", len(COLUMNS), sql_function())
     return conn
 
 
