@@ -5,6 +5,8 @@ export interface Track {
   read_only?: boolean
   missing?: boolean                  // the file isn't at its scanned path any more
   layout_path?: string | null        // where its library's layout puts it, when that's elsewhere
+  lyrics_group?: string              // its lyrics group's name
+  lyrics_lookup?: { status: string; at: number } | null   // the last lyrics lookup
   path: string
   filename: string
   directory: string
@@ -142,6 +144,8 @@ export interface AppSettings {
   library_roots: string[]
   layout_libraries: string[]
   library_templates: Record<string, string>
+  lyrics_groups: LyricsGroup[]
+  library_lyrics_groups: Record<string, string>
   default_music_dir?: string
   env_library_roots?: string[]
   effective_library_roots?: string[]
@@ -167,6 +171,7 @@ export interface ScanJob {
   directory?: string | null          // null = whole library
   phase?: string | null              // listing | reading | pruning
   changed?: number | null
+  kind?: 'scan' | 'lyrics'
 }
 
 export interface About {
@@ -230,6 +235,7 @@ export interface IssueCount {
   duplicate_tracks: number
   missing_files: number
   not_in_layout: number
+  missing_lyrics: number
 }
 
 export interface TreeEntry {
@@ -260,6 +266,21 @@ export interface MbMatch {
 
 export interface LyricsItem {
   id: number; title: string; artist: string | null; status: string; lyrics: string | null; error?: string
+  group?: string; query?: LyricsQuery | null
+}
+
+export interface LyricsQuery { title: string; artist: string; album: string }
+export interface LyricsGroup { id: string; name: string; skip: boolean; queries: LyricsQuery[]; assigned?: number }
+export interface LyricsHit {
+  id: number; title: string; artist: string; album: string | null; duration: number | null
+  synced: string | null; plain: string | null; instrumental: boolean
+}
+export interface LyricsPlan {
+  track: { id: number; title: string | null; artist: string | null; album: string | null; album_artist: string | null
+           duration: number | null; lyrics: string | null }
+  group: { id: string; name: string; skip: boolean }
+  queries: LyricsQuery[]
+  last: { status: string; at: number } | null
 }
 
 export interface MergeGroup {
@@ -276,6 +297,7 @@ export interface LibraryInfo {
   path: string; name: string; parent: string; active: boolean; writable: boolean; tracks: number
   layout: boolean                    // checked against a layout (Quality → Not in layout)
   template: string                   // its own layout ('' = the standard one)
+  lyrics_group: string               // its default lyrics group ('' = Standard)
 }
 
 export interface TagValue {
@@ -481,6 +503,14 @@ export const api = {
       request<{ items: LyricsItem[] }>('POST', '/api/lyrics/fetch', { track_ids: trackIds, prefer, overwrite }),
     stage: (items: Record<number, string>) =>
       request<EditResult & { changed: number }>('POST', '/api/lyrics/stage', { items }),
+    groups: () => request<LyricsGroup[]>('GET', '/api/lyrics/groups'),
+    assign: (trackIds: number[], groupId: string | null) =>
+      request<{ assigned: number }>('POST', '/api/lyrics/assign', { track_ids: trackIds, group_id: groupId }),
+    plan: (trackId: number) => request<LyricsPlan>('GET', `/api/lyrics/plan/${trackId}`),
+    search: (q: { title?: string; artist?: string; album?: string; q?: string }) =>
+      request<{ hits: LyricsHit[] }>('POST', '/api/lyrics/search', q),
+    lookup: (opts: { track_ids?: number[] | null; prefer?: string; retry?: boolean; instrumental_to_none?: boolean }) =>
+      request<{ job_id: string | null; tracks: number }>('POST', '/api/lyrics/lookup', opts),
   },
 
   lookup: {

@@ -1,16 +1,20 @@
 // Lyrics from LRCLIB for the selection: fetch, see what was found per track
 // (synced / plain / instrumental / not found / already has), preview, and
-// stage the ticked ones into the lyrics tag as one step. Backend: /api/lyrics.
+// stage the ticked ones into the lyrics tag as one step. Each track is looked
+// up through its lyrics group's queries; Search… on a row picks one by hand.
+// Backend: /api/lyrics.
 import { api, LyricsItem } from './api'
 import { toast } from './toast'
 import { esc } from './util'
 import { editToast, errText } from './staged'
+import { openLyricsSearch } from './lyricssearch'
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   synced: { label: 'synced', cls: 'mb-good' }, plain: { label: 'plain', cls: 'mb-ok' },
   instrumental: { label: 'instrumental', cls: 'mb-none' }, missing: { label: 'not found', cls: 'mb-none' },
   has: { label: 'has lyrics', cls: 'mb-none' }, untagged: { label: 'needs title + artist', cls: 'mb-bad' },
-  error: { label: 'error', cls: 'mb-bad' },
+  error: { label: 'error', cls: 'mb-bad' }, skipped: { label: 'group: no lyrics', cls: 'mb-none' },
+  manual: { label: 'picked by hand', cls: 'mb-good' },
 }
 
 export function openLyrics(ids: number[], onDone: () => Promise<void>) {
@@ -62,9 +66,11 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
       const can = !!i.lyrics
       return `<tr class="pr-row${skip.has(i.id) ? ' pr-excluded' : ''}">
         <td class="pr-check"><input type="checkbox" data-id="${i.id}" ${can && !skip.has(i.id) ? 'checked' : ''} ${can ? '' : 'disabled'} /></td>
-        <td>${esc(i.title)} <span class="ma-dim">· ${esc(i.artist ?? '')}</span>${i.error ? `<div class="pr-msg">${esc(i.error)}</div>` : ''}</td>
+        <td>${esc(i.title)} <span class="ma-dim">· ${esc(i.artist ?? '')}${i.group ? ` · ${esc(i.group)}` : ''}</span>${i.error ? `<div class="pr-msg">${esc(i.error)}</div>` : ''}
+          ${i.query ? `<div class="ma-dim ly-query">via ${esc([i.query.title, i.query.artist || '(any artist)', i.query.album].filter(Boolean).join(' · '))}</div>` : ''}</td>
         <td><span class="mb-score ${s.cls}">${s.label}</span></td>
-        <td>${can ? `<button type="button" class="btn btn-ghost btn-sm" data-preview="${i.id}">${open.has(i.id) ? 'Hide' : 'Preview'}</button>` : ''}</td></tr>
+        <td>${can ? `<button type="button" class="btn btn-ghost btn-sm" data-preview="${i.id}">${open.has(i.id) ? 'Hide' : 'Preview'}</button>` : ''}
+          ${i.status !== 'has' ? `<button type="button" class="btn btn-ghost btn-sm" data-search="${i.id}" title="Search LRCLIB for this track by hand">Search…</button>` : ''}</td></tr>
         ${can && open.has(i.id) ? `<tr class="ly-preview"><td></td><td colspan="3"><pre>${esc(i.lyrics!)}</pre></td></tr>` : ''}`
     }).join('')
     const n = items.filter(i => i.lyrics && !skip.has(i.id)).length
@@ -93,6 +99,15 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
     render()
   })
   rowsEl.addEventListener('click', (e) => {
+    const sid = Number((e.target as HTMLElement).dataset.search)
+    if (sid) {
+      openLyricsSearch(sid, (text) => {
+        const it = items.find(i => i.id === sid)!
+        it.lyrics = text; it.status = 'manual'; it.query = null
+        skip.delete(sid); render()
+      })
+      return
+    }
     const id = Number((e.target as HTMLElement).dataset.preview)
     if (!id) return
     if (open.has(id)) open.delete(id); else open.add(id)

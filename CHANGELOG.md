@@ -90,6 +90,24 @@
   a leading The/A/An moves to the end ("The Pogues" → "Pogues, The"), as
   Lidarr names folders.
 
+### Lyrics (beartums fork)
+- **Quality → Missing lyrics** lists tracks with no lyrics, with each one's
+  lyrics group and how its last lookup went.
+- **Lyrics groups** (Settings → Lyrics groups): queries tried in order on
+  LRCLIB, as title / artist / album templates. Built in: Standard, Cast album
+  and Soundtrack (fall back to title + album with no artist, and drop
+  "(Original Broadway Cast Recording)", "(From …)"), and **No lyrics** (a skip
+  group: never looked up, never "missing"). Add your own. A track's group is
+  the one it was put in (**Lyrics group…** on a selection; kept in Tagger's DB,
+  not the files), else its library's (Settings → Libraries), else Standard.
+- **Look up all…** (Missing lyrics view) runs a background lookup with
+  progress and Cancel under Settings → Background. Finds are staged in batches
+  for Review; tracks LRCLIB calls instrumental move to No lyrics; tracks
+  already not found are skipped next time.
+- **Search…** (editor, and per row in Lyrics…): search LRCLIB by hand from
+  the group's queries, your own fields or free text; every hit with album,
+  length (± against the track) and synced/plain, readable before you use it.
+
 ### Audio quality
 - Per-file **spectrogram** in the tag editor, rendered on demand by ffmpeg and
   cached by track + mtime — a lossy transcode dressed up as lossless shows up

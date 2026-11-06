@@ -1,5 +1,6 @@
 """
-Background job management — scan jobs persisted to SQLite.
+Background job management — scan jobs (and lyrics lookups, kind 'lyrics')
+persisted to SQLite.
 """
 from __future__ import annotations
 
@@ -18,18 +19,18 @@ logger = logging.getLogger("tagger.scan")
 _CANCEL: set[str] = set()
 
 
-def create_scan_job(directory: str | None = None) -> str:
+def create_scan_job(directory: str | None = None, kind: str = "scan") -> str:
     job_id = str(uuid.uuid4())
     with db() as conn:
         conn.execute(
-            "INSERT INTO scan_jobs (id, status, started_at, directory) VALUES (?, 'pending', ?, ?)",
-            (job_id, time.time(), directory),
+            "INSERT INTO scan_jobs (id, status, started_at, directory, kind) VALUES (?, 'pending', ?, ?, ?)",
+            (job_id, time.time(), directory, kind),
         )
     return job_id
 
 
 def request_cancel(job_id: str) -> bool:
-    """Ask a pending/running scan to stop at its next file."""
+    """Ask a pending/running job to stop at its next file."""
     job = get_job(job_id)
     if not job or job["status"] not in ("pending", "running"):
         return False
@@ -58,12 +59,12 @@ def get_job(job_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def active_scan() -> dict | None:
-    """Return the currently running/pending scan job, if any."""
+def active_scan(kind: str = "scan") -> dict | None:
+    """Return the currently running/pending job of this kind, if any."""
     with db() as conn:
         row = conn.execute(
-            "SELECT * FROM scan_jobs WHERE status IN ('pending', 'running') "
-            "ORDER BY started_at DESC LIMIT 1"
+            "SELECT * FROM scan_jobs WHERE status IN ('pending', 'running') AND kind = ? "
+            "ORDER BY started_at DESC LIMIT 1", (kind,)
         ).fetchone()
     return dict(row) if row else None
 
