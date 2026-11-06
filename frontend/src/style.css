@@ -1391,3 +1391,23 @@ button.scan-status[hidden] { display: none; }
 .al-short { color: #eab308; font-weight: 600; }
 .al-over { color: var(--danger); font-weight: 600; }
 .al-full { color: var(--success); }
+
+/* ── Lyrics groups, search ─────────────────────────────────────────────── */
+.library-lyrics { flex-basis: 100%; margin: 0 0 4px 22px; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.library-lyrics select { font-size: 11px; }
+.lyrics-group { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+.lyrics-group-head { display: flex; align-items: center; gap: 8px; }
+.lyrics-group-name { flex: 1; min-width: 0; }
+.lyrics-group-name[readonly] { border-color: transparent; background: transparent; font-weight: 600; }
+.lyrics-queries { margin-top: 4px; }
+.lyrics-query { display: flex; gap: 4px; margin-bottom: 3px; }
+.lyrics-query input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 11px; }
+.lyrics-assign { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.field-label-row { display: flex; align-items: center; justify-content: space-between; }
+.ly-query { font-size: 11px; }
+.ls-fields { display: flex; gap: 6px; align-items: flex-end; flex-wrap: wrap; margin-top: 6px; }
+.ls-fields .field-label { flex: 1; min-width: 120px; }
+.ls-hit { cursor: pointer; }
+.ls-picked td { background: var(--accent-dim); }
+.ls-off { color: var(--danger); }
+.ls-preview pre { margin: 8px 0 0; max-height: 260px; overflow: auto; font-size: 12px; white-space: pre-wrap; }

@@ -18,6 +18,8 @@ import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
 import { openMbAlbum } from './mbalbum'
 import { openLyrics } from './lyricsdialog'
+import { openLyricsSearch } from './lyricssearch'
+import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
@@ -1322,6 +1324,7 @@ autoFixBtn.addEventListener('click', async () => {
 const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
 const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElement
 const refileBtn      = document.getElementById('refile-btn') as HTMLButtonElement
+const lyricsLookupBtn = document.getElementById('lyrics-lookup-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
 
 dedupeBtn.addEventListener('click', async () => {
@@ -1343,6 +1346,41 @@ dedupeBtn.addEventListener('click', async () => {
     dedupeBtn.disabled = false
   }
 })
+
+// "Missing lyrics" view: look up the selection, or every track listed, in the
+// background (Settings → Background); what's found is staged for review.
+lyricsLookupBtn.addEventListener('click', async () => {
+  const ids = state.selectedIds.size ? [...state.selectedIds] : null
+  const what = ids ? `the ${ids.length} selected track${ids.length !== 1 ? 's' : ''}` : 'every track missing lyrics'
+  if (!confirm(`Look up lyrics for ${what} in the background?\n\nEach track goes through its lyrics group's queries. Found lyrics are ${stageChanges ? 'staged for Review' : 'written'}; tracks LRCLIB calls instrumental move to No lyrics; tracks already not found are skipped.`)) return
+  lyricsLookupBtn.disabled = true
+  try {
+    const r = await api.lyrics.lookup({ track_ids: ids })
+    if (!r.job_id) { toast('Nothing to look up — every track listed was already tried (Search… one by hand)', 'info'); return }
+    toast(`Looking up lyrics for ${r.tracks.toLocaleString()} tracks — progress under Settings → Background`, 'info')
+    pollLyrics(r.job_id)
+  } catch (e) {
+    toast(`Lyrics lookup failed: ${errText(e)}`, 'error')
+  } finally {
+    lyricsLookupBtn.disabled = false
+  }
+})
+
+function pollLyrics(jobId: string) {
+  const timer = setInterval(async () => {
+    try {
+      const job = await api.jobs.get(jobId)
+      if (job.status === 'running' || job.status === 'pending') return
+      clearInterval(timer)
+      const found = `${(job.changed ?? 0).toLocaleString()} of ${job.scanned.toLocaleString()} found`
+      if (job.status === 'done') toast(`Lyrics lookup done — ${found}${stageChanges ? ', staged for Review' : ''}`, 'success')
+      else if (job.status === 'cancelled') toast(`Lyrics lookup cancelled — ${found}`, 'info')
+      else toast(`Lyrics lookup ${job.status}: ${job.error ?? ''}`, 'error')
+      await refreshReviewButton()
+      await refreshAfterBulk()
+    } catch { clearInterval(timer) }
+  }, 3000)
+}
 
 // "Not in layout" view: stage moves for the CHOSEN tracks only -- never the
 // whole list in one click (that was the 11-01 Organize incident).
@@ -1853,6 +1891,14 @@ document.getElementById('mb-album-btn')!.addEventListener('click', () => {
 document.getElementById('lyrics-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (ids.length) openLyrics(ids, refreshAfterBulk)
+})
+document.getElementById('lyrics-group-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openAssignGroup(ids, refreshAfterBulk)
+})
+document.getElementById('lyrics-search-btn')!.addEventListener('click', () => {
+  if (state.selectedIds.size !== 1) { toast('Select one track to search its lyrics', 'info'); return }
+  openLyricsSearch([...state.selectedIds][0], undefined, refreshAfterBulk)
 })
 document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
@@ -2642,9 +2688,11 @@ qualityListEl.addEventListener('click', async (e) => {
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
   const isDupes = state.selectedIssue === 'duplicate_tracks'
   const isLayout = state.selectedIssue === 'not_in_layout'
+  const isLyrics = state.selectedIssue === 'missing_lyrics'
   dedupeBtn.hidden = !isDupes
   refileBtn.hidden = !isLayout
-  fixAllBtn.hidden = isDupes || isLayout
+  lyricsLookupBtn.hidden = !isLyrics
+  fixAllBtn.hidden = isDupes || isLayout || isLyrics
   state.selectedIds.clear()
   state.page = 0
   await renderQualityPanel()
@@ -2730,10 +2778,12 @@ function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
 }
 
 const librariesListEl = document.getElementById('libraries-list') as HTMLUListElement
+const lyricsGroupsListEl = document.getElementById('lyrics-groups-list') as HTMLElement
+wireLyricsGroups(lyricsGroupsListEl, document.getElementById('lyrics-group-add')!)
 
 async function renderLibraries() {
   try {
-    const libs = await api.settings.libraries()
+    const [libs, lyricsGroups] = await Promise.all([api.settings.libraries(), api.lyrics.groups()])
     librariesListEl.innerHTML = libs.length ? libs.map(l => `
       <li class="library-row${l.active ? '' : ' library-off'}">
         <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
@@ -2743,6 +2793,7 @@ async function renderLibraries() {
           <label class="settings-toggle"><input type="checkbox" data-layout-check ${l.layout ? 'checked' : ''} /><span>Check layout</span></label>
           ${layoutTextHtml(l.template)}
         </div>
+        ${libraryGroupSelect(lyricsGroups, l.path, l.lyrics_group)}
       </li>`).join('')
       : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
   } catch (e) {
@@ -2824,6 +2875,7 @@ async function openSettings() {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
     renderLibraries()
+    renderLyricsGroups(lyricsGroupsListEl)
     musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
     localMusicDirs = [...(s.music_dirs ?? [])]
     renderMusicDirsList()
@@ -3017,6 +3069,11 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
       return [b.dataset.path!, v === std ? '' : v]
     }).filter(([, v]) => v))
   }
+  const groups = readLyricsGroups(lyricsGroupsListEl)
+  if (groups) update.lyrics_groups = groups
+  const groupSelects = [...librariesListEl.querySelectorAll<HTMLSelectElement>('[data-lyrics-path]')]
+  if (groupSelects.length) update.library_lyrics_groups = Object.fromEntries(
+    groupSelects.filter(s => s.value).map(s => [s.dataset.lyricsPath!, s.value]))
   try {
     const saved = await api.settings.update(update)
     state.musicDirs = [saved.default_music_dir ?? '', ...(saved.music_dirs ?? [])].filter(Boolean)
@@ -3024,7 +3081,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     renameOnSave = saved.rename_on_save
     renameTemplate = saved.rename_template
     stageChanges = saved.stage_changes ?? true
-    state.qualityIssues = null   // layouts may have changed what is "Not in layout"
+    state.qualityIssues = null   // layouts / lyrics groups may have changed the Quality counts
     if (state.sidebarMode === 'quality') renderQualityPanel()
     // Refresh lookup status after saving
     const status = await api.lookup.status()

@@ -18,6 +18,9 @@ def get_conn() -> sqlite3.Connection:
     # layout_path(path, title, ...): where the library's layout puts a track.
     from core.layout import COLUMNS, sql_function
     conn.create_function("layout_path", len(COLUMNS), sql_function())
+    # lyrics_skip(path, assigned group): the track's lyrics group is never looked up.
+    from core import lyricsgroups
+    conn.create_function("lyrics_skip", 2, lyricsgroups.sql_function())
     return conn
 
 
@@ -53,7 +56,9 @@ def _migrate(conn) -> None:
     # they replaced (for undo). Steps from before this have no details.
     # Scan jobs: scope, phase and changed-file count, for the Background page.
     jobs = {r[1] for r in conn.execute("PRAGMA table_info(scan_jobs)")}
-    for col, decl in (("directory", "TEXT"), ("phase", "TEXT"), ("changed", "INTEGER")):
+    # kind: 'scan', or 'lyrics' for a background lyrics lookup (core/lyricsjob.py).
+    for col, decl in (("directory", "TEXT"), ("phase", "TEXT"), ("changed", "INTEGER"),
+                      ("kind", "TEXT NOT NULL DEFAULT 'scan'")):
         if jobs and col not in jobs:
             conn.execute(f"ALTER TABLE scan_jobs ADD COLUMN {col} {decl}")
     steps = {r[1] for r in conn.execute("PRAGMA table_info(staged_steps)")}
@@ -164,6 +169,20 @@ def init_db() -> None:
                 src       TEXT PRIMARY KEY,
                 dst       TEXT NOT NULL,
                 staged_at REAL NOT NULL
+            );
+
+            -- Lyrics groups a track was put in (core/lyricsgroups.py); none = its
+            -- library's default.
+            CREATE TABLE IF NOT EXISTS lyrics_members (
+                track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                group_id TEXT NOT NULL
+            );
+
+            -- The last lyrics lookup per track: synced | plain | instrumental | missing | ...
+            CREATE TABLE IF NOT EXISTS lyrics_lookups (
+                track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                status   TEXT NOT NULL,
+                at       REAL NOT NULL
             );
 
             -- Undo stack for staging: what each staging action replaced.

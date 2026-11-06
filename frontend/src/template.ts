@@ -131,6 +131,13 @@ export const APP_HTML = `
         </label>
         <p class="settings-hint">Saving a track's tags also plans a move to where its layout puts it, inside its library.</p>
       </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Lyrics groups</div>
+        <p class="settings-hint">How a track's lyrics are looked up on LRCLIB: queries tried in order until one finds them. A query with no artist searches by title + album (cast recordings). <strong>Skip</strong> groups are never looked up and don't count as missing lyrics. A track's group: the one it was put in (<strong>Lyrics group…</strong> on a selection), else its library's (Libraries, above), else Standard.
+          Variables: {title} {artist} {album} {album_artist} {year}, {title_base} {album_base} (without trailing "(…)", "[…]", "- From …"), {artist_first} {album_artist_first} (the first of several).</p>
+        <div id="lyrics-groups-list" class="lyrics-groups-list"></div>
+        <button type="button" id="lyrics-group-add" class="btn btn-ghost btn-sm">Add group</button>
+      </div>
     </div>
     <div class="settings-sidebar-footer" id="settings-footer">
       <button id="settings-logout" class="btn btn-ghost" hidden>Log out</button>
@@ -165,6 +172,7 @@ export const APP_HTML = `
           <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
           <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
           <button id="refile-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Stage moving the selected tracks to the path their library layout gives — reviewed before anything moves" hidden>Re-file selected</button>
+          <button id="lyrics-lookup-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Look up lyrics for every track listed (or the selected ones) in the background — what's found is staged for review" hidden>Look up all…</button>
         </div>
         <ul id="quality-list" class="nav-list"></ul>
       </nav>
@@ -213,6 +221,7 @@ export const APP_HTML = `
         <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
         <button id="mb-album-btn" class="btn btn-ghost btn-sm" title="Match the selected tracks to a MusicBrainz release, track by track — reviewed, then staged">Match album…</button>
         <button id="lyrics-btn" class="btn btn-ghost btn-sm" title="Fetch lyrics (synced when available) from LRCLIB — reviewed, then staged">Lyrics…</button>
+        <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a lyrics group: how its lyrics are looked up, or No lyrics">Lyrics group…</button>
         <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
         <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
         <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
@@ -288,7 +297,7 @@ export const APP_HTML = `
         <label class="field-label">BPM<input name="bpm" type="text" inputmode="numeric" /></label>
         <label class="field-check"><input name="compilation" type="checkbox" /><span>Part of a compilation</span></label>
         <label class="field-label">Comment<textarea name="comment" rows="3"></textarea></label>
-        <label class="field-label">Lyrics<textarea name="lyrics" rows="4"></textarea></label>
+        <label class="field-label"><span class="field-label-row">Lyrics <button type="button" id="lyrics-search-btn" class="btn btn-link btn-sm" title="Search LRCLIB for this track by hand">Search…</button></span><textarea name="lyrics" rows="4"></textarea></label>
         <div id="editor-rename-preview" class="rename-preview" hidden></div>
         <div class="tag-form-actions">
           <button type="submit" class="btn btn-primary">Save</button>

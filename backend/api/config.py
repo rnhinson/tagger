@@ -15,6 +15,19 @@ router = APIRouter()
 ALL_SCAN_TAGS = TAG_FIELDS
 
 
+class LyricsQuery(BaseModel):
+    title: str = "{title}"
+    artist: str = ""
+    album: str = ""
+
+
+class LyricsGroup(BaseModel):
+    id: str
+    name: str
+    skip: bool = False                 # never looked up; not "missing lyrics"
+    queries: list[LyricsQuery] = []
+
+
 class AppSettings(BaseModel):
     rename_on_save: bool = False
     rename_template: str = "{album_artist}/{album}/{track_number:02d} {title}"
@@ -35,6 +48,9 @@ class AppSettings(BaseModel):
     # (rename_template), or the library's own override below.
     layout_libraries: list[str] = []
     library_templates: dict[str, str] = {}
+    # How lyrics are looked up (core/lyricsgroups.py); [] = the defaults.
+    lyrics_groups: list[LyricsGroup] = []
+    library_lyrics_groups: dict[str, str] = {}     # library root -> its default group
 
 
 def get_music_dirs() -> list[str]:
@@ -116,7 +132,8 @@ def list_libraries():
             out.append({"path": p, "name": r.name, "parent": str(r.parent), "active": p not in off,
                         "writable": os.access(p, os.W_OK), "tracks": n,
                         "layout": p in {os.path.normpath(x) for x in s.layout_libraries},
-                        "template": s.library_templates.get(p, "")})
+                        "template": s.library_templates.get(p, ""),
+                        "lyrics_group": s.library_lyrics_groups.get(p, "")})
     return out
 
 
@@ -167,11 +184,40 @@ def update_settings(update: AppSettings):
             except (KeyError, ValueError, IndexError) as exc:
                 raise HTTPException(400, f"Layout for {Path(root).name}: invalid template ({exc})")
         sent["library_templates"] = layouts
+    if "lyrics_groups" in sent:
+        sent["lyrics_groups"] = _check_lyrics_groups(update.lyrics_groups)
+    if "library_lyrics_groups" in sent:
+        sent["library_lyrics_groups"] = {os.path.normpath(k): v for k, v in sent["library_lyrics_groups"].items() if v}
     if "layout_libraries" in sent:
         sent["layout_libraries"] = sorted({os.path.normpath(p) for p in sent["layout_libraries"]})
     merged = _load().model_copy(update=sent)
     _save(merged)
     return get_settings()
+
+
+def _check_lyrics_groups(groups: list[LyricsGroup]) -> list[LyricsGroup]:
+    """Ids unique and slug-like, names given, templates valid; Standard + No lyrics kept."""
+    import re
+    from core import lyricsgroups
+    seen, out = set(), []
+    for g in groups:
+        gid = re.sub(r"[^a-z0-9]+", "-", (g.id or g.name).lower()).strip("-")
+        if not gid or not g.name.strip():
+            raise HTTPException(400, "Lyrics group: a name is required")
+        if gid in seen:
+            raise HTTPException(400, f"Lyrics group {g.name}: duplicate name")
+        seen.add(gid)
+        for q in g.queries:
+            for f in lyricsgroups.FIELDS:
+                try:
+                    lyricsgroups.check(getattr(q, f))
+                except ValueError as exc:
+                    raise HTTPException(400, f"Lyrics group {g.name}, {f}: {exc}")
+        out.append(g.model_copy(update={"id": gid, "name": g.name.strip()}))
+    for d in lyricsgroups.DEFAULT_GROUPS:
+        if d["id"] in (lyricsgroups.STANDARD, lyricsgroups.NONE) and d["id"] not in seen:
+            out.append(LyricsGroup(**d))
+    return out
 
 
 _SAMPLE_TRACK = {

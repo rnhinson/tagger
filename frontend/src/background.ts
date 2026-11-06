@@ -1,5 +1,5 @@
-// Settings page panes: Background (the running scan with progress + Cancel,
-// recent scans) and About (version, build, deployed, environment).
+// Settings page panes: Background (the running scan and lyrics lookup with
+// progress + Cancel, recent jobs) and About (version, build, deployed, environment).
 import { api, ScanJob } from './api'
 import { toast } from './toast'
 import { esc } from './util'
@@ -36,11 +36,38 @@ function current(job: ScanJob): string {
     </div>`
 }
 
+function lyricsCard(job: ScanJob): string {
+  const now = Date.now() / 1000
+  const elapsed = now - (job.started_at ?? now)
+  const pct = job.total ? Math.min(100, (job.scanned / job.total) * 100) : 0
+  const rate = job.scanned && elapsed > 2 ? job.scanned / elapsed : 0
+  const eta = rate && job.total > job.scanned ? (job.total - job.scanned) / rate : null
+  return `
+    <div class="bg-card">
+      <div class="bg-card-head"><strong>Looking up lyrics</strong>
+        <button class="btn btn-ghost btn-sm" data-cancel="${esc(job.id)}">Cancel lookup</button></div>
+      <div class="bg-progress"><div style="width:${pct}%"></div></div>
+      <div class="ma-dim">${job.scanned.toLocaleString()} of ${job.total.toLocaleString()} tracks (${pct.toFixed(1)}%) · ${(job.changed ?? 0).toLocaleString()} found and staged</div>
+      <div class="ma-dim">Started ${fmtTime(job.started_at)} · ${fmtDur(elapsed)} elapsed${eta !== null ? ` · about ${fmtDur(eta)} left` : ''}</div>
+      <div class="settings-hint">What's found is staged in batches — review it from Review. Cancel keeps what was found.</div>
+    </div>`
+}
+
+/** Renders the pane; returns the running scan (not lyrics lookup), if any. */
 export async function renderBackground(el: HTMLElement): Promise<ScanJob | null> {
   let jobs: ScanJob[]
   try { jobs = await api.jobs.list() } catch (e) { el.innerHTML = `<div class="review-error">${esc(errText(e))}</div>`; return null }
-  const active = jobs.find(j => j.status === 'running' || j.status === 'pending') ?? null
+  const running = (j: ScanJob) => j.status === 'running' || j.status === 'pending'
+  const lyrics = jobs.find(j => j.kind === 'lyrics' && running(j)) ?? null
+  const scans = jobs.filter(j => j.kind !== 'lyrics')
+  const active = scans.find(running) ?? null
   const rows = jobs.slice(0, 15).map(j => {
+    if (j.kind === 'lyrics') {
+      const dur = j.finished_at && j.started_at ? fmtDur(j.finished_at - j.started_at) : j.started_at ? '…' : ''
+      return `<tr><td>${fmtTime(j.started_at)}</td><td>Lyrics lookup</td>
+        <td><span class="mb-score ${STATUS_CLS[j.status] ?? ''}">${esc(j.status)}</span>${j.error ? `<div class="pr-msg">${esc(j.error)}</div>` : ''}</td>
+        <td>${j.scanned.toLocaleString()} / ${j.total.toLocaleString()} tracks · ${(j.changed ?? 0).toLocaleString()} found</td><td>${dur}</td></tr>`
+    }
     const dur = j.finished_at && j.started_at ? fmtDur(j.finished_at - j.started_at) : j.started_at ? '…' : ''
     const files = j.status === 'done' ? `${j.total.toLocaleString()} files · ${(j.changed ?? 0).toLocaleString()} changed`
       : j.total ? `${j.scanned.toLocaleString()} / ${j.total.toLocaleString()}` : ''
@@ -51,13 +78,14 @@ export async function renderBackground(el: HTMLElement): Promise<ScanJob | null>
   el.innerHTML = `
     <div class="settings-section">
       <div class="settings-section-title">Library scan</div>
-      ${active ? current(active) : `<div class="bg-card bg-idle"><div class="bg-card-head"><span class="ma-dim">No scan running.${jobs[0]?.finished_at ? ` Last: ${fmtTime(jobs[0].finished_at)}.` : ''}</span>
+      ${active ? current(active) : `<div class="bg-card bg-idle"><div class="bg-card-head"><span class="ma-dim">No scan running.${scans[0]?.finished_at ? ` Last: ${fmtTime(scans[0].finished_at)}.` : ''}</span>
         <button class="btn btn-primary btn-sm" data-scan-now>Scan library now</button></div>
         <div class="settings-hint">Reads new and changed files and drops tracks whose files are gone. The automatic interval is under Settings → Scan Options.</div></div>`}
     </div>
+    ${lyrics ? `<div class="settings-section"><div class="settings-section-title">Lyrics lookup</div>${lyricsCard(lyrics)}</div>` : ''}
     <div class="settings-section">
-      <div class="settings-section-title">Recent scans</div>
-      ${jobs.length ? `<table class="pr-table bg-jobs"><thead><tr><th>Started</th><th>Scope</th><th>Status</th><th>Files</th><th>Took</th></tr></thead><tbody>${rows}</tbody></table>`
+      <div class="settings-section-title">Recent jobs</div>
+      ${jobs.length ? `<table class="pr-table bg-jobs"><thead><tr><th>Started</th><th>Scope</th><th>Status</th><th>Done</th><th>Took</th></tr></thead><tbody>${rows}</tbody></table>`
         : '<div class="settings-hint">None yet.</div>'}
     </div>`
   return active
@@ -67,9 +95,10 @@ export function wireBackground(el: HTMLElement, onCancel: () => void) {
   el.addEventListener('click', async (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cancel]')
     if (!b) return
+    const label = b.textContent
     b.disabled = true; b.textContent = 'Cancelling…'
-    try { await api.jobs.cancel(b.dataset.cancel!); toast('Scan cancelling — it stops at the next file', 'info'); onCancel() }
-    catch (err) { toast(`Cancel failed: ${errText(err)}`, 'error'); b.disabled = false; b.textContent = 'Cancel scan' }
+    try { await api.jobs.cancel(b.dataset.cancel!); toast('Cancelling — it stops at the next file or batch', 'info'); onCancel() }
+    catch (err) { toast(`Cancel failed: ${errText(err)}`, 'error'); b.disabled = false; b.textContent = label }
   })
 }
 

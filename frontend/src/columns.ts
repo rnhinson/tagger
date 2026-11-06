@@ -32,9 +32,18 @@ export const COL_DEFS: ColDef[] = [
     // In the "Not in layout" view: where the library's layout would put it.
     const layout = state.selectedIssue === 'not_in_layout' && t.layout_path
       ? `<div class="layout-path" title="${esc(t.layout_path)}">→ ${esc(sourcePath(t.layout_path))}</div>` : ''
-    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>${layout}`
+    // In "Missing lyrics": its lyrics group, and how the last lookup went.
+    const lk = t.lyrics_lookup
+    const lyrics = state.selectedIssue === 'missing_lyrics'
+      ? `<div class="layout-path">♪ ${esc(t.lyrics_group ?? '')}${lk ? ` · ${esc(LOOKUP_TEXT[lk.status] ?? lk.status)} ${new Date(lk.at * 1000).toLocaleDateString()}` : ''}</div>` : ''
+    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>${layout}${lyrics}`
   }},
 ]
+
+const LOOKUP_TEXT: Record<string, string> = {
+  missing: 'not found', instrumental: 'instrumental', untagged: 'needs title + artist', error: 'lookup failed',
+  synced: 'found (staged)', plain: 'found (staged)',
+}
 
 /**
  * The folder from the library's name down to the album: with roots

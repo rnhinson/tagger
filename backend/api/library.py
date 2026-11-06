@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from core.database import db
-from core import staging
+from core import lyricsgroups, lyricsjob, staging
 from core.multivalue import MULTI_FIELDS, split_values
 from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_change
 
@@ -23,6 +23,8 @@ _ISSUE_CLAUSES: dict[str, str] = {
     "missing_year":         "(year IS NULL OR year = '')",
     "missing_genre":        "(genre IS NULL OR genre = '')",
     "missing_track_number": "(track_number IS NULL OR track_number = '')",
+    # No lyrics, and its lyrics group is looked up (core/lyricsgroups.py).
+    "missing_lyrics": lyricsjob.MISSING,
     # Path differs from where its library's layout puts it (core/layout.py).
     "not_in_layout": "layout_path(path, title, artist, album, album_artist, year, genre, "
                      "track_number, disc_number) != path",
@@ -58,6 +60,9 @@ def _tracks(conn, rows) -> list[dict]:
     dirs = staging.load_dirs(conn)
     templates = layouts()
     roots = get_library_roots() if templates else []
+    ids = [r["id"] for r in rows]
+    assigned, looked = lyricsgroups.assigned(conn, ids), lyricsgroups.lookups(conn, ids)
+    group_for = lyricsgroups.resolver()
     writable: dict[str, bool] = {}
     present: dict[str, set] = {}   # folder -> file names on disk (missing-file flag)
     out = []
@@ -77,7 +82,9 @@ def _tracks(conn, rows) -> list[dict]:
         out.append({**dict(r), "staged": e, "read_only": not writable[d],
                     "missing": r["filename"] not in present[d],
                     # where the library's layout puts it, when that's elsewhere
-                    "layout_path": layout if layout != r["path"] else None})
+                    "layout_path": layout if layout != r["path"] else None,
+                    "lyrics_group": group_for(r["path"], assigned.get(r["id"]))["name"],
+                    "lyrics_lookup": looked.get(r["id"])})
     return out
 
 

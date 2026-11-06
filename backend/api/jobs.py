@@ -54,8 +54,8 @@ def get_job_status(job_id: str):
 
 @router.post("/{job_id}/cancel")
 def cancel_job(job_id: str):
-    """Stop a running scan at its next file (what it read is kept; nothing is pruned)."""
+    """Stop a running scan at its next file (what it read is kept; nothing is pruned), or a lyrics lookup at its next batch."""
     from core.tasks import request_cancel
     if not request_cancel(job_id):
-        raise HTTPException(409, "That scan isn't running")
+        raise HTTPException(409, "That job isn't running")
     return {"cancelling": True}
