@@ -30,7 +30,7 @@ class LyricsGroup(BaseModel):
 
 class AppSettings(BaseModel):
     rename_on_save: bool = False
-    rename_template: str = "{album_artist}/{album}/{track_number:02d} {title}"
+    rename_template: str = "{album_artist_the}/{album_the}/{track_number:02d} {title}"
     acoustid_api_key: str = ""
     discogs_token: str = ""
     scan_tags: list[str] = ALL_SCAN_TAGS
@@ -89,13 +89,21 @@ def get_library_roots():
     return expand_roots(get_library_root_patterns())
 
 
+# The default before {album_artist_the}/{album_the} (Lidarr's naming): a saved
+# copy of it was never a choice, so it follows the new default.
+_OLD_DEFAULT_TEMPLATE = "{album_artist}/{album}/{track_number:02d} {title}"
+
+
 def _load() -> AppSettings:
     f = settings.settings_file
     if f.exists():
         try:
-            return AppSettings(**json.loads(f.read_text()))
+            s = AppSettings(**json.loads(f.read_text()))
         except Exception:
-            pass
+            return AppSettings()
+        if s.rename_template.strip() == _OLD_DEFAULT_TEMPLATE:
+            s.rename_template = AppSettings.model_fields["rename_template"].default
+        return s
     return AppSettings()
 
 

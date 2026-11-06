@@ -551,3 +551,12 @@ def test_checked_library_uses_the_standard_layout_unless_overridden(client, lib)
     client.patch("/api/config", json={"library_templates": {str(lib / "Shared"): "{title}"}})
     assert client.get("/api/library/issues").json()["not_in_layout"] == 1
     assert shared
+
+
+def test_the_old_default_layout_follows_the_new_one(client):
+    from api.config import _OLD_DEFAULT_TEMPLATE
+    assert client.get("/api/config").json()["rename_template"] == "{album_artist_the}/{album_the}/{track_number:02d} {title}"
+    client.patch("/api/config", json={"rename_template": _OLD_DEFAULT_TEMPLATE})
+    assert client.get("/api/config").json()["rename_template"].startswith("{album_artist_the}/{album_the}/")
+    client.patch("/api/config", json={"rename_template": "{album}/{title}"})        # a real choice stays
+    assert client.get("/api/config").json()["rename_template"] == "{album}/{title}"

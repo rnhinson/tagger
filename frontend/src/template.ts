@@ -122,7 +122,7 @@ export const APP_HTML = `
         <div class="settings-section-title">Layout</div>
         <label class="field-label" id="rename-template-wrap">Standard layout
           <input id="setting-rename-template" type="text" spellcheck="false" />
-          <span class="settings-hint">Where a file belongs, relative to its library. Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("The Pogues" → "Pogues, The", as Lidarr names folders) — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code>. A library with its own layout (✎ under Libraries) uses that instead.</span>
+          <span class="settings-hint">Where a file belongs, relative to its library. Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("The Pogues" → "Pogues, The", as Lidarr names folders) — e.g. <code>{album_artist_the}/{album_the}/{track_number:02d} {title}</code> (the default). A library with its own layout (✎ under Libraries) uses that instead.</span>
           <div id="rename-preview" class="rename-preview"></div>
         </label>
         <label class="settings-toggle">
