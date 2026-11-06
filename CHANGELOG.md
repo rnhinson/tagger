@@ -80,9 +80,9 @@
 - Template output keeps dots in the last part ("Vol. 2.mp3", not "Vol.mp3").
 
 ### Library layouts (beartums fork)
-- **Per-library layout** (Settings → Libraries): the folder/file template each
-  library root should follow. Rename on save uses it; a library without one
-  uses the rename template and isn't checked.
+- **Standard layout** (Settings → Layout, formerly the rename template) with
+  **Check layout** per library (Settings → Libraries); ✎ gives a library its
+  own layout, edited in place. Rename on save uses the library's layout.
 - Quality → **Not in layout** lists tracks whose path differs from their
   library's layout, with the path the layout gives. **Re-file selected**
   stages moves for the chosen tracks only, reviewed before anything moves.

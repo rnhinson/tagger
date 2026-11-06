@@ -1252,7 +1252,12 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .library-off .settings-toggle span { color: var(--text-muted); }
 .library-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .library-row { flex-wrap: wrap; }
-.library-layout { flex-basis: 100%; font-family: ui-monospace, monospace; font-size: 11px; margin: 2px 0 4px 22px; }
+.library-layout { flex-basis: 100%; display: flex; align-items: center; gap: 6px; margin: 0 0 4px 22px; min-width: 0; }
+.library-layout .settings-toggle { font-size: 11px; white-space: nowrap; }
+.library-layout-text { flex: 1; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-layout-std { color: var(--text-muted); }
+.library-layout-editing { flex: 1; display: flex; gap: 4px; min-width: 0; }
+.library-layout-editing input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 11px; }
 .layout-path { color: var(--accent); font-size: 11px; }
 .editor-file-layout { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .readonly-note {

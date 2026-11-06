@@ -31,7 +31,7 @@ export const APP_HTML = `
       <div class="settings-section">
         <div class="settings-section-title">Libraries</div>
         <p class="settings-hint">With library roots set (below), a full scan covers only the libraries switched on here. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written.</p>
-        <p class="settings-hint"><strong>Layout</strong>: the folder/file layout a library should follow, relative to it. Tracks elsewhere are listed under Quality → <em>Not in layout</em>, to re-file one by one. Empty: not checked. Rename on save uses it too. Variables as in the rename template, plus <code>{artist_the}</code> <code>{album_artist_the}</code> <code>{album_the}</code> ("The Pogues" → "Pogues, The", as Lidarr names folders). Saved with <strong>Save</strong>.</p>
+        <p class="settings-hint"><strong>Check layout</strong>: compare the library with the standard layout (Layout, below) — tracks elsewhere are listed under Quality → <em>Not in layout</em>, to re-file the ones you choose. ✎ gives a library its own layout. Saved with <strong>Save</strong>.</p>
         <ul id="libraries-list" class="libraries-list"></ul>
       </div>
       <div class="settings-section">
@@ -119,17 +119,17 @@ export const APP_HTML = `
         <div id="library-roots-effective" class="settings-hint"></div>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">File Renaming</div>
+        <div class="settings-section-title">Layout</div>
+        <label class="field-label" id="rename-template-wrap">Standard layout
+          <input id="setting-rename-template" type="text" spellcheck="false" />
+          <span class="settings-hint">Where a file belongs, relative to its library. Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("The Pogues" → "Pogues, The", as Lidarr names folders) — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code>. A library with its own layout (✎ under Libraries) uses that instead.</span>
+          <div id="rename-preview" class="rename-preview"></div>
+        </label>
         <label class="settings-toggle">
           <input id="setting-rename-on-save" type="checkbox" />
           <span>Rename files on save</span>
         </label>
-        <p class="settings-hint">When enabled, saving a track's tags also plans a move to the path built from the template below, inside the track's library root.</p>
-        <label class="field-label" id="rename-template-wrap">Template
-          <input id="setting-rename-template" type="text" />
-          <span class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("Pogues, The") — e.g. <code>{album_artist}/{album}/{track_number:02d} {title}</code>. A library with a layout (Libraries, above) uses its layout instead.</span>
-          <div id="rename-preview" class="rename-preview"></div>
-        </label>
+        <p class="settings-hint">Saving a track's tags also plans a move to where its layout puts it, inside its library.</p>
       </div>
     </div>
     <div class="settings-sidebar-footer" id="settings-footer">

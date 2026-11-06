@@ -1,13 +1,15 @@
 """
 Library layouts: the folder/file template each library root is expected to
-follow (Settings → Libraries), and the path a track would have under it.
+follow, and the path a track would have under it. One standard layout (the
+rename template) applies to every library checked in Settings → Libraries;
+a library can override it with its own.
 
 The Quality panel's "Not in layout" view lists tracks whose path differs from
 their library's layout. Fixing them is always deliberate -- a staged re-file
 of chosen tracks, reviewed and undoable -- never automatic.
 
-A library without a layout isn't checked. Rename-on-save and re-file use the
-library's layout, else the rename template.
+An unchecked library isn't compared. Rename-on-save and re-file use the
+library's override, else the standard layout.
 """
 from __future__ import annotations
 
@@ -23,9 +25,16 @@ COLUMNS = ("path", "title", "artist", "album", "album_artist", "year", "genre",
 
 
 def layouts() -> dict[str, str]:
-    """{library root: template} for the roots that have a layout."""
+    """{library root: template} for the libraries checked against a layout."""
     from api.config import _load
-    return {os.path.normpath(k): v.strip() for k, v in _load().library_templates.items() if v.strip()}
+    s = _load()
+    overrides = {os.path.normpath(k): v.strip() for k, v in s.library_templates.items() if v.strip()}
+    out = {}
+    for root in map(os.path.normpath, s.layout_libraries):
+        template = overrides.get(root) or s.rename_template.strip()
+        if template:
+            out[root] = template
+    return out
 
 
 def expected_path(row, roots: list[Path], templates: dict[str, str]) -> str | None:
@@ -41,9 +50,13 @@ def expected_path(row, roots: list[Path], templates: dict[str, str]) -> str | No
 
 
 def template_for(path: str, roots: list[Path], fallback: str) -> str:
-    """The layout of path's library, else fallback (the rename template)."""
+    """The layout of path's library: its override, else fallback (the standard layout)."""
+    from api.config import _load
     root = root_for(path, roots)
-    return (root and layouts().get(str(root))) or fallback
+    if root is None:
+        return fallback
+    overrides = {os.path.normpath(k): v.strip() for k, v in _load().library_templates.items()}
+    return overrides.get(str(root)) or fallback
 
 
 def sql_function():
