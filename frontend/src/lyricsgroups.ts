@@ -96,10 +96,12 @@ export function libraryGroupSelect(groups: LyricsGroup[], path: string, current:
   </select>`
 }
 
-/** "Lyrics group…": put the selection in a group, or back to its library's. */
+/** "Group…": put the selection in a group, or back to its library's. Opens on their current one. */
 export async function openAssignGroup(ids: number[], onDone: () => Promise<void>) {
-  let groups: LyricsGroup[]
-  try { groups = await api.lyrics.groups() } catch (e) { toast(`Failed: ${errText(e)}`, 'error'); return }
+  let groups: LyricsGroup[], current: string | null
+  try {
+    [groups, { group_id: current }] = await Promise.all([api.lyrics.groups(), api.lyrics.assigned(ids)])
+  } catch (e) { toast(`Failed: ${errText(e)}`, 'error'); return }
   const overlay = document.createElement('div')
   overlay.className = 'modal-overlay'
   const n = `${ids.length.toLocaleString()} track${ids.length !== 1 ? 's' : ''}`
@@ -107,8 +109,9 @@ export async function openAssignGroup(ids: number[], onDone: () => Promise<void>
     <div class="modal-card">
       <div class="modal-title">Group for ${n}</div>
       <div class="lyrics-assign">
-        <label class="settings-toggle"><input type="radio" name="lg" value="" checked /><span>Library's group <span class="ma-dim">(as set under Settings → Libraries)</span></span></label>
-        ${groups.map(g => `<label class="settings-toggle"><input type="radio" name="lg" value="${esc(g.id)}" /><span>${esc(g.name)}${g.skip ? ' <span class="ma-dim">— never looked up, not "missing"</span>' : ''}</span></label>`).join('')}
+        ${current === null ? '<div class="ma-dim">These tracks are in different groups now.</div>' : ''}
+        <label class="settings-toggle"><input type="radio" name="lg" value="" ${current === '' ? 'checked' : ''} /><span>Library's group <span class="ma-dim">(as set under Settings → Libraries)</span></span></label>
+        ${groups.map(g => `<label class="settings-toggle"><input type="radio" name="lg" value="${esc(g.id)}" ${current === g.id ? 'checked' : ''} /><span>${esc(g.name)}${g.skip ? ' <span class="ma-dim">— never looked up, not "missing"</span>' : ''}</span></label>`).join('')}
       </div>
       <div class="modal-actions"><button class="btn btn-ghost" data-cancel>Cancel</button><button class="btn btn-primary" data-ok>Set group</button></div>
     </div>`
@@ -117,7 +120,9 @@ export async function openAssignGroup(ids: number[], onDone: () => Promise<void>
   overlay.addEventListener('click', e => { if (e.target === overlay) close() })
   overlay.querySelector('[data-cancel]')!.addEventListener('click', close)
   overlay.querySelector<HTMLButtonElement>('[data-ok]')!.addEventListener('click', async (e) => {
-    const id = overlay.querySelector<HTMLInputElement>('input[name="lg"]:checked')!.value || null
+    const picked = overlay.querySelector<HTMLInputElement>('input[name="lg"]:checked')
+    if (!picked) { toast('Pick a group', 'info'); return }
+    const id = picked.value || null
     ;(e.target as HTMLButtonElement).disabled = true
     try {
       await api.lyrics.assign(ids, id)

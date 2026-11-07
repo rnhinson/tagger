@@ -67,6 +67,20 @@ def move_dir(src: str | Path, dst: str | Path) -> None:
     shutil.move(str(src), str(dst))
 
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+
+def leftover_images(d: str | Path) -> list[Path]:
+    """The images in folder d when they are all it holds (cover art left behind), else []."""
+    try:
+        entries = list(Path(d).iterdir())
+    except OSError:
+        return []
+    if not entries or any(not e.is_file() or e.suffix.lower() not in IMAGE_EXTS for e in entries):
+        return []
+    return entries
+
+
 def prune_empty_dirs(start: str | Path, stop: str | Path) -> None:
     """Remove start and its empty ancestors, never stop itself or above it."""
     d, stop = Path(start), Path(stop)

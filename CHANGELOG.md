@@ -112,6 +112,25 @@
 - Dark inputs throughout; built-in group names readable; hints no longer
   shouted in capitals.
 
+### Selection & views (beartums fork)
+- **Lyrics column** (Columns menu): synced / plain / none, sortable.
+- Quality views add their own column right after Title: *Missing lyrics* →
+  **Lookup** (group, last lookup, a per-row **Search…**); *Not in layout* →
+  where the layout puts it.
+- **Albums can be multi-selected:** Ctrl/⌘-click or Shift-click in the album
+  list or tiles; their tracks become the selection. A plain click still opens one.
+- **Shift-click ranges across pages** (from the last track clicked, in view order).
+- The selection toolbar is grouped (Tags · Look up · Files), destructive
+  buttons at the right.
+- **Group…** opens on the selection's current group; *Look up all…* names its
+  scope ("Look up all N…" / "Look up N selected…"); the editor's lyrics
+  Search… shows only for one track.
+- Search lyrics: query buttons wrap instead of truncating, the picked hit's
+  lyrics show beside the results, long artist/album names are clipped.
+- **Leftover cover art:** a staged move that empties a folder of everything
+  but images moves them along when the tracks went to a folder the move
+  created, else to the trash; the folder is pruned and undo puts them back.
+
 ### Lyrics (beartums fork)
 - **Quality → Missing lyrics** lists tracks with no lyrics, with each one's
   lyrics group and how its last lookup went.

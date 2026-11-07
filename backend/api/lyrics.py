@@ -100,6 +100,19 @@ def assign(req: Assign):
     return {"assigned": n}
 
 
+class Selection(BaseModel):
+    track_ids: list[int]
+
+
+@router.post("/assigned")
+def assigned(req: Selection):
+    """The group the tracks were all put in by hand ('' = all their library's), or null when they differ."""
+    with db() as conn:
+        got = lyricsgroups.assigned(conn, req.track_ids)
+    ids = {got.get(i, "") for i in req.track_ids}
+    return {"group_id": ids.pop() if len(ids) == 1 else None}
+
+
 @router.get("/plan/{track_id}")
 def plan(track_id: int):
     """A track's group, its queries rendered, and its last lookup -- for Search."""

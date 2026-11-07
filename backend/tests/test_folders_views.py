@@ -1,6 +1,7 @@
 """Folder moves/renames, server-side sort/filter, select-all and summaries."""
 import pytest
 
+from core.config import settings
 from tests.test_staging import _insert, _mp3, lib, needs_ffmpeg  # noqa: F401  (fixture)
 
 
@@ -166,7 +167,8 @@ def test_move_files_into_a_folder(client, lib):
     assert client.get("/api/staged/count").json()["last_step"]["summary"] == "Move 2 files → Carols"
     client.post("/api/staged/apply", json={})
     assert (target / "01 t.mp3").exists() and (target / "02 t.mp3").exists()
-    assert (src / "cover.jpg").exists()   # only the dragged files move
+    assert not (target / "cover.jpg").exists()   # another album's folder: its cover isn't ours
+    assert not src.exists() and [p.name.endswith("_cover.jpg") for p in (settings.config_dir / "trash").iterdir()] == [True]
 
 
 def test_move_files_into_a_folder_validation(client, lib):

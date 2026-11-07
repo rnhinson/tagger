@@ -27,18 +27,31 @@ export const COL_DEFS: ColDef[] = [
   { key: 'sample_rate',  label: 'Sample Rate',  cls: 'col-srate',  render: t => fmtSampleRate(t.sample_rate) },
   { key: 'channels',     label: 'Channels',     cls: 'col-chan',   render: t => fmtChannels(t.channels) },
   { key: 'duration',     label: 'Duration',     cls: 'col-dur',    render: t => fmtDuration(t.duration) },
-  { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t => {
-    const rel = sourcePath(t.directory)
-    // In the "Not in layout" view: where the library's layout would put it.
-    const layout = state.selectedIssue === 'not_in_layout' && t.layout_path
-      ? `<div class="layout-path" title="${esc(t.layout_path)}">→ ${esc(sourcePath(t.layout_path))}</div>` : ''
-    // In "Missing lyrics": its lyrics group, and how the last lookup went.
-    const lk = t.lyrics_lookup
-    const lyrics = state.selectedIssue === 'missing_lyrics'
-      ? `<div class="layout-path">♪ ${esc(t.lyrics_group ?? '')}${lk ? ` · ${esc(LOOKUP_TEXT[lk.status] ?? lk.status)} ${new Date(lk.at * 1000).toLocaleDateString()}` : ''}</div>` : ''
-    return `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(rel)}</span>${layout}${lyrics}`
+  { key: 'has_lyrics',   label: 'Lyrics',       cls: 'col-lyrics', render: t => {
+    const k = lyricsKind(t.lyrics)
+    return k === 'none' ? '' : `<span class="mb-score ${k === 'synced' ? 'mb-good' : 'mb-ok'}">${k}</span>`
   }},
+  { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t =>
+    `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(sourcePath(t.directory))}</span>` },
 ]
+
+export function lyricsKind(text: string | null | undefined): 'synced' | 'plain' | 'none' {
+  if (!text?.trim()) return 'none'
+  return /\[\d\d:\d\d/.test(text) ? 'synced' : 'plain'
+}
+
+/** Columns a Quality view adds after the user's own, always shown there: what the view is about. */
+export function viewCols(): ColDef[] {
+  if (state.selectedIssue === 'missing_lyrics') return [{ key: 'lookup', label: 'Lookup', cls: 'col-view', render: t => {
+    const lk = t.lyrics_lookup
+    const text = `♪ ${t.lyrics_group ?? ''}${lk ? ` · ${LOOKUP_TEXT[lk.status] ?? lk.status} ${new Date(lk.at * 1000).toLocaleDateString()}` : ''}`
+    return `<div class="view-cell"><button type="button" class="btn btn-link btn-sm" data-lyrics-search="${t.id}" title="Search LRCLIB for this track by hand">Search…</button>
+      <span class="view-text" title="${esc(text)}">${esc(text)}</span></div>`
+  }}]
+  if (state.selectedIssue === 'not_in_layout') return [{ key: 'layout', label: 'Layout puts it at', cls: 'col-view', render: t =>
+    t.layout_path ? `<span class="layout-path" title="${esc(t.layout_path)}">→ ${esc(sourcePath(t.layout_path))}</span>` : '' }]
+  return []
+}
 
 const LOOKUP_TEXT: Record<string, string> = {
   missing: 'not found', instrumental: 'instrumental', untagged: 'needs title + artist', error: 'lookup failed',
