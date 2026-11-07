@@ -32,6 +32,7 @@ def lookup_status():
     acoustid_key = _acoustid_key()
     fpcalc_available = bool(acoustid_key) and shutil.which("fpcalc") is not None
     return {
+        "fpcalc_installed": shutil.which("fpcalc") is not None,
         "acoustid_configured": bool(acoustid_key),
         "fpcalc_available": fpcalc_available,
         "method": "acoustid" if (acoustid_key and fpcalc_available) else "text",

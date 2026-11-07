@@ -1,7 +1,9 @@
+import { LOGO_MARK } from './logo'
+
 export const APP_HTML = `
   <header class="topbar">
     <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-    <span class="logo">Tagger</span>
+    <span class="logo">${LOGO_MARK}Tagger</span>
     <div class="search-wrap">
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
     </div>
@@ -135,18 +137,20 @@ export const APP_HTML = `
       <p id="secrets-note" class="settings-hint"></p>
       <div class="settings-section">
         <div class="settings-section-title">AcoustID</div>
-        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free API key at <span class="settings-link">acoustid.org</span>, then install chromaprint: <code>sudo apt install libchromaprint-tools</code></p>
+        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free application API key at <span class="settings-link">acoustid.org</span>.</p>
         <label class="field-label">API Key
-          <span class="secret-row"><input id="setting-acoustid-key" data-secret="acoustid_api_key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" data-placeholder="Paste your AcoustID API key…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
+          <span class="secret-row"><input id="setting-acoustid-key" data-secret="acoustid_api_key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" data-placeholder="Paste your AcoustID API key…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="acoustid" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
         </label>
+        <div class="source-test-result" data-test-result="acoustid" hidden></div>
         <div id="acoustid-status" class="acoustid-status"></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">Discogs</div>
         <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
         <label class="field-label">Token
-          <span class="secret-row"><input id="setting-discogs-token" data-secret="discogs_token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" data-placeholder="Paste your Discogs token…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
+          <span class="secret-row"><input id="setting-discogs-token" data-secret="discogs_token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" data-placeholder="Paste your Discogs token…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="discogs" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
         </label>
+        <div class="source-test-result" data-test-result="discogs" hidden></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">LRCLIB (lyrics)</div>
@@ -155,12 +159,13 @@ export const APP_HTML = `
           <input id="setting-lrclib-app-id" type="text" autocomplete="off" spellcheck="false" placeholder="Optional" />
         </label>
         <label class="field-label">API key
-          <span class="secret-row"><input id="setting-lrclib-key" data-secret="lrclib_api_key" type="password" autocomplete="off" placeholder="Optional" data-placeholder="Optional" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
+          <span class="secret-row"><input id="setting-lrclib-key" data-secret="lrclib_api_key" type="password" autocomplete="off" placeholder="Optional" data-placeholder="Optional" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="lrclib" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
         </label>
+        <div class="source-test-result" data-test-result="lrclib" hidden></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">ReplayGain</div>
-        <p class="settings-hint">Scan volume levels and write ReplayGain tags. Requires <code>rsgain</code> or <code>loudgain</code> installed on the server. Run it from the selection toolbar.</p>
+        <p class="settings-hint">Scan volume levels and write ReplayGain tags, so players that read them play tracks at an even volume. Run it from the selection toolbar.</p>
         <div id="replaygain-status" class="acoustid-status"></div>
       </div>
       </div>

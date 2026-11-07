@@ -101,6 +101,11 @@
   Kubernetes Secret, not the config volume). Plain values already saved are
   encrypted at startup. The API never returns them — Settings shows "Saved",
   with Replace / Remove. Without the variable, storage stays plain text.
+- **Test** beside each key/token (AcoustID, Discogs, LRCLIB): checks what
+  you typed, else the saved one, with the service. Install hints for
+  chromaprint / rsgain appear only when the tool is missing.
+- **Logo**: the braces + tag lines + waveform mark in the header, the
+  browser tab (favicon, light/dark) and About. No wordmark yet.
 - Dark inputs throughout; built-in group names readable; hints no longer
   shouted in capitals.
 

@@ -494,6 +494,8 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
     libraries: () => request<LibraryInfo[]>('GET', '/api/config/libraries'),
+    testSource: (source: string, value: string, app_id?: string) =>
+      request<{ ok: boolean; message: string }>('POST', `/api/config/test/${source}`, { value, app_id }),
     setLibrary: (path: string, active: boolean) =>
       request<{ active: boolean; removed?: number; job_id?: string | null }>('POST', '/api/config/libraries', { path, active }),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
@@ -535,7 +537,7 @@ export const api = {
     releases: (mbTrackId: string) =>
       request<MbRelease[]>('GET', `/api/lookup/releases/${encodeURIComponent(mbTrackId)}`),
     status: () =>
-      request<{ acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
+      request<{ fpcalc_installed: boolean; acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
         'GET', '/api/lookup/status'
       ),
     applyCover: (trackId: number, mbAlbumId: string) =>

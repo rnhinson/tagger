@@ -2767,9 +2767,27 @@ function readSecrets(): Partial<AppSettings> {
   }
   return out as Partial<AppSettings>
 }
-document.getElementById('pane-settings')!.addEventListener('click', (e) => {
+document.getElementById('pane-settings')!.addEventListener('click', async (e) => {
+  const t = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-source-test]')
+  if (t) {
+    e.preventDefault()
+    const src = t.dataset.sourceTest!
+    const out = document.querySelector<HTMLElement>(`[data-test-result="${src}"]`)!
+    const typed = t.parentElement!.querySelector<HTMLInputElement>('[data-secret]')!.value.trim()
+    t.disabled = true
+    out.hidden = false; out.className = 'source-test-result'; out.textContent = 'Testing…'
+    try {
+      const r = await api.settings.testSource(src, typed, src === 'lrclib' ? lrclibAppIdInput.value.trim() : undefined)
+      out.className = `source-test-result ${r.ok ? 'status-ok' : 'status-warn'}`
+      out.textContent = `${r.ok ? '✓' : '⚠'} ${r.message}`
+    } catch (err) {
+      out.className = 'source-test-result status-warn'; out.textContent = `⚠ ${errText(err)}`
+    } finally { t.disabled = false }
+    return
+  }
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-secret-remove]')
   if (!b) return
+  e.preventDefault()
   const i = b.parentElement!.querySelector<HTMLInputElement>('[data-secret]')!
   i.value = ''; i.dataset.removed = '1'; i.placeholder = 'Removed when you save'; b.hidden = true
 })
@@ -2903,7 +2921,7 @@ async function openSettings() {
     renderAcoustidStatus(status)
     replaygainStatusEl.innerHTML = rgStatus.available
       ? `<span class="status-ok">✓ ReplayGain available via ${rgStatus.tool}</span>`
-      : '<span class="status-warn">⚠ No ReplayGain tool found — install rsgain or loudgain on the server</span>'
+      : '<span class="status-warn">⚠ No ReplayGain tool found — install <code>rsgain</code> (or loudgain) on the server</span>'
   } catch (e) {
     toast(`Failed to load settings: ${e}`, 'error')
   }
@@ -2965,16 +2983,13 @@ const updateRenamePreview = debounce(async () => {
   }
 }, 250)
 
-function renderAcoustidStatus(status: { acoustid_configured: boolean; fpcalc_available: boolean; method: string }) {
-  if (!status.acoustid_configured) {
-    acoustidStatusEl.innerHTML = ''
-    return
-  }
-  if (status.fpcalc_available) {
-    acoustidStatusEl.innerHTML = '<span class="status-ok">✓ AcoustID active — fingerprint lookup enabled</span>'
-  } else {
-    acoustidStatusEl.innerHTML = '<span class="status-warn">⚠ API key set but fpcalc not found — install libchromaprint-tools</span>'
-  }
+// Tools on the server: say what to install only when it's missing.
+function renderAcoustidStatus(status: { fpcalc_installed?: boolean; acoustid_configured: boolean; fpcalc_available: boolean; method: string }) {
+  acoustidStatusEl.innerHTML = status.fpcalc_installed === false
+    ? '<span class="status-warn">⚠ fpcalc not found — install chromaprint (<code>libchromaprint-tools</code>) on the server</span>'
+    : status.acoustid_configured
+      ? '<span class="status-ok">✓ AcoustID active — fingerprint lookup enabled</span>'
+      : ''
 }
 
 function closeSettings() {

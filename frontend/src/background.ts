@@ -109,6 +109,7 @@ export async function renderAbout(el: HTMLElement) {
     const built = a.built ? new Date(a.built).toLocaleString() : 'unknown (local build)'
     el.innerHTML = `
       <div class="settings-section">
+        <img class="about-logo" src="/logo.svg" alt="" />
         <div class="about-title">Tagger <span class="ma-dim">${esc(a.image || 'v' + a.version)}</span></div>
         <table class="about-table">
           ${row('App version', esc(a.version))}
