@@ -153,6 +153,31 @@ def list_libraries():
     return out
 
 
+class SourceTest(BaseModel):
+    value: str = ""                    # typed, not saved yet; "" = the saved one
+    app_id: str | None = None          # LRCLIB: as typed (None = the saved one)
+
+
+@router.post("/test/{source}")
+def test_source(source: str, req: SourceTest):
+    """Check a key/token against its service (Settings → Sources → Test)."""
+    from core import sourcetest
+    s = _load()
+    if source == "acoustid":
+        key = req.value.strip() or s.acoustid_api_key or settings.acoustid_api_key
+        return sourcetest.acoustid(key) if key else {"ok": False, "message": "No AcoustID key to test"}
+    if source == "discogs":
+        token = req.value.strip() or s.discogs_token
+        return sourcetest.discogs(token) if token else {"ok": False, "message": "No Discogs token to test"}
+    if source == "lrclib":
+        key = req.value.strip() or s.lrclib_api_key
+        app_id = (req.app_id if req.app_id is not None else s.lrclib_app_id).strip()
+        if not (key or app_id):
+            return {"ok": False, "message": "No LRCLIB app ID or key to test"}
+        return sourcetest.lrclib(key, app_id)
+    raise HTTPException(404, "Unknown source")
+
+
 class LibraryToggle(BaseModel):
     path: str
     active: bool

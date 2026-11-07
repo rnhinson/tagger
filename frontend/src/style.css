@@ -49,6 +49,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 }
 
 .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
   font-weight: 700;
   color: var(--accent);
@@ -1433,3 +1436,8 @@ button.scan-status[hidden] { display: none; }
 .settings-section > .btn { align-self: flex-start; }
 .secret-row { display: flex; gap: 6px; align-items: center; }
 .secret-row input { flex: 1; }
+.source-test-result { font-size: 12px; }
+.source-test-result[hidden] { display: none; }
+.logo-mark { height: 24px; width: auto; color: var(--text); flex-shrink: 0; }
+.about-logo { width: 160px; height: auto; display: block; margin-bottom: 12px; }
+.about-table a { color: var(--accent); }

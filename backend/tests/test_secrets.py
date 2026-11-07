@@ -30,3 +30,20 @@ def test_plain_values_are_sealed_at_startup_and_a_wrong_key_reads_as_unset(clien
     assert "a-789" not in settings.settings_file.read_text() and _load().acoustid_api_key == "a-789"
     monkeypatch.setenv("TAGGER_SECRET_KEY", Fernet.generate_key().decode())
     assert _load().acoustid_api_key == ""
+
+
+def test_source_tests_use_the_typed_value_else_the_saved_one(client, monkeypatch):
+    from core import sourcetest
+    seen = []
+    monkeypatch.setattr(sourcetest, "_fetch", lambda url, h: seen.append((url, h)) or (401, {"message": "nope"}))
+    assert client.post("/api/config/test/discogs", json={}).json() == {"ok": False, "message": "No Discogs token to test"}
+    client.patch("/api/config", json={"discogs_token": "saved", "lrclib_app_id": "app"})
+    r = client.post("/api/config/test/discogs", json={}).json()
+    assert r == {"ok": False, "message": "Discogs: nope"} and seen[-1][1]["Authorization"] == "Discogs token=saved"
+    client.post("/api/config/test/discogs", json={"value": "typed"})
+    assert seen[-1][1]["Authorization"] == "Discogs token=typed"
+    monkeypatch.setattr(sourcetest, "_fetch", lambda url, h: seen.append((url, h)) or (200, {}))
+    assert client.post("/api/config/test/lrclib", json={"value": "k"}).json()["message"] == "LRCLIB accepted the app ID and key"
+    assert seen[-1][1] == {"Lrclib-Api-Key": "k", "Lrclib-App-Id": "app"}
+    monkeypatch.setattr(sourcetest, "_fetch", lambda url, h: (200, {"error": {"code": 4}}))
+    assert client.post("/api/config/test/acoustid", json={"value": "x"}).json()["ok"] is False
