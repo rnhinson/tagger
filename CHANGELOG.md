@@ -124,7 +124,7 @@
 - LRCLIB's rate limit is respected: requests are spaced out (~80/min), a 429
   waits its Retry-After and retries, and a lookup that's still refused stops
   with what it found staged instead of recording tracks as "not found".
-  Optional **LRCLIB API key** (Settings → Sources) for a registered app's
+  Optional **LRCLIB app ID + API key** (Settings → Sources) for a registered app's
   far higher limit.
 - "Lyrics groups" are now **Groups** (they carry a layout too);
   **Group…** on a selection.

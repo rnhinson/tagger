@@ -37,6 +37,7 @@ class AppSettings(BaseModel):
     acoustid_api_key: str = ""
     discogs_token: str = ""
     lrclib_api_key: str = ""           # optional: a registered app's much higher rate limit
+    lrclib_app_id: str = ""            # its public id, sent with the key
     scan_tags: list[str] = ALL_SCAN_TAGS
     music_dirs: list[str] = []
     scan_exclude: list[str] = []       # glob patterns; matching paths are skipped

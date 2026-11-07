@@ -2746,6 +2746,7 @@ rescanFolderBtn.addEventListener('click', () => {
 const settingsModal     = document.getElementById('settings-sidebar')!
 // Keys and tokens: the server says only which are set (never the values).
 // A field is sent when typed into (replace) or removed; otherwise left alone.
+const lrclibAppIdInput = document.getElementById('setting-lrclib-app-id') as HTMLInputElement
 const secretInputs = [...document.querySelectorAll<HTMLInputElement>('[data-secret]')]
 function showSecrets(s: AppSettings) {
   for (const i of secretInputs) {
@@ -2877,6 +2878,7 @@ async function openSettings() {
       api.settings.get(), api.lookup.status(), api.tags.replaygainStatus(),
     ])
     showSecrets(s)
+    lrclibAppIdInput.value    = s.lrclib_app_id ?? ''
     scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
     autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
@@ -3066,6 +3068,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   getScanTagCheckboxes().forEach(cb => { if (cb.checked) scanTags.push(cb.dataset.tag!) })
   const update: Partial<AppSettings> = {
     ...readSecrets(),
+    lrclib_app_id:     lrclibAppIdInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
     stage_changes:     stageChangesInput.checked,
     library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),

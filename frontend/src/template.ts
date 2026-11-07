@@ -150,7 +150,10 @@ export const APP_HTML = `
       </div>
       <div class="settings-section">
         <div class="settings-section-title">LRCLIB (lyrics)</div>
-        <p class="settings-hint">Free, no key needed: about 90 lookups a minute, spaced out automatically. Register an app at <span class="settings-link">lrclib.net/developers</span> (server-side) and paste its key for a far higher limit.</p>
+        <p class="settings-hint">Free, no key needed: about 90 lookups a minute, spaced out automatically. Register an app at <span class="settings-link">lrclib.net/developers</span> (server-side) and paste its app ID and key for a far higher limit.</p>
+        <label class="field-label">App ID
+          <input id="setting-lrclib-app-id" type="text" autocomplete="off" spellcheck="false" placeholder="Optional" />
+        </label>
         <label class="field-label">API key
           <span class="secret-row"><input id="setting-lrclib-key" data-secret="lrclib_api_key" type="password" autocomplete="off" placeholder="Optional" data-placeholder="Optional" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
         </label>
