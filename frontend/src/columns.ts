@@ -55,7 +55,7 @@ export function viewCols(): ColDef[] {
 
 const LOOKUP_TEXT: Record<string, string> = {
   missing: 'not found', instrumental: 'instrumental', untagged: 'needs title + artist', error: 'lookup failed',
-  synced: 'found (staged)', plain: 'found (staged)',
+  synced: 'found (staged)', plain: 'found (staged)', has_plain: 'plain only',
 }
 
 /**

@@ -18,7 +18,7 @@ def test_fetch_statuses_and_stage(client, lib, monkeypatch):
     f = _insert(d / "05.mp3", title="No artist", track_number="5")
     items = client.post("/api/lyrics/fetch", json={"track_ids": [a, b, c, e, f]}).json()["items"]
     assert [(i["id"], i["status"]) for i in items] == [
-        (a, "synced"), (b, "instrumental"), (c, "missing"), (e, "has"), (f, "untagged")]
+        (a, "synced"), (b, "instrumental"), (c, "missing"), (e, "has_plain"), (f, "untagged")]   # e: plain, no synced found
     assert items[0]["lyrics"] == SYNCED
     plain = client.post("/api/lyrics/fetch", json={"track_ids": [a], "prefer": "plain"}).json()["items"][0]
     assert (plain["status"], plain["lyrics"]) == ("plain", "Here comes old flat top")
@@ -206,3 +206,34 @@ def test_fetch_with_one_query_for_every_track(client, lib, monkeypatch):
     bad = client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"title": "{titel}"}})
     assert bad.status_code == 400 and "{titel}" in bad.json()["detail"]
     assert client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"artist": "x"}}).status_code == 400
+
+
+def test_plain_lyrics_are_looked_up_again_for_synced(client, lib, monkeypatch):
+    hits = {"Synced There": {"synced": SYNCED, "plain": "p", "instrumental": False},
+            "Plain There": {"synced": None, "plain": "p2", "instrumental": False}}
+    monkeypatch.setattr(lrclib, "fetch", lambda title, *a: hits.get(title))
+    d = lib / "Shared" / "X"
+    up = _insert(d / "1.mp3", title="Synced There", artist="A", lyrics="old plain words")
+    keep = _insert(d / "2.mp3", title="Plain There", artist="A", lyrics="old plain words")
+    done = _insert(d / "3.mp3", title="Synced There", artist="A", lyrics="[00:01.00] already synced")
+    items = client.post("/api/lyrics/fetch", json={"track_ids": [up, keep, done]}).json()["items"]
+    assert [(i["status"], i["lyrics"]) for i in items] == [("synced", SYNCED), ("has_plain", None), ("has", None)]
+    plain = client.post("/api/lyrics/fetch", json={"track_ids": [up], "prefer": "plain"}).json()["items"]
+    assert plain[0]["status"] == "has"                       # plain wanted: plain is enough
+
+    assert client.post("/api/lyrics/lookup", json={"track_ids": [done]}).json()["tracks"] == 0   # synced: done
+
+
+def test_background_lookup_upgrades_plain_to_synced_only(client, lib, monkeypatch):
+    hits = {"Synced There": {"synced": SYNCED, "plain": "p", "instrumental": False},
+            "Plain There": {"synced": None, "plain": "p2", "instrumental": False}}
+    monkeypatch.setattr(lrclib, "fetch", lambda title, *a: hits.get(title))
+    d = lib / "Shared" / "X"
+    up = _insert(d / "1.mp3", title="Synced There", artist="A", lyrics="old plain words")
+    keep = _insert(d / "2.mp3", title="Plain There", artist="A", lyrics="old plain words")
+    r = client.post("/api/lyrics/lookup", json={"track_ids": [up, keep]}).json()
+    assert r["tracks"] == 2
+    assert client.get(f"/api/jobs/{r['job_id']}").json()["changed"] == 1
+    assert client.get(f"/api/library/track/{up}").json()["staged"]["tags"]["lyrics"] == SYNCED
+    assert client.get(f"/api/library/track/{keep}").json()["staged"] is None       # plain for plain: kept
+    assert client.post("/api/lyrics/lookup", json={"track_ids": [keep]}).json()["tracks"] == 0   # recorded

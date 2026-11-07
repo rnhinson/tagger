@@ -65,7 +65,11 @@ async def fetch_lyrics(req: LyricsFetch):
         group = custom or group_for(t["path"], assigned.get(t["id"]))
         base = {"id": t["id"], "title": t.get("title") or t["filename"], "artist": t.get("artist"),
                 "group": group["name"]}
-        if t.get("lyrics") and not req.overwrite:
+        # Plain lyrics are looked up again (synced can replace them) unless
+        # plain is what's wanted; synced ones only when replacing.
+        have = lyricsgroups.kind(t.get("lyrics"))
+        upgrading = have == "plain" and req.prefer == "synced" and not req.overwrite
+        if have != "none" and not req.overwrite and not upgrading:
             return {**base, "status": "has", "lyrics": None}
         if group["skip"]:
             return {**base, "status": "skipped", "lyrics": None}
@@ -74,7 +78,7 @@ async def fetch_lyrics(req: LyricsFetch):
                 res = await asyncio.to_thread(lyricsgroups.look_up, t, group, req.prefer)
             except Exception as e:  # noqa: BLE001 -- one track's failure isn't the batch's
                 return {**base, "status": "error", "error": str(e), "lyrics": None}
-        return {**base, **res}
+        return {**base, **(lyricsgroups.upgrade(t.get("lyrics"), res) if upgrading else res)}
 
     common = {}
     for f in lyricsgroups.FIELDS:

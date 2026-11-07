@@ -76,6 +76,26 @@ def unknown(template: str) -> str | None:
     return next((m.group(0) for m in _VAR.finditer(template) if m.group(1) not in VARIABLES), None)
 
 
+_STAMP = re.compile(r"\[\d+:\d\d")
+
+
+def kind(text: str | None) -> str:
+    """'synced' (timestamped lines), 'plain', or 'none' -- what a track already has."""
+    if not (text or "").strip():
+        return "none"
+    return "synced" if _STAMP.search(text) else "plain"
+
+
+def upgrade(existing: str | None, res: dict) -> dict:
+    """
+    A lookup for a track that already has plain lyrics: only synced is worth
+    offering. Anything else keeps what it has ('has_plain', no lyrics).
+    """
+    if kind(existing) != "plain" or res["status"] == "synced":
+        return res
+    return {**res, "status": "has_plain", "lyrics": None}
+
+
 def check(template: str) -> None:
     """Raise ValueError naming the problem if template uses anything but VARIABLES."""
     for _, name, spec, conv in string.Formatter().parse(template):

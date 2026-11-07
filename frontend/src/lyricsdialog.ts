@@ -14,7 +14,7 @@ import { openLyricsSearch } from './lyricssearch'
 const STATUS: Record<string, { label: string; cls: string }> = {
   synced: { label: 'synced', cls: 'mb-good' }, plain: { label: 'plain', cls: 'mb-ok' },
   instrumental: { label: 'instrumental', cls: 'mb-none' }, missing: { label: 'not found', cls: 'mb-none' },
-  has: { label: 'has lyrics', cls: 'mb-none' }, untagged: { label: 'needs title + artist', cls: 'mb-bad' },
+  has: { label: 'has lyrics', cls: 'mb-none' }, has_plain: { label: 'plain kept · no synced', cls: 'mb-none' }, untagged: { label: 'needs title + artist', cls: 'mb-bad' },
   error: { label: 'error', cls: 'mb-bad' }, skipped: { label: 'group: no lyrics', cls: 'mb-none' },
   manual: { label: 'picked by hand', cls: 'mb-good' },
 }
@@ -32,7 +32,7 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
         <div class="pr-options">
           <label class="pr-select">Prefer
             <select id="ly-prefer"><option value="synced">Synced (timestamped) when available</option><option value="plain">Plain text</option></select></label>
-          <label class="settings-toggle"><input id="ly-overwrite" type="checkbox" /><span>Replace lyrics tracks already have</span></label>
+          <label class="settings-toggle"><input id="ly-overwrite" type="checkbox" /><span title="Plain lyrics are always checked for synced ones; this also replaces synced lyrics, and plain with plain">Replace lyrics tracks already have</span></label>
           <button class="btn btn-ghost btn-sm" id="ly-fetch">Fetch again</button>
         </div>
         <div class="ly-query-row">
@@ -98,7 +98,7 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
     const c = (st: string) => items.filter(i => i.status === st).length
     sumEl.innerHTML = [`<strong>${n}</strong> to write`, c('synced') ? `${c('synced')} synced` : '', c('plain') ? `${c('plain')} plain` : '',
       c('missing') ? `${c('missing')} not found` : '', c('instrumental') ? `${c('instrumental')} instrumental` : '',
-      c('has') ? `${c('has')} already have lyrics` : ''].filter(Boolean).join(' · ')
+      c('has') ? `${c('has')} already have lyrics` : '', c('has_plain') ? `${c('has_plain')} keep plain (no synced found)` : ''].filter(Boolean).join(' · ')
     goBtn.disabled = n === 0
     goBtn.textContent = `Stage lyrics on ${n} track${n !== 1 ? 's' : ''}`
   }

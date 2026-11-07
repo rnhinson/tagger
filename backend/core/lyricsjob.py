@@ -26,8 +26,9 @@ MISSING = ("(lyrics IS NULL OR trim(lyrics) = '') AND NOT lyrics_skip(path, "
 
 
 def targets(conn, ids: list[int] | None, retry: bool) -> list[int]:
-    """The tracks a run looks up: missing lyrics (written or staged), not skipped,
-    and -- unless retry -- not already looked up without success."""
+    """The tracks a run looks up: no lyrics or only plain ones (written or
+    staged), not skipped, and -- unless retry -- not already looked up without
+    success."""
     if ids is None:
         ids = [r[0] for r in conn.execute(f"SELECT id FROM tracks WHERE {MISSING} ORDER BY directory, filename")]
     from api.tags import _rows
@@ -41,9 +42,10 @@ def targets(conn, ids: list[int] | None, retry: bool) -> list[int]:
         r = rows.get(i)
         if r is None or group_for(r["path"], assigned.get(i))["skip"]:
             continue
-        if (staging.effective(r, entries.get(i)).get("lyrics") or "").strip():
+        # Plain lyrics can still get synced ones; synced is done.
+        if lyricsgroups.kind(staging.effective(r, entries.get(i)).get("lyrics")) == "synced":
             continue
-        if done.get(i, {}).get("status") in ("missing", "instrumental", "untagged"):
+        if done.get(i, {}).get("status") in ("missing", "instrumental", "untagged", "has_plain"):
             continue
         out.append(i)
     return out
@@ -60,7 +62,8 @@ async def run(job_id: str, ids: list[int], prefer: str = "synced", instrumental_
     async def one(row, group):
         async with sem:
             try:
-                return await asyncio.to_thread(lyricsgroups.look_up, row, group, prefer)
+                res = await asyncio.to_thread(lyricsgroups.look_up, row, group, prefer)
+                return lyricsgroups.upgrade(row["lyrics"], res)
             except RateLimited as e:
                 return {"status": "later", "lyrics": None, "query": None, "error": str(e)}
             except Exception as e:  # noqa: BLE001 -- one track's failure isn't the run's
@@ -84,7 +87,7 @@ async def run(job_id: str, ids: list[int], prefer: str = "synced", instrumental_
                     if res["status"] == "later":
                         continue          # not looked up: next run tries it
                     lyricsgroups.record(conn, r["id"], res["status"], now)
-                    if res["status"] == "instrumental" and instrumental_to_none:
+                    if res["status"] == "instrumental" and instrumental_to_none and not (r["lyrics"] or "").strip():
                         lyricsgroups.assign(conn, [r["id"]], lyricsgroups.NONE)
                 if hits:
                     step = staging.Step(conn, f"Lyrics lookup: {len(hits)} track{'s' if len(hits) != 1 else ''}")
