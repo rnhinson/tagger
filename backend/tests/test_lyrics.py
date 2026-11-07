@@ -179,3 +179,30 @@ def test_has_lyrics_sorts_none_plain_synced(client, lib):
            _insert(lib / "Shared" / "p.mp3", lyrics="la la")]
     got = client.get("/api/library/track-ids", params={"sort": "has_lyrics"}).json()["ids"]
     assert got == [ids[1], ids[2], ids[0]]
+
+
+def test_fetch_with_one_query_for_every_track(client, lib, monkeypatch):
+    calls = []
+    monkeypatch.setattr(lrclib, "fetch", lambda *a: calls.append(a[:3]) or {"synced": None, "plain": "w", "instrumental": False})
+    monkeypatch.setattr(lrclib, "fetch_by_album", lambda *a: calls.append(("by album",) + a[:2]) or None)
+    d = lib / "Shared" / "Hamilton"
+    a = _insert(d / "01.mp3", title="My Shot", artist="Lin-Manuel Miranda", album="Hamilton")
+    b = _insert(d / "02.mp3", title="Wait For It", artist="Leslie Odom Jr.", album="Hamilton")
+    client.post("/api/lyrics/assign", json={"track_ids": [b], "group_id": "none"})
+    r = client.post("/api/lyrics/fetch", json={"track_ids": [a, b]}).json()
+    assert r["common"] == {"title": None, "artist": None, "album": "Hamilton"}
+    assert [i["status"] for i in r["items"]] == ["plain", "skipped"]
+
+    calls.clear()
+    q = {"title": "{title}", "artist": "Original Broadway Cast", "album": "Hamilton (OBC)"}
+    r = client.post("/api/lyrics/fetch", json={"track_ids": [a, b], "query": q}).json()
+    assert calls == [("My Shot", "Original Broadway Cast", "Hamilton (OBC)"),
+                     ("Wait For It", "Original Broadway Cast", "Hamilton (OBC)")]   # No lyrics too: asked for
+    assert [i["group"] for i in r["items"]] == ["this search"] * 2
+
+    calls.clear()
+    client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"title": "{title_base}", "album": "{album}"}})
+    assert calls == [("by album", "My Shot", "Hamilton")]                  # blank artist: by title + album
+    bad = client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"title": "{titel}"}})
+    assert bad.status_code == 400 and "{titel}" in bad.json()["detail"]
+    assert client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"artist": "x"}}).status_code == 400

@@ -506,8 +506,9 @@ export const api = {
   },
 
   lyrics: {
-    fetch: (trackIds: number[], prefer: string, overwrite: boolean) =>
-      request<{ items: LyricsItem[] }>('POST', '/api/lyrics/fetch', { track_ids: trackIds, prefer, overwrite }),
+    fetch: (trackIds: number[], prefer: string, overwrite: boolean, query: LyricsQuery | null = null) =>
+      request<{ items: LyricsItem[]; common: Record<keyof LyricsQuery, string | null> }>(
+        'POST', '/api/lyrics/fetch', { track_ids: trackIds, prefer, overwrite, query }),
     stage: (items: Record<number, string>) =>
       request<EditResult & { changed: number }>('POST', '/api/lyrics/stage', { items }),
     groups: () => request<LyricsGroup[]>('GET', '/api/lyrics/groups'),

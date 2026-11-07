@@ -127,6 +127,10 @@
   Search… shows only for one track.
 - Search lyrics: query buttons wrap instead of truncating, the picked hit's
   lyrics show beside the results, long artist/album names are clipped.
+- **Lyrics… can search with one query for the whole selection:** Title /
+  Artist / Album start as the shared value, or the `{placeholder}` where the
+  tracks differ; edit and Fetch again to use it on every track (No lyrics
+  ones too). *Use groups' queries* goes back.
 - **Leftover cover art:** a staged move that empties a folder of everything
   but images moves them along when the tracks went to a folder the move
   created, else to the trash; the folder is pruned and undo puts them back.

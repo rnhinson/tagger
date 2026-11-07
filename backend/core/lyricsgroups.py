@@ -63,8 +63,17 @@ def variables(track) -> dict:
     return v
 
 
+_VAR = re.compile(r"\{(\w+)\}")
+
+
 def _render(template: str, v: dict) -> str:
-    return " ".join(template.format_map(v).split())
+    """Fill {variables}; anything else is literal text (a typed-in album name)."""
+    return " ".join(_VAR.sub(lambda m: v.get(m.group(1), m.group(0)), template).split())
+
+
+def unknown(template: str) -> str | None:
+    """The first {name} in template that isn't a variable, if any."""
+    return next((m.group(0) for m in _VAR.finditer(template) if m.group(1) not in VARIABLES), None)
 
 
 def check(template: str) -> None:
