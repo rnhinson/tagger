@@ -1248,16 +1248,6 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 
 /* ── Libraries (settings) and read-only ───────────────────────────────────── */
 .libraries-list { list-style: none; margin: 0; padding: 0; }
-.library-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
-.library-off .settings-toggle span { color: var(--text-muted); }
-.library-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.library-row { flex-wrap: wrap; }
-.library-layout { flex-basis: 100%; display: flex; align-items: center; gap: 6px; margin: 0 0 4px 22px; min-width: 0; }
-.library-layout .settings-toggle { font-size: 11px; white-space: nowrap; }
-.library-layout-text { flex: 1; min-width: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.library-layout-std { color: var(--text-muted); }
-.library-layout-editing { flex: 1; display: flex; gap: 4px; min-width: 0; }
-.library-layout-editing input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 11px; }
 .layout-path { color: var(--accent); font-size: 11px; }
 .editor-file-layout { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .readonly-note {
@@ -1393,12 +1383,10 @@ button.scan-status[hidden] { display: none; }
 .al-full { color: var(--success); }
 
 /* ── Lyrics groups, search ─────────────────────────────────────────────── */
-.library-lyrics { flex-basis: 100%; margin: 0 0 4px 22px; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-.library-lyrics select { font-size: 11px; }
 .lyrics-group { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
 .lyrics-group-head { display: flex; align-items: center; gap: 8px; }
 .lyrics-group-name { flex: 1; min-width: 0; }
-.lyrics-group-name[readonly] { border-color: transparent; background: transparent; font-weight: 600; }
+.lyrics-group-name[readonly] { border-color: transparent; background: transparent; font-weight: 600; cursor: default; }
 .lyrics-queries { margin-top: 4px; }
 .lyrics-query { display: flex; gap: 4px; margin-bottom: 3px; }
 .lyrics-query input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 11px; }
@@ -1411,3 +1399,35 @@ button.scan-status[hidden] { display: none; }
 .ls-picked td { background: var(--accent-dim); }
 .ls-off { color: var(--danger); }
 .ls-preview pre { margin: 8px 0 0; max-height: 260px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+
+/* ── Settings sections, tables, inputs ───────────────────────────────────── */
+.settings-subnav { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.settings-subnav button {
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius); color: var(--text-muted);
+  font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer;
+}
+.settings-subnav button:hover { color: var(--text); background: var(--surface2); }
+.settings-subnav button.active { color: var(--text); background: var(--surface3); border-color: var(--border); }
+.settings-sect { display: flex; flex-direction: column; gap: 24px; }
+.settings-sect[hidden] { display: none; }
+.settings-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.settings-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.settings-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+.settings-table th:first-child, .settings-table td:first-child { width: 1%; white-space: nowrap; }
+.settings-table td.num { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settings-table tr.library-off td { color: var(--text-muted); }
+.settings-table input[type=text] { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; }
+.settings-table input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.group-layout-name { white-space: nowrap; }
+.settings-pane input[type=text], .settings-pane input[type=password], .settings-pane input[type=number],
+.settings-pane textarea, .settings-pane select {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; font-family: inherit; padding: 4px 8px; outline: none; min-width: 0;
+}
+.settings-pane input:focus, .settings-pane textarea:focus, .settings-pane select:focus { border-color: var(--accent); }
+.settings-pane input::placeholder { color: var(--text-dim); }
+.settings-pane .lyrics-query input, .settings-table input[type=text] { font-family: ui-monospace, monospace; font-size: 12px; }
+.settings-pane .lyrics-group-name[readonly] { border-color: transparent; background: transparent; color: var(--text); }
+.field-label .settings-hint { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.field-label .rename-preview { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.settings-section > .btn { align-self: flex-start; }

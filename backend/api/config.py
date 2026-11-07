@@ -22,10 +22,12 @@ class LyricsQuery(BaseModel):
 
 
 class LyricsGroup(BaseModel):
+    """A group of tracks put together by hand: how their lyrics are looked up, and their layout."""
     id: str
     name: str
     skip: bool = False                 # never looked up; not "missing lyrics"
     queries: list[LyricsQuery] = []
+    layout: str = ""                   # "" = the library's layout (core/layout.py)
 
 
 class AppSettings(BaseModel):
@@ -33,6 +35,7 @@ class AppSettings(BaseModel):
     rename_template: str = "{album_artist}/{album}/{track_number:02d} {title}"
     acoustid_api_key: str = ""
     discogs_token: str = ""
+    lrclib_api_key: str = ""           # optional: a registered app's much higher rate limit
     scan_tags: list[str] = ALL_SCAN_TAGS
     music_dirs: list[str] = []
     scan_exclude: list[str] = []       # glob patterns; matching paths are skipped
@@ -174,15 +177,11 @@ def toggle_library(req: LibraryToggle, background_tasks: BackgroundTasks):
 
 @router.patch("")
 def update_settings(update: AppSettings):
-    from core.naming import render_template
     sent = update.model_dump(exclude_unset=True)
     if "library_templates" in sent:
         layouts = {os.path.normpath(k): v.strip() for k, v in sent["library_templates"].items() if v.strip()}
         for root, template in layouts.items():
-            try:
-                render_template(template, _SAMPLE_TRACK, ".flac")
-            except (KeyError, ValueError, IndexError) as exc:
-                raise HTTPException(400, f"Layout for {Path(root).name}: invalid template ({exc})")
+            _check_layout(template, f"Layout for {Path(root).name}")
         sent["library_templates"] = layouts
     if "lyrics_groups" in sent:
         sent["lyrics_groups"] = _check_lyrics_groups(update.lyrics_groups)
@@ -195,6 +194,14 @@ def update_settings(update: AppSettings):
     return get_settings()
 
 
+def _check_layout(template: str, what: str) -> None:
+    from core.naming import render_template
+    try:
+        render_template(template, _SAMPLE_TRACK, ".flac")
+    except (KeyError, ValueError, IndexError) as exc:
+        raise HTTPException(400, f"{what}: invalid template ({exc})")
+
+
 def _check_lyrics_groups(groups: list[LyricsGroup]) -> list[LyricsGroup]:
     """Ids unique and slug-like, names given, templates valid; Standard + No lyrics kept."""
     import re
@@ -203,17 +210,19 @@ def _check_lyrics_groups(groups: list[LyricsGroup]) -> list[LyricsGroup]:
     for g in groups:
         gid = re.sub(r"[^a-z0-9]+", "-", (g.id or g.name).lower()).strip("-")
         if not gid or not g.name.strip():
-            raise HTTPException(400, "Lyrics group: a name is required")
+            raise HTTPException(400, "Group: a name is required")
         if gid in seen:
-            raise HTTPException(400, f"Lyrics group {g.name}: duplicate name")
+            raise HTTPException(400, f"Group {g.name}: duplicate name")
         seen.add(gid)
         for q in g.queries:
             for f in lyricsgroups.FIELDS:
                 try:
                     lyricsgroups.check(getattr(q, f))
                 except ValueError as exc:
-                    raise HTTPException(400, f"Lyrics group {g.name}, {f}: {exc}")
-        out.append(g.model_copy(update={"id": gid, "name": g.name.strip()}))
+                    raise HTTPException(400, f"Group {g.name}, lyrics {f}: {exc}")
+        if g.layout.strip():
+            _check_layout(g.layout.strip(), f"Layout for group {g.name}")
+        out.append(g.model_copy(update={"id": gid, "name": g.name.strip(), "layout": g.layout.strip()}))
     for d in lyricsgroups.DEFAULT_GROUPS:
         if d["id"] in (lyricsgroups.STANDARD, lyricsgroups.NONE) and d["id"] not in seen:
             out.append(LyricsGroup(**d))

@@ -19,7 +19,7 @@ import { openMergeAlbums } from './mergealbums'
 import { openMbAlbum } from './mbalbum'
 import { openLyrics } from './lyricsdialog'
 import { openLyricsSearch } from './lyricssearch'
-import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect } from './lyricsgroups'
+import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect, renderGroupLayouts } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
@@ -2746,6 +2746,7 @@ rescanFolderBtn.addEventListener('click', () => {
 const settingsModal     = document.getElementById('settings-sidebar')!
 const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
 const discogsTokenInput = document.getElementById('setting-discogs-token') as HTMLInputElement
+const lrclibKeyInput    = document.getElementById('setting-lrclib-key') as HTMLInputElement
 const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTMLTextAreaElement
 const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
@@ -2777,57 +2778,52 @@ function getScanTagCheckboxes(): NodeListOf<HTMLInputElement> {
   return document.querySelectorAll<HTMLInputElement>('#scan-tags-list input[data-tag]')
 }
 
-const librariesListEl = document.getElementById('libraries-list') as HTMLUListElement
+const librariesListEl = document.getElementById('libraries-list') as HTMLElement
+const libraryLayoutsEl = document.getElementById('library-layouts-list') as HTMLElement
+const groupLayoutsEl = document.getElementById('group-layouts-list') as HTMLElement
 const lyricsGroupsListEl = document.getElementById('lyrics-groups-list') as HTMLElement
-wireLyricsGroups(lyricsGroupsListEl, document.getElementById('lyrics-group-add')!)
+wireLyricsGroups(lyricsGroupsListEl, document.getElementById('lyrics-group-add')!, groupLayoutsEl)
 
-async function renderLibraries() {
-  try {
-    const [libs, lyricsGroups] = await Promise.all([api.settings.libraries(), api.lyrics.groups()])
-    librariesListEl.innerHTML = libs.length ? libs.map(l => `
-      <li class="library-row${l.active ? '' : ' library-off'}">
-        <label class="settings-toggle"><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} />
-          <span>${l.writable ? '' : '🔒 '}${esc(l.name)}</span></label>
-        <span class="library-meta" title="${esc(l.path)}">${l.active ? `${l.tracks.toLocaleString()} tracks` : 'off'}</span>
-        <div class="library-layout" data-path="${esc(l.path)}" data-override="${esc(l.template)}">
-          <label class="settings-toggle"><input type="checkbox" data-layout-check ${l.layout ? 'checked' : ''} /><span>Check layout</span></label>
-          ${layoutTextHtml(l.template)}
-        </div>
-        ${libraryGroupSelect(lyricsGroups, l.path, l.lyrics_group)}
-      </li>`).join('')
-      : '<li class="settings-hint">No library roots — every music directory is scanned.</li>'
-  } catch (e) {
-    librariesListEl.innerHTML = `<li class="settings-hint">Failed to load libraries: ${esc(String(e))}</li>`
-  }
+// Settings sections: one shown at a time; the last one is remembered.
+const settingsSubnav = document.querySelector<HTMLElement>('.settings-subnav')!
+function showSettingsSection(name: string) {
+  if (!settingsSubnav.querySelector(`[data-sect="${name}"]`)) name = 'libraries'
+  settingsSubnav.querySelectorAll<HTMLElement>('[data-sect]').forEach(b => b.classList.toggle('active', b.dataset.sect === name))
+  document.querySelectorAll<HTMLElement>('.settings-sect').forEach(el => { el.hidden = el.dataset.sect !== name })
+  try { localStorage.setItem('tagger.settingsSection', name) } catch { /* private window */ }
 }
-
-/** A library's layout, read-only: its own (✎ to edit) or the standard one, muted. */
-function layoutTextHtml(override: string): string {
-  const shown = override || renameTemplateInput.value.trim()
-  return `<code class="library-layout-text${override ? '' : ' library-layout-std'}"
-      title="${override ? 'This library\'s own layout' : 'The standard layout (Layout, below)'}">${esc(shown) || '—'}</code>
-    <button type="button" class="btn btn-ghost btn-sm library-layout-edit" title="Give this library its own layout">✎</button>`
-}
-
-// ✎ swaps the text for an input in place; "Standard" drops the override.
-librariesListEl.addEventListener('click', (e) => {
-  const t = e.target as HTMLElement
-  const box = t.closest<HTMLElement>('.library-layout')
-  if (!box) return
-  if (t.closest('.library-layout-edit')) {
-    const text = box.querySelector('.library-layout-text')!
-    const edit = document.createElement('span')
-    edit.className = 'library-layout-editing'
-    edit.innerHTML = `<input type="text" spellcheck="false" data-layout-input value="${esc(box.dataset.override || renameTemplateInput.value.trim())}" />
-      <button type="button" class="btn btn-ghost btn-sm library-layout-reset" title="Use the standard layout">Standard</button>`
-    text.replaceWith(edit)
-    box.querySelector('.library-layout-edit')!.remove()
-    edit.querySelector('input')!.focus()
-  } else if (t.closest('.library-layout-reset')) {
-    box.dataset.override = ''
-    box.querySelector('.library-layout-editing')!.outerHTML = layoutTextHtml('')
-  }
+settingsSubnav.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-sect]')
+  if (b) showSettingsSection(b.dataset.sect!)
 })
+try { showSettingsSection(localStorage.getItem('tagger.settingsSection') ?? 'libraries') } catch { showSettingsSection('libraries') }
+
+/** Libraries (and, opening Settings, the layout tables and group cards: those hold unsaved edits otherwise). */
+async function renderLibraries(all = true) {
+  try {
+    const [libs, groups] = await Promise.all([api.settings.libraries(), api.lyrics.groups()])
+    const std = renameTemplateInput.value.trim()
+    librariesListEl.innerHTML = libs.length ? libs.map(l => `
+      <tr class="${l.active ? '' : 'library-off'}">
+        <td><input type="checkbox" data-path="${esc(l.path)}" ${l.active ? 'checked' : ''} aria-label="Scan ${esc(l.name)}" /></td>
+        <td title="${esc(l.path)}">${l.writable ? '' : '🔒 '}${esc(l.name)}</td>
+        <td class="num">${l.active ? l.tracks.toLocaleString() : 'off'}</td>
+        <td>${libraryGroupSelect(groups, l.path, l.lyrics_group)}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="4" class="settings-hint">No library roots — every music directory is scanned.</td></tr>'
+    if (!all) return
+    libraryLayoutsEl.innerHTML = libs.map(l => `
+      <tr data-layout-path="${esc(l.path)}">
+        <td><input type="checkbox" data-layout-check ${l.layout ? 'checked' : ''} aria-label="Check ${esc(l.name)} against its layout" /></td>
+        <td title="${esc(l.path)}">${esc(l.name)}</td>
+        <td><input type="text" spellcheck="false" data-layout-input value="${esc(l.template)}" placeholder="${esc(std)}" /></td>
+      </tr>`).join('')
+    renderGroupLayouts(groupLayoutsEl, groups)
+    renderLyricsGroups(lyricsGroupsListEl, groups)
+  } catch (e) {
+    librariesListEl.innerHTML = `<tr><td colspan="4" class="settings-hint">Failed to load libraries: ${esc(String(e))}</td></tr>`
+  }
+}
 
 librariesListEl.addEventListener('change', async (e) => {
   const cb = e.target as HTMLInputElement
@@ -2846,7 +2842,7 @@ librariesListEl.addEventListener('change', async (e) => {
   } catch (err) {
     toast(`Failed: ${err}`, 'error'); cb.checked = !cb.checked
   } finally {
-    await renderLibraries()
+    await renderLibraries(false)
   }
 })
 
@@ -2856,6 +2852,7 @@ async function openSettings() {
       api.settings.get(), api.lookup.status(), api.tags.replaygainStatus(),
     ])
     acoustidKeyInput.value    = s.acoustid_api_key
+    lrclibKeyInput.value      = s.lrclib_api_key ?? ''
     discogsTokenInput.value   = s.discogs_token ?? ''
     scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
     autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
@@ -2875,7 +2872,6 @@ async function openSettings() {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
     renderLibraries()
-    renderLyricsGroups(lyricsGroupsListEl)
     musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
     localMusicDirs = [...(s.music_dirs ?? [])]
     renderMusicDirsList()
@@ -3017,7 +3013,7 @@ logoutBtn.addEventListener('click', async () => {
 renameTemplateInput.addEventListener('input', () => {
   updateRenamePreview()
   // libraries following the standard layout show it as you type
-  librariesListEl.querySelectorAll('.library-layout-std').forEach(c => { c.textContent = renameTemplateInput.value.trim() || '—' })
+  libraryLayoutsEl.querySelectorAll<HTMLInputElement>('[data-layout-input]').forEach(i => { i.placeholder = renameTemplateInput.value.trim() })
 })
 
 document.getElementById('music-dir-add-btn')!.addEventListener('click', () => {
@@ -3048,6 +3044,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   const update: Partial<AppSettings> = {
     acoustid_api_key:  acoustidKeyInput.value.trim(),
     discogs_token:     discogsTokenInput.value.trim(),
+    lrclib_api_key:    lrclibKeyInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
     stage_changes:     stageChangesInput.checked,
     library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),
@@ -3058,18 +3055,18 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
   }
   // Layouts: only when the library list loaded (else leave them as they are).
-  // An override equal to the standard layout isn't one -- it follows the standard.
-  const layoutBoxes = [...librariesListEl.querySelectorAll<HTMLElement>('.library-layout')]
-  if (layoutBoxes.length) {
+  // A layout equal to the standard one isn't an override -- it follows the standard.
+  const layoutRows = [...libraryLayoutsEl.querySelectorAll<HTMLElement>('[data-layout-path]')]
+  if (layoutRows.length) {
     const std = renameTemplateInput.value.trim()
-    update.layout_libraries = layoutBoxes
-      .filter(b => b.querySelector<HTMLInputElement>('[data-layout-check]')!.checked).map(b => b.dataset.path!)
-    update.library_templates = Object.fromEntries(layoutBoxes.map(b => {
-      const v = (b.querySelector<HTMLInputElement>('[data-layout-input]')?.value ?? b.dataset.override ?? '').trim()
-      return [b.dataset.path!, v === std ? '' : v]
+    update.layout_libraries = layoutRows
+      .filter(r => r.querySelector<HTMLInputElement>('[data-layout-check]')!.checked).map(r => r.dataset.layoutPath!)
+    update.library_templates = Object.fromEntries(layoutRows.map(r => {
+      const v = r.querySelector<HTMLInputElement>('[data-layout-input]')!.value.trim()
+      return [r.dataset.layoutPath!, v === std ? '' : v]
     }).filter(([, v]) => v))
   }
-  const groups = readLyricsGroups(lyricsGroupsListEl)
+  const groups = readLyricsGroups(lyricsGroupsListEl, groupLayoutsEl)
   if (groups) update.lyrics_groups = groups
   const groupSelects = [...librariesListEl.querySelectorAll<HTMLSelectElement>('[data-lyrics-path]')]
   if (groupSelects.length) update.library_lyrics_groups = Object.fromEntries(

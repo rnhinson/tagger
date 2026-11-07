@@ -146,6 +146,7 @@ export interface AppSettings {
   library_templates: Record<string, string>
   lyrics_groups: LyricsGroup[]
   library_lyrics_groups: Record<string, string>
+  lrclib_api_key: string
   default_music_dir?: string
   env_library_roots?: string[]
   effective_library_roots?: string[]
@@ -270,7 +271,7 @@ export interface LyricsItem {
 }
 
 export interface LyricsQuery { title: string; artist: string; album: string }
-export interface LyricsGroup { id: string; name: string; skip: boolean; queries: LyricsQuery[]; assigned?: number }
+export interface LyricsGroup { id: string; name: string; skip: boolean; queries: LyricsQuery[]; layout?: string; assigned?: number }
 export interface LyricsHit {
   id: number; title: string; artist: string; album: string | null; duration: number | null
   synced: string | null; plain: string | null; instrumental: boolean

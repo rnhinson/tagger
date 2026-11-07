@@ -8,26 +8,79 @@ group's business (core/lyricsgroups.py).
 from __future__ import annotations
 
 import json
+import random
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 API = "https://lrclib.net/api"
-_UA = "tagger (https://github.com/beartums/tagger)"
+_UA = "tagger/0.2.0 (https://github.com/beartums/tagger)"
+
+# LRCLIB's limits (lrclib.net/docs, "Rate Limiting"): ~90 requests/min for a
+# client named in its User-Agent, ~6,000/min app-wide with a registered app's
+# key (Settings → Sources). Requests are spaced out across every thread, and a
+# 429 or 503 waits its Retry-After (plus jitter) and tries again.
+GAP, GAP_WITH_KEY = 0.75, 0.05     # seconds between requests
+RETRIES = 4
+_lock = threading.Lock()
+_next = 0.0
+
+
+class RateLimited(Exception):
+    """LRCLIB kept saying "too many requests": try again later, not "not found"."""
+
+
+def _key() -> str:
+    from api.config import _load
+    return _load().lrclib_api_key.strip()
+
+
+def _wait_turn(gap: float) -> None:
+    global _next
+    with _lock:
+        now = time.monotonic()
+        start = max(now, _next)
+        _next = start + gap
+    if start > now:
+        time.sleep(start - now)
+
+
+def _pause(seconds: float) -> None:
+    """Everyone waits: no request goes out before seconds (plus up to 30%) have passed."""
+    global _next
+    with _lock:
+        _next = max(_next, time.monotonic() + seconds * (1 + random.random() * 0.3))
 
 
 def _get(path: str, params: dict) -> object | None:
     url = f"{API}/{path}?" + urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        # /get tries outside sources on a miss and can answer 5xx when they
-        # fail: for a lookup that is "not found", not an error.
-        if e.code == 404 or e.code >= 500:
-            return None
-        raise
+    key = _key()
+    headers = {"User-Agent": _UA}
+    if key:
+        headers["Lrclib-Api-Key"] = key
+    for attempt in range(RETRIES + 1):
+        _wait_turn(GAP_WITH_KEY if key else GAP)
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            if e.code == 429 or (e.code == 503 and retry_after):
+                if attempt == RETRIES:
+                    raise RateLimited(f"LRCLIB: too many requests ({e.code})") from e
+                try:
+                    _pause(max(float(retry_after or 0), 1.0))
+                except ValueError:
+                    _pause(5.0)
+                continue
+            # /get tries outside sources on a miss and can answer 5xx when they
+            # fail: for a lookup that is "not found", not an error.
+            if e.code == 404 or e.code >= 500:
+                return None
+            raise
+    return None
 
 
 def _hit(h: dict) -> dict:

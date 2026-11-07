@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from core.database import db
-from core import lyricsgroups, lyricsjob, staging
+from core import layout, lyricsgroups, lyricsjob, staging
 from core.multivalue import MULTI_FIELDS, split_values
 from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_change
 
@@ -25,9 +25,8 @@ _ISSUE_CLAUSES: dict[str, str] = {
     "missing_track_number": "(track_number IS NULL OR track_number = '')",
     # No lyrics, and its lyrics group is looked up (core/lyricsgroups.py).
     "missing_lyrics": lyricsjob.MISSING,
-    # Path differs from where its library's layout puts it (core/layout.py).
-    "not_in_layout": "layout_path(path, title, artist, album, album_artist, year, genre, "
-                     "track_number, disc_number) != path",
+    # Path differs from where its layout puts it (core/layout.py).
+    "not_in_layout": f"layout_path({layout.SQL_ARGS}) != path",
     "duplicate_tracks": (
         "id IN ("
         "  SELECT t2.id FROM tracks t2"
@@ -54,12 +53,9 @@ def _tracks(conn, rows) -> list[dict]:
     a staged folder move gets that folder's destination as its new path.
     """
     import os
-    from api.config import get_library_roots
-    from core.layout import expected_path, layouts
     entries = staging.load(conn, [r["id"] for r in rows])
     dirs = staging.load_dirs(conn)
-    templates = layouts()
-    roots = get_library_roots() if templates else []
+    layouts = layout.Layouts()
     ids = [r["id"] for r in rows]
     assigned, looked = lyricsgroups.assigned(conn, ids), lyricsgroups.lookups(conn, ids)
     group_for = lyricsgroups.resolver()
@@ -78,11 +74,11 @@ def _tracks(conn, rows) -> list[dict]:
                 present[d] = set(os.listdir(d))
             except OSError:
                 present[d] = set()
-        layout = expected_path(r, roots, templates) if templates else None
+        where = layouts.expected(r, assigned.get(r["id"]))
         out.append({**dict(r), "staged": e, "read_only": not writable[d],
                     "missing": r["filename"] not in present[d],
-                    # where the library's layout puts it, when that's elsewhere
-                    "layout_path": layout if layout != r["path"] else None,
+                    # where its layout puts it, when that's elsewhere
+                    "layout_path": where if where != r["path"] else None,
                     "lyrics_group": group_for(r["path"], assigned.get(r["id"]))["name"],
                     "lyrics_lookup": looked.get(r["id"])})
     return out
