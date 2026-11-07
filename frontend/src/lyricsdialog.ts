@@ -1,9 +1,11 @@
 // Lyrics from LRCLIB for the selection: fetch, see what was found per track
 // (synced / plain / instrumental / not found / already has), preview, and
 // stage the ticked ones into the lyrics tag as one step. Each track is looked
-// up through its lyrics group's queries; Search… on a row picks one by hand.
+// up through its lyrics group's queries, or one query typed for them all
+// (shared values as text, the rest as {placeholders}); Search… on a row picks
+// one by hand.
 // Backend: /api/lyrics.
-import { api, LyricsItem } from './api'
+import { api, LyricsItem, LyricsQuery } from './api'
 import { toast } from './toast'
 import { esc } from './util'
 import { editToast, errText } from './staged'
@@ -12,7 +14,7 @@ import { openLyricsSearch } from './lyricssearch'
 const STATUS: Record<string, { label: string; cls: string }> = {
   synced: { label: 'synced', cls: 'mb-good' }, plain: { label: 'plain', cls: 'mb-ok' },
   instrumental: { label: 'instrumental', cls: 'mb-none' }, missing: { label: 'not found', cls: 'mb-none' },
-  has: { label: 'has lyrics', cls: 'mb-none' }, untagged: { label: 'needs title + artist', cls: 'mb-bad' },
+  has: { label: 'has lyrics', cls: 'mb-none' }, has_plain: { label: 'plain kept · no synced', cls: 'mb-none' }, untagged: { label: 'needs title + artist', cls: 'mb-bad' },
   error: { label: 'error', cls: 'mb-bad' }, skipped: { label: 'group: no lyrics', cls: 'mb-none' },
   manual: { label: 'picked by hand', cls: 'mb-good' },
 }
@@ -30,9 +32,18 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
         <div class="pr-options">
           <label class="pr-select">Prefer
             <select id="ly-prefer"><option value="synced">Synced (timestamped) when available</option><option value="plain">Plain text</option></select></label>
-          <label class="settings-toggle"><input id="ly-overwrite" type="checkbox" /><span>Replace lyrics tracks already have</span></label>
+          <label class="settings-toggle"><input id="ly-overwrite" type="checkbox" /><span title="Plain lyrics are always checked for synced ones; this also replaces synced lyrics, and plain with plain">Replace lyrics tracks already have</span></label>
           <button class="btn btn-ghost btn-sm" id="ly-fetch">Fetch again</button>
         </div>
+        <div class="ly-query-row">
+          <span class="ly-query-label">Search with</span>
+          <label class="field-label">Title<input id="ly-q-title" type="text" spellcheck="false" /></label>
+          <label class="field-label">Artist<input id="ly-q-artist" type="text" spellcheck="false" placeholder="blank: by title + album" /></label>
+          <label class="field-label">Album<input id="ly-q-album" type="text" spellcheck="false" /></label>
+          <button type="button" class="btn btn-link btn-sm" id="ly-q-reset" hidden>Use groups' queries</button>
+        </div>
+        <div class="ma-dim ly-query-hint" id="ly-q-hint"><span id="ly-q-mode">Now: each track's group queries.</span> Edit these to search every track with one query — text, or
+          <code>{title}</code> <code>{artist}</code> <code>{album}</code> <code>{album_artist}</code> <code>{year}</code> <code>{title_base}</code> <code>{album_base}</code> <code>{artist_first}</code> <code>{album_artist_first}</code> filled per track — then Fetch again.</div>
         <div id="ly-error" class="review-error" hidden></div>
       </div>
       <div class="pr-summary" id="ly-summary">Fetching…</div>
@@ -50,6 +61,16 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
   const $ = <T extends HTMLElement>(sel: string) => overlay.querySelector<T>(sel)!
   const rowsEl = $('#ly-rows'), sumEl = $('#ly-summary'), errEl = $('#ly-error'), goBtn = $<HTMLButtonElement>('#ly-apply')
   let items: LyricsItem[] = []
+  // One typed query for every track, once edited; else each track's group queries.
+  const qIn = (f: keyof LyricsQuery) => $<HTMLInputElement>(`#ly-q-${f}`)
+  const FIELDS: (keyof LyricsQuery)[] = ['title', 'artist', 'album']
+  let custom = false, filled = false
+  const setCustom = (on: boolean) => {
+    custom = on
+    $('#ly-q-reset').hidden = !on
+    $('#ly-q-hint').classList.toggle('ly-query-on', on)
+    $('#ly-q-mode').textContent = on ? 'Now: this one query for every track (No lyrics tracks too).' : "Now: each track's group queries."
+  }
   const skip = new Set<number>(), open = new Set<number>()
   let token = 0
 
@@ -77,7 +98,7 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
     const c = (st: string) => items.filter(i => i.status === st).length
     sumEl.innerHTML = [`<strong>${n}</strong> to write`, c('synced') ? `${c('synced')} synced` : '', c('plain') ? `${c('plain')} plain` : '',
       c('missing') ? `${c('missing')} not found` : '', c('instrumental') ? `${c('instrumental')} instrumental` : '',
-      c('has') ? `${c('has')} already have lyrics` : ''].filter(Boolean).join(' · ')
+      c('has') ? `${c('has')} already have lyrics` : '', c('has_plain') ? `${c('has_plain')} keep plain (no synced found)` : ''].filter(Boolean).join(' · ')
     goBtn.disabled = n === 0
     goBtn.textContent = `Stage lyrics on ${n} track${n !== 1 ? 's' : ''}`
   }
@@ -86,8 +107,11 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
     const t = ++token
     errEl.hidden = true; sumEl.textContent = 'Fetching from LRCLIB…'; goBtn.disabled = true
     try {
-      const r = await api.lyrics.fetch(ids, $<HTMLSelectElement>('#ly-prefer').value, $<HTMLInputElement>('#ly-overwrite').checked)
+      const query = custom ? { title: qIn('title').value, artist: qIn('artist').value, album: qIn('album').value } : null
+      const r = await api.lyrics.fetch(ids, $<HTMLSelectElement>('#ly-prefer').value, $<HTMLInputElement>('#ly-overwrite').checked, query)
       if (t !== token) return
+      // Shared values as text, the rest as their placeholder.
+      if (!filled) { for (const f of FIELDS) qIn(f).value = r.common[f] ?? `{${f}}`; filled = true }
       items = r.items; skip.clear(); render()
     } catch (e) { if (t === token) { errEl.textContent = errText(e); errEl.hidden = false } }
   }
@@ -115,6 +139,11 @@ export function openLyrics(ids: number[], onDone: () => Promise<void>) {
   })
   for (const sel of ['#ly-prefer', '#ly-overwrite']) $(sel).addEventListener('change', fetchAll)
   $('#ly-fetch').addEventListener('click', fetchAll)
+  for (const f of FIELDS) {
+    qIn(f).addEventListener('input', () => setCustom(true))
+    qIn(f).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); fetchAll() } })
+  }
+  $('#ly-q-reset').addEventListener('click', () => { filled = false; setCustom(false); fetchAll() })
 
   goBtn.addEventListener('click', async () => {
     const chosen: Record<number, string> = {}

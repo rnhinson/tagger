@@ -63,8 +63,37 @@ def variables(track) -> dict:
     return v
 
 
+_VAR = re.compile(r"\{(\w+)\}")
+
+
 def _render(template: str, v: dict) -> str:
-    return " ".join(template.format_map(v).split())
+    """Fill {variables}; anything else is literal text (a typed-in album name)."""
+    return " ".join(_VAR.sub(lambda m: v.get(m.group(1), m.group(0)), template).split())
+
+
+def unknown(template: str) -> str | None:
+    """The first {name} in template that isn't a variable, if any."""
+    return next((m.group(0) for m in _VAR.finditer(template) if m.group(1) not in VARIABLES), None)
+
+
+_STAMP = re.compile(r"\[\d+:\d\d")
+
+
+def kind(text: str | None) -> str:
+    """'synced' (timestamped lines), 'plain', or 'none' -- what a track already has."""
+    if not (text or "").strip():
+        return "none"
+    return "synced" if _STAMP.search(text) else "plain"
+
+
+def upgrade(existing: str | None, res: dict) -> dict:
+    """
+    A lookup for a track that already has plain lyrics: only synced is worth
+    offering. Anything else keeps what it has ('has_plain', no lyrics).
+    """
+    if kind(existing) != "plain" or res["status"] == "synced":
+        return res
+    return {**res, "status": "has_plain", "lyrics": None}
 
 
 def check(template: str) -> None:

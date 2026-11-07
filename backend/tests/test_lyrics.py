@@ -18,7 +18,7 @@ def test_fetch_statuses_and_stage(client, lib, monkeypatch):
     f = _insert(d / "05.mp3", title="No artist", track_number="5")
     items = client.post("/api/lyrics/fetch", json={"track_ids": [a, b, c, e, f]}).json()["items"]
     assert [(i["id"], i["status"]) for i in items] == [
-        (a, "synced"), (b, "instrumental"), (c, "missing"), (e, "has"), (f, "untagged")]
+        (a, "synced"), (b, "instrumental"), (c, "missing"), (e, "has_plain"), (f, "untagged")]   # e: plain, no synced found
     assert items[0]["lyrics"] == SYNCED
     plain = client.post("/api/lyrics/fetch", json={"track_ids": [a], "prefer": "plain"}).json()["items"][0]
     assert (plain["status"], plain["lyrics"]) == ("plain", "Here comes old flat top")
@@ -179,3 +179,61 @@ def test_has_lyrics_sorts_none_plain_synced(client, lib):
            _insert(lib / "Shared" / "p.mp3", lyrics="la la")]
     got = client.get("/api/library/track-ids", params={"sort": "has_lyrics"}).json()["ids"]
     assert got == [ids[1], ids[2], ids[0]]
+
+
+def test_fetch_with_one_query_for_every_track(client, lib, monkeypatch):
+    calls = []
+    monkeypatch.setattr(lrclib, "fetch", lambda *a: calls.append(a[:3]) or {"synced": None, "plain": "w", "instrumental": False})
+    monkeypatch.setattr(lrclib, "fetch_by_album", lambda *a: calls.append(("by album",) + a[:2]) or None)
+    d = lib / "Shared" / "Hamilton"
+    a = _insert(d / "01.mp3", title="My Shot", artist="Lin-Manuel Miranda", album="Hamilton")
+    b = _insert(d / "02.mp3", title="Wait For It", artist="Leslie Odom Jr.", album="Hamilton")
+    client.post("/api/lyrics/assign", json={"track_ids": [b], "group_id": "none"})
+    r = client.post("/api/lyrics/fetch", json={"track_ids": [a, b]}).json()
+    assert r["common"] == {"title": None, "artist": None, "album": "Hamilton"}
+    assert [i["status"] for i in r["items"]] == ["plain", "skipped"]
+
+    calls.clear()
+    q = {"title": "{title}", "artist": "Original Broadway Cast", "album": "Hamilton (OBC)"}
+    r = client.post("/api/lyrics/fetch", json={"track_ids": [a, b], "query": q}).json()
+    assert calls == [("My Shot", "Original Broadway Cast", "Hamilton (OBC)"),
+                     ("Wait For It", "Original Broadway Cast", "Hamilton (OBC)")]   # No lyrics too: asked for
+    assert [i["group"] for i in r["items"]] == ["this search"] * 2
+
+    calls.clear()
+    client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"title": "{title_base}", "album": "{album}"}})
+    assert calls == [("by album", "My Shot", "Hamilton")]                  # blank artist: by title + album
+    bad = client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"title": "{titel}"}})
+    assert bad.status_code == 400 and "{titel}" in bad.json()["detail"]
+    assert client.post("/api/lyrics/fetch", json={"track_ids": [a], "query": {"artist": "x"}}).status_code == 400
+
+
+def test_plain_lyrics_are_looked_up_again_for_synced(client, lib, monkeypatch):
+    hits = {"Synced There": {"synced": SYNCED, "plain": "p", "instrumental": False},
+            "Plain There": {"synced": None, "plain": "p2", "instrumental": False}}
+    monkeypatch.setattr(lrclib, "fetch", lambda title, *a: hits.get(title))
+    d = lib / "Shared" / "X"
+    up = _insert(d / "1.mp3", title="Synced There", artist="A", lyrics="old plain words")
+    keep = _insert(d / "2.mp3", title="Plain There", artist="A", lyrics="old plain words")
+    done = _insert(d / "3.mp3", title="Synced There", artist="A", lyrics="[00:01.00] already synced")
+    items = client.post("/api/lyrics/fetch", json={"track_ids": [up, keep, done]}).json()["items"]
+    assert [(i["status"], i["lyrics"]) for i in items] == [("synced", SYNCED), ("has_plain", None), ("has", None)]
+    plain = client.post("/api/lyrics/fetch", json={"track_ids": [up], "prefer": "plain"}).json()["items"]
+    assert plain[0]["status"] == "has"                       # plain wanted: plain is enough
+
+    assert client.post("/api/lyrics/lookup", json={"track_ids": [done]}).json()["tracks"] == 0   # synced: done
+
+
+def test_background_lookup_upgrades_plain_to_synced_only(client, lib, monkeypatch):
+    hits = {"Synced There": {"synced": SYNCED, "plain": "p", "instrumental": False},
+            "Plain There": {"synced": None, "plain": "p2", "instrumental": False}}
+    monkeypatch.setattr(lrclib, "fetch", lambda title, *a: hits.get(title))
+    d = lib / "Shared" / "X"
+    up = _insert(d / "1.mp3", title="Synced There", artist="A", lyrics="old plain words")
+    keep = _insert(d / "2.mp3", title="Plain There", artist="A", lyrics="old plain words")
+    r = client.post("/api/lyrics/lookup", json={"track_ids": [up, keep]}).json()
+    assert r["tracks"] == 2
+    assert client.get(f"/api/jobs/{r['job_id']}").json()["changed"] == 1
+    assert client.get(f"/api/library/track/{up}").json()["staged"]["tags"]["lyrics"] == SYNCED
+    assert client.get(f"/api/library/track/{keep}").json()["staged"] is None       # plain for plain: kept
+    assert client.post("/api/lyrics/lookup", json={"track_ids": [keep]}).json()["tracks"] == 0   # recorded

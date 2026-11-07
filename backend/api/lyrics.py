@@ -19,16 +19,38 @@ from core.database import db
 router = APIRouter()
 
 
+class LyricsQueryIn(BaseModel):
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+
+
 class LyricsFetch(BaseModel):
     track_ids: list[int]
     prefer: str = "synced"          # synced | plain
     overwrite: bool = False         # also fetch for tracks that already have lyrics
+    # One query for every track instead of each one's group queries: text,
+    # or {variables} filled per track. Asked for, so No lyrics tracks too.
+    query: LyricsQueryIn | None = None
 
 
 @router.post("/fetch")
 async def fetch_lyrics(req: LyricsFetch):
-    """What LRCLIB has for each track: the text to write, and its kind."""
+    """
+    What LRCLIB has for each track: the text to write, and its kind. Also
+    `common`: each query field's value when every track shares it, else null
+    (the dialog shows the text, or the {placeholder}).
+    """
     from api.tags import _rows
+    custom = None
+    if req.query:
+        q = req.query.model_dump()
+        bad = next((u for u in map(lyricsgroups.unknown, q.values()) if u), None)
+        if bad:
+            raise HTTPException(400, f"Unknown placeholder {bad}")
+        if not q["title"].strip():
+            raise HTTPException(400, "The query needs a title")
+        custom = {"name": "this search", "skip": False, "queries": [q]}
     with db() as conn:
         rows = _rows(conn, req.track_ids)
         entries = staging.load(conn, [r["id"] for r in rows])
@@ -40,10 +62,14 @@ async def fetch_lyrics(req: LyricsFetch):
     sem = asyncio.Semaphore(4)
 
     async def one(t: dict) -> dict:
-        group = group_for(t["path"], assigned.get(t["id"]))
+        group = custom or group_for(t["path"], assigned.get(t["id"]))
         base = {"id": t["id"], "title": t.get("title") or t["filename"], "artist": t.get("artist"),
                 "group": group["name"]}
-        if t.get("lyrics") and not req.overwrite:
+        # Plain lyrics are looked up again (synced can replace them) unless
+        # plain is what's wanted; synced ones only when replacing.
+        have = lyricsgroups.kind(t.get("lyrics"))
+        upgrading = have == "plain" and req.prefer == "synced" and not req.overwrite
+        if have != "none" and not req.overwrite and not upgrading:
             return {**base, "status": "has", "lyrics": None}
         if group["skip"]:
             return {**base, "status": "skipped", "lyrics": None}
@@ -52,9 +78,13 @@ async def fetch_lyrics(req: LyricsFetch):
                 res = await asyncio.to_thread(lyricsgroups.look_up, t, group, req.prefer)
             except Exception as e:  # noqa: BLE001 -- one track's failure isn't the batch's
                 return {**base, "status": "error", "error": str(e), "lyrics": None}
-        return {**base, **res}
+        return {**base, **(lyricsgroups.upgrade(t.get("lyrics"), res) if upgrading else res)}
 
-    return {"items": await asyncio.gather(*(one(t) for t in tracks))}
+    common = {}
+    for f in lyricsgroups.FIELDS:
+        vals = {(t.get(f) or "").strip() for t in tracks}
+        common[f] = vals.pop() if len(vals) == 1 else None
+    return {"items": await asyncio.gather(*(one(t) for t in tracks)), "common": common}
 
 
 class LyricsStage(BaseModel):
