@@ -1431,3 +1431,5 @@ button.scan-status[hidden] { display: none; }
 .field-label .settings-hint { text-transform: none; letter-spacing: normal; font-weight: 400; }
 .field-label .rename-preview { text-transform: none; letter-spacing: normal; font-weight: 400; }
 .settings-section > .btn { align-self: flex-start; }
+.secret-row { display: flex; gap: 6px; align-items: center; }
+.secret-row input { flex: 1; }

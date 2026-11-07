@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
+from core import secrets
 from core.config import settings
 from core.tagger import TAG_FIELDS
 
@@ -96,7 +97,11 @@ def _load() -> AppSettings:
     f = settings.settings_file
     if f.exists():
         try:
-            return AppSettings(**json.loads(f.read_text()))
+            data = json.loads(f.read_text())
+            for k in secrets.FIELDS:
+                if isinstance(data.get(k), str):
+                    data[k] = secrets.unseal(data[k], k)
+            return AppSettings(**data)
         except Exception:
             pass
     return AppSettings()
@@ -104,7 +109,10 @@ def _load() -> AppSettings:
 
 def _save(s: AppSettings) -> None:
     settings.config_dir.mkdir(parents=True, exist_ok=True)
-    settings.settings_file.write_text(s.model_dump_json(indent=2))
+    data = s.model_dump()
+    for k in secrets.FIELDS:
+        data[k] = secrets.seal(data[k])
+    settings.settings_file.write_text(json.dumps(data, indent=2))
 
 
 @router.get("")
@@ -112,6 +120,10 @@ def get_settings():
     s = _load()
     return {
         **s.model_dump(),
+        # Keys and tokens never leave the server: only whether each is set.
+        **{k: "" for k in secrets.FIELDS},
+        "secrets_set": {k: bool(getattr(s, k)) for k in secrets.FIELDS},
+        "secrets_encrypted": secrets.enabled(),
         "default_music_dir": str(settings.music_dir),
         "env_library_roots": settings.library_roots,
         "effective_library_roots": [str(r) for r in get_library_roots()],

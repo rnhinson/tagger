@@ -132,11 +132,12 @@ export const APP_HTML = `
       </div>
       </div>
       <div class="settings-sect" data-sect="sources" hidden>
+      <p id="secrets-note" class="settings-hint"></p>
       <div class="settings-section">
         <div class="settings-section-title">AcoustID</div>
         <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free API key at <span class="settings-link">acoustid.org</span>, then install chromaprint: <code>sudo apt install libchromaprint-tools</code></p>
         <label class="field-label">API Key
-          <input id="setting-acoustid-key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" />
+          <span class="secret-row"><input id="setting-acoustid-key" data-secret="acoustid_api_key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" data-placeholder="Paste your AcoustID API key…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
         </label>
         <div id="acoustid-status" class="acoustid-status"></div>
       </div>
@@ -144,14 +145,14 @@ export const APP_HTML = `
         <div class="settings-section-title">Discogs</div>
         <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
         <label class="field-label">Token
-          <input id="setting-discogs-token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" />
+          <span class="secret-row"><input id="setting-discogs-token" data-secret="discogs_token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" data-placeholder="Paste your Discogs token…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
         </label>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">LRCLIB (lyrics)</div>
         <p class="settings-hint">Free, no key needed: about 90 lookups a minute, spaced out automatically. Register an app at <span class="settings-link">lrclib.net/developers</span> (server-side) and paste its key for a far higher limit.</p>
         <label class="field-label">API key
-          <input id="setting-lrclib-key" type="password" autocomplete="off" placeholder="Optional" />
+          <span class="secret-row"><input id="setting-lrclib-key" data-secret="lrclib_api_key" type="password" autocomplete="off" placeholder="Optional" data-placeholder="Optional" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button></span>
         </label>
       </div>
       <div class="settings-section">

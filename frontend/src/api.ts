@@ -147,6 +147,8 @@ export interface AppSettings {
   lyrics_groups: LyricsGroup[]
   library_lyrics_groups: Record<string, string>
   lrclib_api_key: string
+  secrets_set?: Record<string, boolean>   // keys/tokens are never sent back, only whether set
+  secrets_encrypted?: boolean
   default_music_dir?: string
   env_library_roots?: string[]
   effective_library_roots?: string[]

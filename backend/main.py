@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
     from core.tasks import auto_scan_loop, mark_interrupted
 
     settings.config_dir.mkdir(parents=True, exist_ok=True)
+    from core.secrets import seal_existing
+    seal_existing()
     init_db()
     mark_interrupted()
     task = asyncio.create_task(auto_scan_loop())

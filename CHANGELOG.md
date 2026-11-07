@@ -96,6 +96,11 @@
 - Split into sections: Libraries · Layouts · Groups · Scanning · Sources ·
   Writing. Every layout (standard, per library with its Check, per group) is
   under Layouts; libraries are a table (on/off, tracks, group).
+- **API keys and tokens encrypted at rest** (AcoustID, Discogs, LRCLIB) in
+  settings.json with `TAGGER_SECRET_KEY` (a Fernet key; keep it in a
+  Kubernetes Secret, not the config volume). Plain values already saved are
+  encrypted at startup. The API never returns them — Settings shows "Saved",
+  with Replace / Remove. Without the variable, storage stays plain text.
 - Dark inputs throughout; built-in group names readable; hints no longer
   shouted in capitals.
 
