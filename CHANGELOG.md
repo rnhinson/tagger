@@ -96,6 +96,11 @@
 - Split into sections: Libraries · Layouts · Groups · Scanning · Sources ·
   Writing. Every layout (standard, per library with its Check, per group) is
   under Layouts; libraries are a table (on/off, tracks, group).
+- **API keys and tokens encrypted at rest** (AcoustID, Discogs, LRCLIB) in
+  settings.json with `TAGGER_SECRET_KEY` (a Fernet key; keep it in a
+  Kubernetes Secret, not the config volume). Plain values already saved are
+  encrypted at startup. The API never returns them — Settings shows "Saved",
+  with Replace / Remove. Without the variable, storage stays plain text.
 - Dark inputs throughout; built-in group names readable; hints no longer
   shouted in capitals.
 
@@ -119,7 +124,7 @@
 - LRCLIB's rate limit is respected: requests are spaced out (~80/min), a 429
   waits its Retry-After and retries, and a lookup that's still refused stops
   with what it found staged instead of recording tracks as "not found".
-  Optional **LRCLIB API key** (Settings → Sources) for a registered app's
+  Optional **LRCLIB app ID + API key** (Settings → Sources) for a registered app's
   far higher limit.
 - "Lyrics groups" are now **Groups** (they carry a layout too);
   **Group…** on a selection.

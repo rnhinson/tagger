@@ -133,7 +133,7 @@ def test_rate_limit_waits_retry_after_and_sends_the_key(client, monkeypatch):
     from email.message import Message
     calls, paused = [], []
     def fake_open(req, timeout):
-        calls.append(req.get_header("Lrclib-api-key"))
+        calls.append((req.get_header("Lrclib-app-id"), req.get_header("Lrclib-api-key")))
         if len(calls) == 1:
             h = Message(); h["Retry-After"] = "2"
             raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", h, None)
@@ -141,9 +141,9 @@ def test_rate_limit_waits_retry_after_and_sends_the_key(client, monkeypatch):
     monkeypatch.setattr(lrclib.urllib.request, "urlopen", fake_open)
     monkeypatch.setattr(lrclib, "_wait_turn", lambda gap: None)
     monkeypatch.setattr(lrclib, "_pause", paused.append)
-    client.patch("/api/config", json={"lrclib_api_key": "k1"})
+    client.patch("/api/config", json={"lrclib_api_key": "k1", "lrclib_app_id": "app1"})
     assert lrclib._get("search", {"q": "x"}) == []
-    assert calls == ["k1", "k1"] and paused == [2.0]
+    assert calls == [("app1", "k1"), ("app1", "k1")] and paused == [2.0]
 
     def always_429(req, timeout):
         raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", Message(), None)

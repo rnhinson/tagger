@@ -2744,9 +2744,35 @@ rescanFolderBtn.addEventListener('click', () => {
 // ─── Settings modal ───────────────────────────────────────────────────────────
 
 const settingsModal     = document.getElementById('settings-sidebar')!
-const acoustidKeyInput  = document.getElementById('setting-acoustid-key') as HTMLInputElement
-const discogsTokenInput = document.getElementById('setting-discogs-token') as HTMLInputElement
-const lrclibKeyInput    = document.getElementById('setting-lrclib-key') as HTMLInputElement
+// Keys and tokens: the server says only which are set (never the values).
+// A field is sent when typed into (replace) or removed; otherwise left alone.
+const lrclibAppIdInput = document.getElementById('setting-lrclib-app-id') as HTMLInputElement
+const secretInputs = [...document.querySelectorAll<HTMLInputElement>('[data-secret]')]
+function showSecrets(s: AppSettings) {
+  for (const i of secretInputs) {
+    const set = !!s.secrets_set?.[i.dataset.secret!]
+    i.value = ''
+    delete i.dataset.removed
+    i.placeholder = set ? 'Saved — type to replace' : i.dataset.placeholder!
+    i.parentElement!.querySelector<HTMLElement>('[data-secret-remove]')!.hidden = !set
+  }
+  document.getElementById('secrets-note')!.innerHTML = s.secrets_encrypted
+    ? '🔒 Keys and tokens are stored encrypted (<code>TAGGER_SECRET_KEY</code>) and never shown again.'
+    : '⚠ Keys and tokens are stored as plain text: set <code>TAGGER_SECRET_KEY</code> on the server to encrypt them.'
+}
+function readSecrets(): Partial<AppSettings> {
+  const out: Record<string, string> = {}
+  for (const i of secretInputs) {
+    if (i.value.trim() || i.dataset.removed) out[i.dataset.secret!] = i.value.trim()
+  }
+  return out as Partial<AppSettings>
+}
+document.getElementById('pane-settings')!.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-secret-remove]')
+  if (!b) return
+  const i = b.parentElement!.querySelector<HTMLInputElement>('[data-secret]')!
+  i.value = ''; i.dataset.removed = '1'; i.placeholder = 'Removed when you save'; b.hidden = true
+})
 const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTMLTextAreaElement
 const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
@@ -2851,9 +2877,8 @@ async function openSettings() {
     const [s, status, rgStatus] = await Promise.all([
       api.settings.get(), api.lookup.status(), api.tags.replaygainStatus(),
     ])
-    acoustidKeyInput.value    = s.acoustid_api_key
-    lrclibKeyInput.value      = s.lrclib_api_key ?? ''
-    discogsTokenInput.value   = s.discogs_token ?? ''
+    showSecrets(s)
+    lrclibAppIdInput.value    = s.lrclib_app_id ?? ''
     scanExcludeInput.value    = (s.scan_exclude ?? []).join('\n')
     autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
@@ -3042,9 +3067,8 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
   const scanTags: string[] = []
   getScanTagCheckboxes().forEach(cb => { if (cb.checked) scanTags.push(cb.dataset.tag!) })
   const update: Partial<AppSettings> = {
-    acoustid_api_key:  acoustidKeyInput.value.trim(),
-    discogs_token:     discogsTokenInput.value.trim(),
-    lrclib_api_key:    lrclibKeyInput.value.trim(),
+    ...readSecrets(),
+    lrclib_app_id:     lrclibAppIdInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
     stage_changes:     stageChangesInput.checked,
     library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),

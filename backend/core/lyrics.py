@@ -32,9 +32,12 @@ class RateLimited(Exception):
     """LRCLIB kept saying "too many requests": try again later, not "not found"."""
 
 
-def _key() -> str:
+def _auth() -> dict:
+    """The registered app's headers (Settings → Sources), if any."""
     from api.config import _load
-    return _load().lrclib_api_key.strip()
+    s = _load()
+    h = {"Lrclib-App-Id": s.lrclib_app_id.strip(), "Lrclib-Api-Key": s.lrclib_api_key.strip()}
+    return {k: v for k, v in h.items() if v}
 
 
 def _wait_turn(gap: float) -> None:
@@ -56,10 +59,9 @@ def _pause(seconds: float) -> None:
 
 def _get(path: str, params: dict) -> object | None:
     url = f"{API}/{path}?" + urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
-    key = _key()
-    headers = {"User-Agent": _UA}
-    if key:
-        headers["Lrclib-Api-Key"] = key
+    auth = _auth()
+    key = "Lrclib-Api-Key" in auth
+    headers = {"User-Agent": _UA, **auth}
     for attempt in range(RETRIES + 1):
         _wait_turn(GAP_WITH_KEY if key else GAP)
         try:
