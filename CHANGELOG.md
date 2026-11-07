@@ -89,6 +89,9 @@
 - Template variables `{artist_the}`, `{album_artist_the}`, `{album_the}`:
   a leading The/A/An moves to the end ("The Pogues" → "Pogues, The"), as
   Lidarr names folders.
+- The default layout is now `{album_artist_the}/{album_the}/{track_number:02d} {title}`
+  ("Pogues, The/…", as Lidarr names folders). A saved copy of the old default
+  follows it.
 - **Group layouts**: a group can set its own layout. A track uses the first
   set of its group's (one it was put in by hand), its library's, the standard.
 
