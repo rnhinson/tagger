@@ -217,7 +217,7 @@ export const APP_HTML = `
       <nav id="panel-quality" class="sidebar-panel" hidden>
         <div class="nav-toolbar" id="quality-toolbar" hidden>
           <button id="fix-all-btn" class="btn btn-ghost btn-sm" style="flex:1">Fix All</button>
-          <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Keep the highest-quality copy of each duplicate and remove the rest from the library" hidden>Keep best</button>
+          <button id="dedupe-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Review each group: pick the copy to keep, then remove the rest from the library or move their files to the trash (undoable)" hidden>Review duplicates…</button>
           <button id="refile-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Stage moving the selected tracks to the path their library layout gives — reviewed before anything moves" hidden>Re-file selected</button>
           <button id="lyrics-lookup-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Look up lyrics for every track listed (or the selected ones) in the background — what's found is staged for review" hidden>Look up all…</button>
         </div>

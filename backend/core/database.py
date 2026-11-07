@@ -21,6 +21,10 @@ def get_conn() -> sqlite3.Connection:
     # lyrics_skip(path, assigned group): the track's lyrics group is never looked up.
     from core import lyricsgroups
     conn.create_function("lyrics_skip", 2, lyricsgroups.sql_function())
+    # dup_rank(id) / dup_album(directory): duplicate groups (core/duplicates.py).
+    from core import duplicates
+    conn.create_function("dup_rank", 1, duplicates.dup_rank)
+    conn.create_function("dup_album", 1, duplicates.dup_album)
     return conn
 
 
@@ -183,6 +187,14 @@ def init_db() -> None:
                 track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
                 status   TEXT NOT NULL,
                 at       REAL NOT NULL
+            );
+
+            -- Chromaprint fingerprints (fpcalc -raw, first 30 s) for duplicates by
+            -- sound; stale when the file's mtime changes. fp '' = fpcalc failed.
+            CREATE TABLE IF NOT EXISTS fingerprints (
+                track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                mtime    REAL,
+                fp       TEXT NOT NULL
             );
 
             -- Undo stack for staging: what each staging action replaced.

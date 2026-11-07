@@ -124,6 +124,13 @@ export interface Album {
   cover_track_id: number
 }
 
+export interface DuplicateTrack {
+  id: number; title: string | null; artist: string | null; album: string | null; path: string; directory: string
+  format: string; bitrate: number | null; sample_rate: number | null; size: number | null; duration: number | null
+  read_only: boolean
+}
+export interface DuplicateGroup { tracks: DuplicateTrack[] }   // keeper first
+
 export interface AlbumRow {
   album: string; directory: string; tracks: number; expected: number | null; discs: number
   album_artist: string | null; artist: string | null; year: string | null; genre: string | null
@@ -176,7 +183,7 @@ export interface ScanJob {
   directory?: string | null          // null = whole library
   phase?: string | null              // listing | reading | pruning
   changed?: number | null
-  kind?: 'scan' | 'lyrics'
+  kind?: 'scan' | 'lyrics' | 'fingerprint'
 }
 
 export interface About {
@@ -238,6 +245,7 @@ export interface IssueCount {
   missing_genre: number
   missing_track_number: number
   duplicate_tracks: number
+  duplicate_albums: number
   missing_files: number
   not_in_layout: number
   missing_lyrics: number
@@ -410,7 +418,9 @@ export const api = {
     },
     history: (limit = 50) => request<ChangeLogEntry[]>('GET', `/api/library/history?limit=${limit}`),
     undo: (id: number) => request<{ restored: number; kind: string; errors: WriteError[] }>('POST', `/api/library/history/${id}/undo`),
-    dedupeKeepBest: () => request<{ removed: number }>('POST', '/api/library/dedupe/keep-best'),
+    duplicates: () => request<{ total: number; groups: DuplicateGroup[] }>('GET', '/api/library/duplicates'),
+    fingerprints: () => request<{ tracks: number; fingerprinted: number; available: boolean }>('GET', '/api/library/fingerprints'),
+    fingerprintAll: () => request<{ job_id: string | null; tracks: number }>('POST', '/api/library/fingerprints'),
     trashInfo: () => request<{ count: number; bytes: number }>('GET', '/api/library/trash'),
     emptyTrash: () => request<{ removed: number; bytes: number }>('POST', '/api/library/trash/empty'),
   },

@@ -112,6 +112,19 @@
 - Dark inputs throughout; built-in group names readable; hints no longer
   shouted in capitals.
 
+### Duplicates (beartums fork)
+- **Duplicate tracks** match on cleaned-up title + first artist ("The",
+  "feat. X", "(Remastered)", " - 2009 Remaster" ignored) **and lengths within
+  2 s**, so live takes and remixes aren't duplicates; or **by sound** --
+  chromaprint fingerprints from a background *Fingerprint* job (fpcalc, first
+  30 s, resumable), which catches copies whose tags disagree.
+- **Review duplicates…** replaces one-click *Keep best*: each group with its
+  suggested keeper (lossless, then bitrate, sample rate, size) picked; change
+  it, untick a group, then remove the rest from the library or move their
+  files to the trash -- both undoable from History.
+- **Duplicate albums** (Quality): the same cleaned-up album + album artist in
+  more than one folder, shown in the album list.
+
 ### Selection & views (beartums fork)
 - **Lyrics column** (Columns menu): synced / plain / none, sortable.
 - Quality views add their own column right after Title: *Missing lyrics* →

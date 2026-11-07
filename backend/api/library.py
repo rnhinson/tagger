@@ -5,13 +5,13 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from core.database import db
-from core import layout, lyricsgroups, lyricsjob, staging
+from core import duplicates, layout, lyricsgroups, lyricsjob, staging
 from core.multivalue import MULTI_FIELDS, split_values
 from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_change
 
@@ -28,19 +28,10 @@ _ISSUE_CLAUSES: dict[str, str] = {
     "missing_lyrics": lyricsjob.MISSING,
     # Path differs from where its layout puts it (core/layout.py).
     "not_in_layout": f"layout_path({layout.SQL_ARGS}) != path",
-    "duplicate_tracks": (
-        "id IN ("
-        "  SELECT t2.id FROM tracks t2"
-        "  INNER JOIN ("
-        "    SELECT LOWER(title) AS lt, LOWER(artist) AS la"
-        "    FROM tracks"
-        "    WHERE (title IS NOT NULL AND title != '')"
-        "      AND (artist IS NOT NULL AND artist != '')"
-        "    GROUP BY LOWER(title), LOWER(artist)"
-        "    HAVING COUNT(*) > 1"
-        "  ) dups ON LOWER(t2.title) = dups.lt AND LOWER(t2.artist) = dups.la"
-        ")"
-    ),
+    # Same recording more than once / same album in several folders
+    # (core/duplicates.py; refresh() first).
+    "duplicate_tracks": "dup_rank(id) IS NOT NULL",
+    "duplicate_albums": "dup_album(directory) IS NOT NULL",
 }
 
 
@@ -158,6 +149,9 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         clauses.append("album = ?")
         params.append(v.album)
     if v.issue and v.issue in _ISSUE_CLAUSES:
+        if v.issue.startswith("duplicate_"):
+            with db() as conn:
+                duplicates.refresh(conn)
         clauses.append(_ISSUE_CLAUSES[v.issue])
     if v.format:
         clauses.append("format = ?")
@@ -174,8 +168,10 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         blanks = "" if v.sort in ("title", "has_lyrics") else _blank("directory" if v.sort == "source" else v.sort) + ", "
         order = f"ORDER BY {blanks}{col} {direction}, directory, path"
     elif v.issue == "duplicate_tracks":
-        # Group duplicates together so they're visually adjacent
-        order = "ORDER BY LOWER(COALESCE(title,'')), LOWER(COALESCE(artist,'')), path"
+        # Each group together, in the order the duplicates dialog lists them
+        order = "ORDER BY dup_rank(id), path"
+    elif v.issue == "duplicate_albums":
+        order = "ORDER BY dup_album(directory), directory, CAST(disc_number AS INTEGER), CAST(track_number AS INTEGER), filename"
     else:
         # Disc/track numbers are text tags ("10", "2/12"): sort them as numbers.
         order = ("ORDER BY directory, CAST(disc_number AS INTEGER), "
@@ -188,6 +184,7 @@ def _track_filters(v: View) -> tuple[str, list, str]:
 def get_issues():
     """Return per-issue track counts for the quality panel."""
     with db() as conn:
+        duplicates.refresh(conn)
         result = {}
         for key, clause in _ISSUE_CLAUSES.items():
             result[key] = conn.execute(
@@ -223,38 +220,60 @@ def remove_tracks(track_ids: list[int]):
     return {"removed": len(rows)}
 
 
-@router.post("/dedupe/keep-best")
-def dedupe_keep_best():
+@router.get("/duplicates")
+def list_duplicates(limit: int = Query(500, le=5000)):
     """
-    For each set of tracks sharing a title+artist, keep the highest-quality copy
-    (bitrate, then file size) and remove the rest from the library DB. Files are
-    left on disk; the removal is logged so it can be undone.
+    Duplicate track groups for review, each keeper-first (lossless, bitrate,
+    sample rate, size). Removing the rest goes through
+    /remove or /delete-files, so it is undoable like any removal.
     """
     with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM tracks "
-            "WHERE (title IS NOT NULL AND title != '') "
-            "  AND (artist IS NOT NULL AND artist != '')"
-        ).fetchall()
-        groups: dict[tuple[str, str], list] = {}
-        for r in rows:
-            groups.setdefault((r["title"].lower(), r["artist"].lower()), []).append(r)
+        groups = duplicates.compute(conn)
+        ids = [t for g in groups[:limit] for t in g]
+        rows = {r["id"]: dict(r) for r in _rows_chunked(conn, ids)}
+    import os
+    writable: dict[str, bool] = {}
+    out = []
+    for g in groups[:limit]:
+        tracks = []
+        for tid in g:
+            r = rows[tid]
+            d = r["directory"]
+            if d not in writable:
+                writable[d] = os.access(d, os.W_OK)
+            tracks.append({k: r[k] for k in ("id", "title", "artist", "album", "path", "directory", "format",
+                                              "bitrate", "sample_rate", "size", "duration")}
+                          | {"read_only": not writable[d]})
+        out.append({"tracks": tracks})
+    return {"total": len(groups), "groups": out}
 
-        losers = []
-        for members in groups.values():
-            if len(members) < 2:
-                continue
-            ranked = sorted(members, key=lambda r: ((r["bitrate"] or 0), (r["size"] or 0)), reverse=True)
-            losers.extend(ranked[1:])
 
-        if not losers:
-            return {"removed": 0, "kept": 0}
-        snaps = [snapshot(r) for r in losers]
-        ids = [r["id"] for r in losers]
-        placeholders = ",".join("?" * len(ids))
-        conn.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", ids)
-        log_change(conn, "remove", f"Removed {len(ids)} duplicate tracks (kept best quality)", snaps)
-    return {"removed": len(ids)}
+@router.post("/fingerprints")
+def start_fingerprints(background_tasks: BackgroundTasks):
+    """Fingerprint every track not done yet (duplicates by sound), in the background."""
+    from core import fingerprintjob
+    from core.tasks import active_scan, create_scan_job
+    if not fingerprintjob.available():
+        raise HTTPException(400, "fpcalc not found -- install libchromaprint-tools")
+    if active_scan("fingerprint"):
+        raise HTTPException(409, "Fingerprinting is already running")
+    with db() as conn:
+        ids = fingerprintjob.targets(conn)
+    if not ids:
+        return {"job_id": None, "tracks": 0}
+    job_id = create_scan_job(kind="fingerprint")
+    background_tasks.add_task(fingerprintjob.run, job_id, ids)
+    return {"job_id": job_id, "tracks": len(ids)}
+
+
+@router.get("/fingerprints")
+def fingerprint_status():
+    with db() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        done = conn.execute("SELECT COUNT(*) FROM fingerprints f JOIN tracks t ON t.id = f.track_id "
+                            "WHERE f.mtime IS t.mtime").fetchone()[0]
+    from core import fingerprintjob
+    return {"tracks": total, "fingerprinted": done, "available": fingerprintjob.available()}
 
 
 @router.post("/delete-files")
