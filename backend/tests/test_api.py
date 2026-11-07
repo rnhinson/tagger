@@ -7,7 +7,8 @@ def test_settings_roundtrip(client):
     assert "default_music_dir" in s
 
     client.patch("/api/config", json={"discogs_token": "abc123"})
-    assert client.get("/api/config").json()["discogs_token"] == "abc123"
+    s = client.get("/api/config").json()
+    assert s["discogs_token"] == "" and s["secrets_set"]["discogs_token"] is True   # set, never echoed
 
 
 def test_rename_preview_ok_and_error(client):

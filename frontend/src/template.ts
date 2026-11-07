@@ -1,7 +1,9 @@
+import { LOGO_MARK } from './logo'
+
 export const APP_HTML = `
   <header class="topbar">
     <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-    <span class="logo">Tagger</span>
+    <span class="logo">${LOGO_MARK}Tagger</span>
     <div class="search-wrap">
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
     </div>
@@ -28,11 +30,28 @@ export const APP_HTML = `
     <div id="pane-background" class="settings-sidebar-body settings-pane" hidden></div>
     <div id="pane-about" class="settings-sidebar-body settings-pane" hidden></div>
     <div id="pane-settings" class="settings-sidebar-body settings-pane">
+      <nav class="settings-subnav" role="tablist" aria-label="Settings sections">
+        <button type="button" data-sect="libraries" class="active">Libraries</button>
+        <button type="button" data-sect="layouts">Layouts</button>
+        <button type="button" data-sect="groups">Groups</button>
+        <button type="button" data-sect="scanning">Scanning</button>
+        <button type="button" data-sect="sources">Sources</button>
+        <button type="button" data-sect="writing">Writing</button>
+      </nav>
+      <div class="settings-sect" data-sect="libraries">
       <div class="settings-section">
         <div class="settings-section-title">Libraries</div>
-        <p class="settings-hint">With library roots set (below), a full scan covers only the libraries switched on here. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written.</p>
-        <p class="settings-hint"><strong>Check layout</strong>: compare the library with the standard layout (Layout, below) — tracks elsewhere are listed under Quality → <em>Not in layout</em>, to re-file the ones you choose. ✎ gives a library its own layout. Saved with <strong>Save</strong>.</p>
-        <ul id="libraries-list" class="libraries-list"></ul>
+        <p class="settings-hint">A full scan covers the libraries switched on. Switching one off removes its tracks from Tagger (files untouched); switching it on scans it. 🔒 = read-only: shown, never written. <strong>Group</strong>: the group its tracks are in unless put in another (Groups).</p>
+        <table class="settings-table libraries-table"><thead><tr><th>On</th><th>Library</th><th>Tracks</th><th>Group</th></tr></thead>
+          <tbody id="libraries-list"></tbody></table>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Library Roots</div>
+        <p class="settings-hint">Folders layouts are relative to — each file is organized inside the deepest root that contains it, never outside. One per line; <code>*</code> matches each subfolder (e.g. <code>/music/Libraries/*</code>). Empty uses <span id="library-roots-default"></span>.</p>
+        <label class="field-label">Roots
+          <textarea id="setting-library-roots" rows="3" placeholder="/music/Shared&#10;/music/Libraries/*"></textarea>
+        </label>
+        <div id="library-roots-effective" class="settings-hint"></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">Music Directories</div>
@@ -44,32 +63,43 @@ export const APP_HTML = `
           <button id="music-dir-add-btn" class="btn btn-ghost btn-sm">Add</button>
         </div>
       </div>
+      </div>
+      <div class="settings-sect" data-sect="layouts" hidden>
       <div class="settings-section">
-        <div class="settings-section-title">AcoustID</div>
-        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free API key at <span class="settings-link">acoustid.org</span>, then install chromaprint: <code>sudo apt install libchromaprint-tools</code></p>
-        <label class="field-label">API Key
-          <input id="setting-acoustid-key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" />
+        <div class="settings-section-title">Layouts</div>
+        <p class="settings-hint">A track uses the first layout set: <strong>1.</strong> its group's, <strong>2.</strong> its library's, <strong>3.</strong> the standard one. Libraries with <strong>Check</strong> on are compared — tracks elsewhere are listed under Quality → <em>Not in layout</em>, to re-file the ones you choose.</p>
+        <label class="field-label" id="rename-template-wrap">Standard layout
+          <input id="setting-rename-template" type="text" spellcheck="false" />
+          <div id="rename-preview" class="rename-preview"></div>
         </label>
-        <div id="acoustid-status" class="acoustid-status"></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Discogs</div>
-        <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
-        <label class="field-label">Token
-          <input id="setting-discogs-token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" />
+        <p class="settings-hint">Where a file belongs, relative to its library. Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("The Pogues" → "Pogues, The", as Lidarr names folders).</p>
+        <label class="settings-toggle">
+          <input id="setting-rename-on-save" type="checkbox" />
+          <span>Rename files on save — saving a track's tags also plans a move to where its layout puts it</span>
         </label>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">ReplayGain</div>
-        <p class="settings-hint">Scan volume levels and write ReplayGain tags. Requires <code>rsgain</code> or <code>loudgain</code> installed on the server. Run it from the selection toolbar.</p>
-        <div id="replaygain-status" class="acoustid-status"></div>
+        <div class="settings-section-title">Library layouts</div>
+        <table class="settings-table layouts-table"><thead><tr><th>Check</th><th>Library</th><th>Layout <span class="ma-dim">(blank: standard)</span></th></tr></thead>
+          <tbody id="library-layouts-list"></tbody></table>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">Trash</div>
-        <p class="settings-hint">Deleted files are moved to a trash folder and can be restored with Undo. Emptying trash frees that space permanently.</p>
-        <div id="trash-status" class="acoustid-status"></div>
-        <button id="empty-trash-btn" class="btn btn-ghost btn-sm">Empty trash</button>
+        <div class="settings-section-title">Group layouts</div>
+        <p class="settings-hint">For tracks put in the group by hand (<strong>Group…</strong> on a selection). Blank: the library's layout.</p>
+        <table class="settings-table layouts-table"><thead><tr><th>Group</th><th>Layout <span class="ma-dim">(blank: library's)</span></th></tr></thead>
+          <tbody id="group-layouts-list"></tbody></table>
       </div>
+      </div>
+      <div class="settings-sect" data-sect="groups" hidden>
+      <div class="settings-section">
+        <div class="settings-section-title">Groups</div>
+        <p class="settings-hint">A track's group: the one it was put in (<strong>Group…</strong> on a selection), else its library's (Libraries), else Standard. A group sets how lyrics are looked up on LRCLIB — queries tried in order until one finds them; a query with no artist searches by title + album (cast recordings) — and can set a layout (Layouts). <strong>Skip</strong>: never looked up, not counted as missing lyrics.</p>
+        <p class="settings-hint">Variables: {title} {artist} {album} {album_artist} {year}, {title_base} {album_base} (without trailing "(…)", "[…]", "- From …"), {artist_first} {album_artist_first} (the first of several).</p>
+        <div id="lyrics-groups-list" class="lyrics-groups-list"></div>
+        <button type="button" id="lyrics-group-add" class="btn btn-ghost btn-sm">Add group</button>
+      </div>
+      </div>
+      <div class="settings-sect" data-sect="scanning" hidden>
       <div class="settings-section">
         <div class="settings-section-title">Scan Tags</div>
         <p class="settings-hint">Choose which tags are read from audio files during a library scan. Disabled tags will be left empty in the database.</p>
@@ -102,6 +132,44 @@ export const APP_HTML = `
         <div class="scan-now-row"><button type="button" class="btn btn-ghost btn-sm" data-scan-now>Scan library now</button>
           <span class="settings-hint">Progress and Cancel are on the Background tab.</span></div>
       </div>
+      </div>
+      <div class="settings-sect" data-sect="sources" hidden>
+      <p id="secrets-note" class="settings-hint"></p>
+      <div class="settings-section">
+        <div class="settings-section-title">AcoustID</div>
+        <p class="settings-hint">Identifies audio by fingerprint — much more accurate than text search. Get a free application API key at <span class="settings-link">acoustid.org</span>.</p>
+        <label class="field-label">API Key
+          <span class="secret-row"><input id="setting-acoustid-key" data-secret="acoustid_api_key" type="password" autocomplete="off" placeholder="Paste your AcoustID API key…" data-placeholder="Paste your AcoustID API key…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="acoustid" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
+        </label>
+        <div class="source-test-result" data-test-result="acoustid" hidden></div>
+        <div id="acoustid-status" class="acoustid-status"></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Discogs</div>
+        <p class="settings-hint">Optional second metadata source. Supplements MusicBrainz text search with release-level matches. Get a personal-access token from your Discogs account's developer settings.</p>
+        <label class="field-label">Token
+          <span class="secret-row"><input id="setting-discogs-token" data-secret="discogs_token" type="password" autocomplete="off" placeholder="Paste your Discogs token…" data-placeholder="Paste your Discogs token…" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="discogs" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
+        </label>
+        <div class="source-test-result" data-test-result="discogs" hidden></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">LRCLIB (lyrics)</div>
+        <p class="settings-hint">Free, no key needed: about 90 lookups a minute, spaced out automatically. Register an app at <span class="settings-link">lrclib.net/developers</span> (server-side) and paste its app ID and key for a far higher limit.</p>
+        <label class="field-label">App ID
+          <input id="setting-lrclib-app-id" type="text" autocomplete="off" spellcheck="false" placeholder="Optional" />
+        </label>
+        <label class="field-label">API key
+          <span class="secret-row"><input id="setting-lrclib-key" data-secret="lrclib_api_key" type="password" autocomplete="off" placeholder="Optional" data-placeholder="Optional" /><button type="button" class="btn btn-ghost btn-sm" data-secret-remove hidden>Remove</button><button type="button" class="btn btn-ghost btn-sm" data-source-test="lrclib" title="Check it with the service (what you typed, else the saved one)">Test</button></span>
+        </label>
+        <div class="source-test-result" data-test-result="lrclib" hidden></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">ReplayGain</div>
+        <p class="settings-hint">Scan volume levels and write ReplayGain tags, so players that read them play tracks at an even volume. Run it from the selection toolbar.</p>
+        <div id="replaygain-status" class="acoustid-status"></div>
+      </div>
+      </div>
+      <div class="settings-sect" data-sect="writing" hidden>
       <div class="settings-section">
         <div class="settings-section-title">Writing Changes</div>
         <label class="settings-toggle">
@@ -111,32 +179,11 @@ export const APP_HTML = `
         <p class="settings-hint">Edits, organizing and lookups are held as staged changes until you write them from <strong>Review</strong>. Off: each edit is written straight away.</p>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">Library Roots</div>
-        <p class="settings-hint">Folders the rename template is relative to — each file is organized inside the deepest root that contains it, never outside. One per line; <code>*</code> matches each subfolder (e.g. <code>/music/Libraries/*</code>). Empty uses <span id="library-roots-default"></span>.</p>
-        <label class="field-label">Roots
-          <textarea id="setting-library-roots" rows="3" placeholder="/music/Shared&#10;/music/Libraries/*"></textarea>
-        </label>
-        <div id="library-roots-effective" class="settings-hint"></div>
+        <div class="settings-section-title">Trash</div>
+        <p class="settings-hint">Deleted files are moved to a trash folder and can be restored with Undo. Emptying trash frees that space permanently.</p>
+        <div id="trash-status" class="acoustid-status"></div>
+        <button id="empty-trash-btn" class="btn btn-ghost btn-sm">Empty trash</button>
       </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Layout</div>
-        <label class="field-label" id="rename-template-wrap">Standard layout
-          <input id="setting-rename-template" type="text" spellcheck="false" />
-          <span class="settings-hint">Where a file belongs, relative to its library. Variables: {title} {artist} {album} {album_artist} {year} {genre} {track_number:02d} {disc_number}, and {artist_the} {album_artist_the} {album_the} ("The Pogues" → "Pogues, The", as Lidarr names folders) — e.g. <code>{album_artist_the}/{album_the}/{track_number:02d} {title}</code> (the default). A library with its own layout (✎ under Libraries) uses that instead.</span>
-          <div id="rename-preview" class="rename-preview"></div>
-        </label>
-        <label class="settings-toggle">
-          <input id="setting-rename-on-save" type="checkbox" />
-          <span>Rename files on save</span>
-        </label>
-        <p class="settings-hint">Saving a track's tags also plans a move to where its layout puts it, inside its library.</p>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Lyrics groups</div>
-        <p class="settings-hint">How a track's lyrics are looked up on LRCLIB: queries tried in order until one finds them. A query with no artist searches by title + album (cast recordings). <strong>Skip</strong> groups are never looked up and don't count as missing lyrics. A track's group: the one it was put in (<strong>Lyrics group…</strong> on a selection), else its library's (Libraries, above), else Standard.
-          Variables: {title} {artist} {album} {album_artist} {year}, {title_base} {album_base} (without trailing "(…)", "[…]", "- From …"), {artist_first} {album_artist_first} (the first of several).</p>
-        <div id="lyrics-groups-list" class="lyrics-groups-list"></div>
-        <button type="button" id="lyrics-group-add" class="btn btn-ghost btn-sm">Add group</button>
       </div>
     </div>
     <div class="settings-sidebar-footer" id="settings-footer">
@@ -221,7 +268,7 @@ export const APP_HTML = `
         <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
         <button id="mb-album-btn" class="btn btn-ghost btn-sm" title="Match the selected tracks to a MusicBrainz release, track by track — reviewed, then staged">Match album…</button>
         <button id="lyrics-btn" class="btn btn-ghost btn-sm" title="Fetch lyrics (synced when available) from LRCLIB — reviewed, then staged">Lyrics…</button>
-        <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a lyrics group: how its lyrics are looked up, or No lyrics">Lyrics group…</button>
+        <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a group: how its lyrics are looked up (or No lyrics), and its layout">Group…</button>
         <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
         <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
         <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>

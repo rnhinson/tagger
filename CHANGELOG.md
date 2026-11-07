@@ -92,6 +92,25 @@
 - The default layout is now `{album_artist_the}/{album_the}/{track_number:02d} {title}`
   ("Pogues, The/…", as Lidarr names folders). A saved copy of the old default
   follows it.
+- **Group layouts**: a group can set its own layout. A track uses the first
+  set of its group's (one it was put in by hand), its library's, the standard.
+
+### Settings (beartums fork)
+- Split into sections: Libraries · Layouts · Groups · Scanning · Sources ·
+  Writing. Every layout (standard, per library with its Check, per group) is
+  under Layouts; libraries are a table (on/off, tracks, group).
+- **API keys and tokens encrypted at rest** (AcoustID, Discogs, LRCLIB) in
+  settings.json with `TAGGER_SECRET_KEY` (a Fernet key; keep it in a
+  Kubernetes Secret, not the config volume). Plain values already saved are
+  encrypted at startup. The API never returns them — Settings shows "Saved",
+  with Replace / Remove. Without the variable, storage stays plain text.
+- **Test** beside each key/token (AcoustID, Discogs, LRCLIB): checks what
+  you typed, else the saved one, with the service. Install hints for
+  chromaprint / rsgain appear only when the tool is missing.
+- **Logo**: the braces + tag lines + waveform mark in the header, the
+  browser tab (favicon, light/dark) and About. No wordmark yet.
+- Dark inputs throughout; built-in group names readable; hints no longer
+  shouted in capitals.
 
 ### Lyrics (beartums fork)
 - **Quality → Missing lyrics** lists tracks with no lyrics, with each one's
@@ -110,6 +129,13 @@
 - **Search…** (editor, and per row in Lyrics…): search LRCLIB by hand from
   the group's queries, your own fields or free text; every hit with album,
   length (± against the track) and synced/plain, readable before you use it.
+- LRCLIB's rate limit is respected: requests are spaced out (~80/min), a 429
+  waits its Retry-After and retries, and a lookup that's still refused stops
+  with what it found staged instead of recording tracks as "not found".
+  Optional **LRCLIB app ID + API key** (Settings → Sources) for a registered app's
+  far higher limit.
+- "Lyrics groups" are now **Groups** (they carry a layout too);
+  **Group…** on a selection.
 
 ### Audio quality
 - Per-file **spectrogram** in the tag editor, rendered on demand by ffmpeg and

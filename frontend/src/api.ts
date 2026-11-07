@@ -146,6 +146,10 @@ export interface AppSettings {
   library_templates: Record<string, string>
   lyrics_groups: LyricsGroup[]
   library_lyrics_groups: Record<string, string>
+  lrclib_api_key: string
+  lrclib_app_id: string
+  secrets_set?: Record<string, boolean>   // keys/tokens are never sent back, only whether set
+  secrets_encrypted?: boolean
   default_music_dir?: string
   env_library_roots?: string[]
   effective_library_roots?: string[]
@@ -270,7 +274,7 @@ export interface LyricsItem {
 }
 
 export interface LyricsQuery { title: string; artist: string; album: string }
-export interface LyricsGroup { id: string; name: string; skip: boolean; queries: LyricsQuery[]; assigned?: number }
+export interface LyricsGroup { id: string; name: string; skip: boolean; queries: LyricsQuery[]; layout?: string; assigned?: number }
 export interface LyricsHit {
   id: number; title: string; artist: string; album: string | null; duration: number | null
   synced: string | null; plain: string | null; instrumental: boolean
@@ -490,6 +494,8 @@ export const api = {
   settings: {
     get: () => request<AppSettings>('GET', '/api/config'),
     libraries: () => request<LibraryInfo[]>('GET', '/api/config/libraries'),
+    testSource: (source: string, value: string, app_id?: string) =>
+      request<{ ok: boolean; message: string }>('POST', `/api/config/test/${source}`, { value, app_id }),
     setLibrary: (path: string, active: boolean) =>
       request<{ active: boolean; removed?: number; job_id?: string | null }>('POST', '/api/config/libraries', { path, active }),
     update: (s: Partial<AppSettings>) => request<AppSettings>('PATCH', '/api/config', s),
@@ -531,7 +537,7 @@ export const api = {
     releases: (mbTrackId: string) =>
       request<MbRelease[]>('GET', `/api/lookup/releases/${encodeURIComponent(mbTrackId)}`),
     status: () =>
-      request<{ acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
+      request<{ fpcalc_installed: boolean; acoustid_configured: boolean; fpcalc_available: boolean; method: string }>(
         'GET', '/api/lookup/status'
       ),
     applyCover: (trackId: number, mbAlbumId: string) =>

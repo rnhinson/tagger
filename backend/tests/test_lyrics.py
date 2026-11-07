@@ -119,3 +119,47 @@ def test_search_returns_every_hit(client, monkeypatch):
                      "synced": SYNCED, "plain": "p", "instrumental": False}]
     assert seen == {"q": "", "track_name": "My Shot", "artist_name": "", "album_name": "Hamilton"}
     assert client.post("/api/lyrics/search", json={}).status_code == 400
+
+
+class _Resp:
+    def __init__(self, body): self.body = body
+    def read(self): return self.body
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_rate_limit_waits_retry_after_and_sends_the_key(client, monkeypatch):
+    import urllib.error
+    from email.message import Message
+    calls, paused = [], []
+    def fake_open(req, timeout):
+        calls.append((req.get_header("Lrclib-app-id"), req.get_header("Lrclib-api-key")))
+        if len(calls) == 1:
+            h = Message(); h["Retry-After"] = "2"
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", h, None)
+        return _Resp(b"[]")
+    monkeypatch.setattr(lrclib.urllib.request, "urlopen", fake_open)
+    monkeypatch.setattr(lrclib, "_wait_turn", lambda gap: None)
+    monkeypatch.setattr(lrclib, "_pause", paused.append)
+    client.patch("/api/config", json={"lrclib_api_key": "k1", "lrclib_app_id": "app1"})
+    assert lrclib._get("search", {"q": "x"}) == []
+    assert calls == [("app1", "k1"), ("app1", "k1")] and paused == [2.0]
+
+    def always_429(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", Message(), None)
+    monkeypatch.setattr(lrclib.urllib.request, "urlopen", always_429)
+    import pytest
+    with pytest.raises(lrclib.RateLimited):
+        lrclib._get("search", {"q": "x"})
+
+
+def test_background_lookup_stops_on_the_rate_limit(client, lib, monkeypatch):
+    def limited(*a):
+        raise lrclib.RateLimited("LRCLIB: too many requests (429)")
+    monkeypatch.setattr(lrclib, "fetch", limited)
+    _insert(lib / "Shared" / "C" / "1.mp3", title="One", artist="X")
+    r = client.post("/api/lyrics/lookup", json={}).json()
+    job = client.get(f"/api/jobs/{r['job_id']}").json()
+    assert job["status"] == "error" and "rate limit" in job["error"]
+    assert client.get("/api/library/tracks").json()["tracks"][0]["lyrics_lookup"] is None   # not recorded
+    assert client.post("/api/lyrics/lookup", json={}).json()["tracks"] == 1

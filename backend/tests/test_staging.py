@@ -560,3 +560,18 @@ def test_the_old_default_layout_follows_the_new_one(client):
     assert client.get("/api/config").json()["rename_template"].startswith("{album_artist_the}/{album_the}/")
     client.patch("/api/config", json={"rename_template": "{album}/{title}"})        # a real choice stays
     assert client.get("/api/config").json()["rename_template"] == "{album}/{title}"
+
+
+def test_group_layout_beats_library_and_standard(client, lib):
+    shared = lib / "Shared"
+    client.patch("/api/config", json={"rename_template": "{album}/{title}", "layout_libraries": [str(shared)],
+                                      "library_templates": {str(shared): "{artist}/{title}"},
+                                      "lyrics_groups": [{"id": "cast", "name": "Cast album", "layout": "Cast/{album}/{title}"}]})
+    a = _insert(shared / "loose1.mp3", title="T", artist="X", album="A")
+    b = _insert(shared / "loose2.mp3", title="U", artist="X", album="A")
+    client.post("/api/lyrics/assign", json={"track_ids": [a], "group_id": "cast"})
+    by = {t["id"]: t["layout_path"] for t in client.get("/api/library/tracks", params={"issue": "not_in_layout"}).json()["tracks"]}
+    assert by == {a: str(shared / "Cast" / "A" / "T.mp3"), b: str(shared / "X" / "U.mp3")}
+    bad = {"id": "", "name": "Live", "layout": "{nope}"}
+    r = client.patch("/api/config", json={"lyrics_groups": [bad]})
+    assert r.status_code == 400 and "group Live" in r.json()["detail"]

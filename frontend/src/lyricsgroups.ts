@@ -1,5 +1,6 @@
-// Lyrics groups: the editor in Settings (name, Skip, queries tried in order)
-// and "Lyrics group…" for a selection. Backend: core/lyricsgroups.py.
+// Groups: the editor in Settings → Groups (name, Skip, lyrics queries tried
+// in order), their layouts in Settings → Layouts, and "Group…" for a
+// selection. Backend: core/lyricsgroups.py, core/layout.py.
 import { api, LyricsGroup, LyricsQuery } from './api'
 import { toast } from './toast'
 import { esc } from './util'
@@ -17,7 +18,7 @@ function queryRow(q: LyricsQuery): string {
 function groupCard(g: LyricsGroup): string {
   return `<div class="lyrics-group" data-id="${esc(g.id)}">
     <div class="lyrics-group-head">
-      <input type="text" class="lyrics-group-name" value="${esc(g.name)}" placeholder="Group name" ${BUILT_IN.has(g.id) ? 'readonly' : ''} />
+      <input type="text" class="lyrics-group-name" value="${esc(g.name)}" placeholder="Group name" ${BUILT_IN.has(g.id) ? 'readonly title="Built in"' : ''} />
       <label class="settings-toggle"><input type="checkbox" data-skip ${g.skip ? 'checked' : ''} ${g.id === 'none' ? 'disabled' : ''} /><span>Skip</span></label>
       ${g.assigned ? `<span class="ma-dim">${g.assigned.toLocaleString()} tracks</span>` : ''}
       ${BUILT_IN.has(g.id) ? '' : '<button type="button" class="btn btn-ghost btn-sm" data-group-remove title="Delete this group (its tracks go back to their library\'s group)">Delete</button>'}
@@ -27,17 +28,35 @@ function groupCard(g: LyricsGroup): string {
   </div>`
 }
 
-export async function renderLyricsGroups(el: HTMLElement) {
-  try {
-    el.innerHTML = (await api.lyrics.groups()).map(groupCard).join('')
-  } catch (e) { el.innerHTML = `<div class="settings-hint">Failed to load lyrics groups: ${esc(errText(e))}</div>` }
+export function renderLyricsGroups(el: HTMLElement, groups: LyricsGroup[]) {
+  el.innerHTML = groups.map(groupCard).join('')
 }
 
-export function wireLyricsGroups(el: HTMLElement, addBtn: HTMLElement) {
+function layoutRow(g: LyricsGroup, i: number): string {
+  return `<tr data-group-layout="${i}"><td class="group-layout-name">${esc(g.name) || '<span class="ma-dim">(new group)</span>'}</td>
+    <td><input type="text" spellcheck="false" data-layout-input value="${esc(g.layout ?? '')}" placeholder="library's layout" /></td></tr>`
+}
+
+/** Settings → Layouts: one row per group card, in the same order. */
+export function renderGroupLayouts(layoutsEl: HTMLElement, groups: LyricsGroup[]) {
+  layoutsEl.innerHTML = groups.map(layoutRow).join('')
+}
+
+export function wireLyricsGroups(el: HTMLElement, addBtn: HTMLElement, layoutsEl: HTMLElement) {
+  // Layout rows follow the cards by position: added, renamed and deleted with them.
+  const rows = () => [...layoutsEl.querySelectorAll<HTMLElement>('[data-group-layout]')]
+  const cards = () => [...el.querySelectorAll<HTMLElement>('.lyrics-group')]
   addBtn.addEventListener('click', () => {
     el.insertAdjacentHTML('beforeend', groupCard({ id: '', name: '', skip: false,
       queries: [{ title: '{title_base}', artist: '{artist_first}', album: '' }] }))
+    layoutsEl.insertAdjacentHTML('beforeend', layoutRow({ id: '', name: '', skip: false, queries: [] }, rows().length))
     el.querySelector<HTMLInputElement>('.lyrics-group:last-child .lyrics-group-name')!.focus()
+  })
+  el.addEventListener('input', (e) => {
+    const name = (e.target as HTMLElement).closest<HTMLInputElement>('.lyrics-group-name')
+    if (!name) return
+    const row = rows()[cards().indexOf(name.closest('.lyrics-group')!)]
+    if (row) row.querySelector('.group-layout-name')!.innerHTML = esc(name.value.trim()) || '<span class="ma-dim">(new group)</span>'
   })
   el.addEventListener('click', (e) => {
     const t = e.target as HTMLElement
@@ -45,7 +64,7 @@ export function wireLyricsGroups(el: HTMLElement, addBtn: HTMLElement) {
     if (!card) return
     if (t.closest('[data-q-add]')) t.closest('[data-q-add]')!.insertAdjacentHTML('beforebegin', queryRow({ title: '{title}', artist: '', album: '' }))
     else if (t.closest('[data-q-remove]')) t.closest('.lyrics-query')!.remove()
-    else if (t.closest('[data-group-remove]')) card.remove()
+    else if (t.closest('[data-group-remove]')) { rows()[cards().indexOf(card)]?.remove(); card.remove() }
   })
   el.addEventListener('change', (e) => {
     const cb = e.target as HTMLInputElement
@@ -53,11 +72,12 @@ export function wireLyricsGroups(el: HTMLElement, addBtn: HTMLElement) {
   })
 }
 
-/** The groups as edited, or null when the list never loaded (leave them as they are). */
-export function readLyricsGroups(el: HTMLElement): LyricsGroup[] | null {
+/** The groups as edited, with their layouts, or null when the list never loaded (leave them as they are). */
+export function readLyricsGroups(el: HTMLElement, layoutsEl: HTMLElement): LyricsGroup[] | null {
   const cards = [...el.querySelectorAll<HTMLElement>('.lyrics-group')]
   if (!cards.length) return null
-  return cards.map(c => ({
+  const layouts = [...layoutsEl.querySelectorAll<HTMLInputElement>('[data-group-layout] [data-layout-input]')].map(i => i.value.trim())
+  return cards.map((c, i) => ({
     id: c.dataset.id ?? '',
     name: c.querySelector<HTMLInputElement>('.lyrics-group-name')!.value.trim(),
     skip: c.querySelector<HTMLInputElement>('[data-skip]')!.checked,
@@ -65,14 +85,15 @@ export function readLyricsGroups(el: HTMLElement): LyricsGroup[] | null {
       const v = (k: string) => r.querySelector<HTMLInputElement>(`[data-q="${k}"]`)!.value.trim()
       return { title: v('title'), artist: v('artist'), album: v('album') }
     }).filter(q => q.title),
+    layout: layouts[i] ?? '',
   }))
 }
 
 /** A library's default group, as a <select> for its row under Libraries. */
 export function libraryGroupSelect(groups: LyricsGroup[], path: string, current: string): string {
-  return `<label class="library-lyrics">Lyrics <select data-lyrics-path="${esc(path)}">
+  return `<select data-lyrics-path="${esc(path)}" aria-label="Group">
     ${groups.map(g => `<option value="${g.id === 'standard' ? '' : esc(g.id)}" ${(current || 'standard') === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}
-  </select></label>`
+  </select>`
 }
 
 /** "Lyrics group…": put the selection in a group, or back to its library's. */
@@ -84,7 +105,7 @@ export async function openAssignGroup(ids: number[], onDone: () => Promise<void>
   const n = `${ids.length.toLocaleString()} track${ids.length !== 1 ? 's' : ''}`
   overlay.innerHTML = `
     <div class="modal-card">
-      <div class="modal-title">Lyrics group for ${n}</div>
+      <div class="modal-title">Group for ${n}</div>
       <div class="lyrics-assign">
         <label class="settings-toggle"><input type="radio" name="lg" value="" checked /><span>Library's group <span class="ma-dim">(as set under Settings → Libraries)</span></span></label>
         ${groups.map(g => `<label class="settings-toggle"><input type="radio" name="lg" value="${esc(g.id)}" /><span>${esc(g.name)}${g.skip ? ' <span class="ma-dim">— never looked up, not "missing"</span>' : ''}</span></label>`).join('')}
