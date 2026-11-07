@@ -12,13 +12,14 @@ import logging
 import time
 
 from core import lyricsgroups, staging
+from core.lyrics import RateLimited
 from core.database import db
 from core.tasks import _CANCEL, _update_job
 
 logger = logging.getLogger("tagger.lyrics")
 
 BATCH = 100        # tracks per staging step
-PARALLEL = 4       # LRCLIB requests at once
+PARALLEL = 4       # tracks at once; core/lyrics.py spaces out the requests
 
 MISSING = ("(lyrics IS NULL OR trim(lyrics) = '') AND NOT lyrics_skip(path, "
            "(SELECT group_id FROM lyrics_members WHERE track_id = tracks.id))")
@@ -60,6 +61,8 @@ async def run(job_id: str, ids: list[int], prefer: str = "synced", instrumental_
         async with sem:
             try:
                 return await asyncio.to_thread(lyricsgroups.look_up, row, group, prefer)
+            except RateLimited as e:
+                return {"status": "later", "lyrics": None, "query": None, "error": str(e)}
             except Exception as e:  # noqa: BLE001 -- one track's failure isn't the run's
                 return {"status": "error", "lyrics": None, "query": None, "error": str(e)}
 
@@ -78,6 +81,8 @@ async def run(job_id: str, ids: list[int], prefer: str = "synced", instrumental_
             with db() as conn:
                 hits = [(r, res) for r, res in zip(rows, results) if res["lyrics"]]
                 for r, res in zip(rows, results):
+                    if res["status"] == "later":
+                        continue          # not looked up: next run tries it
                     lyricsgroups.record(conn, r["id"], res["status"], now)
                     if res["status"] == "instrumental" and instrumental_to_none:
                         lyricsgroups.assign(conn, [r["id"]], lyricsgroups.NONE)
@@ -89,6 +94,14 @@ async def run(job_id: str, ids: list[int], prefer: str = "synced", instrumental_
             found += len(hits)
             done += len(chunk)
             _update_job(job_id, scanned=done, changed=found)
+            if any(res["status"] == "later" for res in results):
+                # LRCLIB still refusing after waiting as asked: stop rather than
+                # risk a ban. What was found is staged; a new run picks up the rest.
+                _update_job(job_id, status="error", phase=None, finished_at=time.time(),
+                            error=f"LRCLIB rate limit: stopped after {done} tracks ({found} found). Try again later, "
+                                  "or add an LRCLIB API key in Settings → Sources.")
+                logger.warning("lyrics lookup %s stopped by the rate limit after %d", job_id, done)
+                return
         _update_job(job_id, status="done", phase=None, finished_at=time.time(), scanned=done, changed=found)
         logger.info("lyrics lookup %s done: %d of %d found", job_id, found, done)
     except Exception as exc:

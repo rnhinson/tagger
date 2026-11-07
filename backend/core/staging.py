@@ -366,8 +366,7 @@ def stage_edit(conn, row, tags: dict, step: Step | None = None) -> None:
         entry = load(conn, [row["id"]]).get(row["id"])
         roots = get_library_roots()
         try:
-            dest = plan_path(row, effective(row, entry),
-                             template_for(row["path"], roots, app.rename_template), roots)
+            dest = plan_path(row, effective(row, entry), template_for(conn, row), roots)
         except PlanError:
             return  # leave the file where it is
         stage(conn, row, new_path=dest, step=step)
