@@ -129,6 +129,7 @@ export interface AlbumRow {
   album_artist: string | null; artist: string | null; year: string | null; genre: string | null
   format: string | null; bitrate: number | null; cover_track_id: number; mixed: string[]
   values: Record<string, string[]>     // distinct values of each mixed field, most common first
+  ids: number[]                        // its tracks (none when read-only)
 }
 
 export interface AppSettings {
@@ -512,6 +513,8 @@ export const api = {
     groups: () => request<LyricsGroup[]>('GET', '/api/lyrics/groups'),
     assign: (trackIds: number[], groupId: string | null) =>
       request<{ assigned: number }>('POST', '/api/lyrics/assign', { track_ids: trackIds, group_id: groupId }),
+    assigned: (trackIds: number[]) =>
+      request<{ group_id: string | null }>('POST', '/api/lyrics/assigned', { track_ids: trackIds }),
     plan: (trackId: number) => request<LyricsPlan>('GET', `/api/lyrics/plan/${trackId}`),
     search: (q: { title?: string; artist?: string; album?: string; q?: string }) =>
       request<{ hits: LyricsHit[] }>('POST', '/api/lyrics/search', q),

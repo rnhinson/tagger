@@ -163,3 +163,19 @@ def test_background_lookup_stops_on_the_rate_limit(client, lib, monkeypatch):
     assert job["status"] == "error" and "rate limit" in job["error"]
     assert client.get("/api/library/tracks").json()["tracks"][0]["lyrics_lookup"] is None   # not recorded
     assert client.post("/api/lyrics/lookup", json={}).json()["tracks"] == 1
+
+
+def test_assigned_is_the_shared_group_or_null(client, lib):
+    a, b = (_insert(lib / "Shared" / f"{n}.mp3") for n in "ab")
+    assert client.post("/api/lyrics/assigned", json={"track_ids": [a, b]}).json() == {"group_id": ""}
+    client.post("/api/lyrics/assign", json={"track_ids": [a], "group_id": "cast"})
+    assert client.post("/api/lyrics/assigned", json={"track_ids": [a]}).json() == {"group_id": "cast"}
+    assert client.post("/api/lyrics/assigned", json={"track_ids": [a, b]}).json() == {"group_id": None}
+
+
+def test_has_lyrics_sorts_none_plain_synced(client, lib):
+    ids = [_insert(lib / "Shared" / "s.mp3", lyrics="[00:01.00] la"),
+           _insert(lib / "Shared" / "n.mp3"),
+           _insert(lib / "Shared" / "p.mp3", lyrics="la la")]
+    got = client.get("/api/library/track-ids", params={"sort": "has_lyrics"}).json()["ids"]
+    assert got == [ids[1], ids[2], ids[0]]

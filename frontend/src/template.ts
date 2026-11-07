@@ -262,18 +262,25 @@ export const APP_HTML = `
       <div id="bulk-actions" class="bulk-actions" hidden>
         <span id="selection-count" class="selection-count"></span>
         <button id="select-view-btn" class="btn btn-link btn-sm" hidden></button>
-        <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
-        <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
-        <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
-        <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
-        <button id="mb-album-btn" class="btn btn-ghost btn-sm" title="Match the selected tracks to a MusicBrainz release, track by track — reviewed, then staged">Match album…</button>
-        <button id="lyrics-btn" class="btn btn-ghost btn-sm" title="Fetch lyrics (synced when available) from LRCLIB — reviewed, then staged">Lyrics…</button>
-        <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a group: how its lyrics are looked up (or No lyrics), and its layout">Group…</button>
-        <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
-        <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
-        <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
-        <button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
-        <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
+        <span class="bulk-group"><span class="bulk-group-label">Tags</span>
+          <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
+          <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
+          <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
+          <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
+        </span>
+        <span class="bulk-group"><span class="bulk-group-label">Look up</span>
+          <button id="mb-album-btn" class="btn btn-ghost btn-sm" title="Match the selected tracks to a MusicBrainz release, track by track — reviewed, then staged">Match album…</button>
+          <button id="lyrics-btn" class="btn btn-ghost btn-sm" title="Fetch lyrics (synced when available) from LRCLIB — reviewed, then staged">Lyrics…</button>
+          <button id="replaygain-btn" class="btn btn-ghost btn-sm" title="Scan ReplayGain for the selection" hidden>ReplayGain</button>
+        </span>
+        <span class="bulk-group"><span class="bulk-group-label">Files</span>
+          <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a group: how its lyrics are looked up (or No lyrics), and its layout">Group…</button>
+          <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
+          <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
+        </span>
+        <span class="bulk-group bulk-danger"><button id="remove-tracks-btn" class="btn btn-danger btn-sm" title="Remove from the library index (leaves files on disk)">Remove from library</button>
+          <button id="delete-files-btn" class="btn btn-danger btn-sm" title="Move the selected files to trash (undoable)">Delete files</button>
+        </span>
         <button id="clear-selection" class="btn btn-ghost btn-sm">✕ Deselect</button>
       </div>
       <div class="table-wrap">

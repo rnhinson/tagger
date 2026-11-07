@@ -575,3 +575,73 @@ def test_group_layout_beats_library_and_standard(client, lib):
     bad = {"id": "", "name": "Live", "layout": "{nope}"}
     r = client.patch("/api/config", json={"lyrics_groups": [bad]})
     assert r.status_code == 400 and "group Live" in r.json()["detail"]
+
+
+@needs_ffmpeg
+def test_cover_art_left_in_an_emptied_folder_follows_or_goes_to_trash(client, lib):
+    old = lib / "Shared" / "old"
+    src = _mp3(old / "x.mp3")
+    (old / "cover.jpg").write_bytes(b"c")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    cid = client.post("/api/staged/apply", json={}).json()["change_id"]
+    new = lib / "Shared" / "A" / "Al"
+    assert (new / "cover.jpg").read_bytes() == b"c" and not old.exists()   # followed; folder pruned
+
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["errors"] == [] and (old / "cover.jpg").exists() and src.exists()
+    assert not (lib / "Shared" / "A").exists()
+
+    (new).mkdir(parents=True)
+    (new / "cover.jpg").write_bytes(b"theirs")                            # the destination has its own
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    client.post("/api/staged/apply", json={})
+    assert (new / "cover.jpg").read_bytes() == b"theirs" and not old.exists()
+    assert [p.name.endswith("_cover.jpg") for p in (settings.config_dir / "trash").iterdir()] == [True]
+
+
+@needs_ffmpeg
+def test_a_folder_with_more_than_images_keeps_them(client, lib):
+    old = lib / "Shared" / "old"
+    src = _mp3(old / "x.mp3")
+    (old / "cover.jpg").write_bytes(b"c")
+    (old / "rip.log").write_text("eac")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    client.post("/api/staged/apply", json={})
+    assert (old / "cover.jpg").exists() and (old / "rip.log").exists()
+
+
+@needs_ffmpeg
+def test_cover_art_left_in_an_emptied_folder_follows_or_goes_to_trash(client, lib):
+    old = lib / "Shared" / "old"
+    src = _mp3(old / "x.mp3")
+    (old / "cover.jpg").write_bytes(b"c")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    cid = client.post("/api/staged/apply", json={}).json()["change_id"]
+    new = lib / "Shared" / "A" / "Al"
+    assert (new / "cover.jpg").read_bytes() == b"c" and not old.exists()   # followed; folder pruned
+
+    res = client.post(f"/api/library/history/{cid}/undo").json()
+    assert res["errors"] == [] and (old / "cover.jpg").exists() and src.exists()
+    assert not (lib / "Shared" / "A").exists()
+
+    new.mkdir(parents=True)
+    (new / "cover.jpg").write_bytes(b"theirs")                            # the destination has its own
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    client.post("/api/staged/apply", json={})
+    assert (new / "cover.jpg").read_bytes() == b"theirs" and not old.exists()
+    assert [p.name.endswith("_cover.jpg") for p in (settings.config_dir / "trash").iterdir()] == [True]
+
+
+@needs_ffmpeg
+def test_a_folder_with_more_than_images_keeps_them(client, lib):
+    old = lib / "Shared" / "old"
+    src = _mp3(old / "x.mp3")
+    (old / "cover.jpg").write_bytes(b"c")
+    (old / "rip.log").write_text("eac")
+    tid = _insert(src, title="T", album="Al", album_artist="A", track_number="1")
+    client.post("/api/tags/reorganize", json={"track_ids": [tid]})
+    client.post("/api/staged/apply", json={})
+    assert (old / "cover.jpg").exists() and (old / "rip.log").exists()

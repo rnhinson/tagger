@@ -46,15 +46,17 @@ def snapshot(row) -> dict:
 
 
 def log_change(conn, kind: str, summary: str, snapshots: list[dict],
-               dirs: list[dict] | None = None) -> int | None:
+               dirs: list[dict] | None = None, files: list[dict] | None = None) -> int | None:
     """
     Record an undoable change within the caller's transaction. Returns its id.
     `dirs` are whole-folder moves ({src, dst}) made by the change; undo moves
-    each folder back in one piece before restoring the tracks.
+    each folder back in one piece before restoring the tracks. `files` are
+    other files it moved ({src, dst}: cover art out of emptied folders),
+    moved back after the tracks.
     """
     if not snapshots and not dirs:
         return None
-    data = {"tracks": snapshots, **({"dirs": dirs} if dirs else {})}
+    data = {"tracks": snapshots, **({"dirs": dirs} if dirs else {}), **({"files": files} if files else {})}
     cur = conn.execute(
         "INSERT INTO change_log (ts, kind, summary, data, undone) VALUES (?, ?, ?, ?, 0)",
         (time.time(), kind, summary, json.dumps(data)),
@@ -89,6 +91,7 @@ def undo_change(conn, change_id: int) -> dict:
     if row["kind"] == "tag_edit":
         _undo_dir_moves(conn, payload.get("dirs", []), errors)
         restored = _undo_tag_edits(conn, tracks, errors)
+        _undo_file_moves(payload.get("files", []), errors)
     elif row["kind"] == "remove":
         restored = _undo_removes(conn, tracks)
     elif row["kind"] == "delete_files":
@@ -140,6 +143,26 @@ def _undo_dir_moves(conn, dirs: list[dict], errors: list[dict]) -> None:
         conn.commit()
         roots = roots or get_library_roots()
         prune_empty_dirs(Path(dst).parent, root_for(dst, roots) or settings.music_dir)
+
+
+def _undo_file_moves(files: list[dict], errors: list[dict]) -> None:
+    from api.config import get_library_roots
+
+    roots = get_library_roots() if files else []
+    for f in files:
+        src, dst = Path(f["src"]), Path(f["dst"])
+        if src.exists():
+            continue  # already back
+        if not dst.exists():
+            errors.append({"name": src.name, "error": f"file missing: {dst}"})
+            continue
+        try:
+            move_file(dst, src)
+        except (MoveError, OSError) as exc:
+            errors.append({"name": src.name, "error": f"move back failed: {exc}"})
+            continue
+        if dst.parent != settings.config_dir / "trash":
+            prune_empty_dirs(dst.parent, root_for(dst, roots) or settings.music_dir)
 
 
 def _undo_tag_edits(conn, snapshots: list[dict], errors: list[dict]) -> int:

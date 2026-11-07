@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -104,6 +105,8 @@ _SORT = {
     **{c: f"CAST({c} AS INTEGER)" for c in ("year", "track_number", "disc_number", "bpm")},
     **{c: c for c in ("bitrate", "sample_rate", "channels", "duration")},
     "source": "directory COLLATE NOCASE",
+    # none < plain < synced ("[mm:ss" timestamps)
+    "has_lyrics": f"CASE WHEN {_blank('lyrics')} THEN 0 WHEN lyrics GLOB '*[[][0-9][0-9]:[0-9][0-9]*' THEN 2 ELSE 1 END",
 }
 
 
@@ -168,7 +171,7 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         direction = "DESC" if v.sort_dir == "desc" else "ASC"
         # Blanks last either way (title never is: it falls back to the file
         # name), then a stable tiebreak.
-        blanks = "" if v.sort == "title" else _blank("directory" if v.sort == "source" else v.sort) + ", "
+        blanks = "" if v.sort in ("title", "has_lyrics") else _blank("directory" if v.sort == "source" else v.sort) + ", "
         order = f"ORDER BY {blanks}{col} {direction}, directory, path"
     elif v.issue == "duplicate_tracks":
         # Group duplicates together so they're visually adjacent
@@ -563,7 +566,9 @@ def album_list(view: View = Depends()):
     out = []
     for (directory, album), tracks in groups.items():
         row: dict = {"album": album, "directory": directory, "tracks": len(tracks),
-                     "cover_track_id": min(t["id"] for t in tracks), "mixed": [], "values": {}}
+                     "cover_track_id": min(t["id"] for t in tracks), "mixed": [], "values": {},
+                     # for multi-select; none when read-only (never bulk-selected)
+                     "ids": [t["id"] for t in tracks] if os.access(directory, os.W_OK) else []}
         for f in fields:
             counts: dict[str, int] = {}
             for t in tracks:

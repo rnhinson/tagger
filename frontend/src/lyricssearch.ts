@@ -21,9 +21,9 @@ export async function openLyricsSearch(trackId: number, onChosen?: (text: string
         <span class="fix-confirm-title">Search lyrics · ${esc(t.title ?? '')} <span class="ma-dim">· ${esc(t.artist ?? '')} · ${esc(t.album ?? '')} · ${fmtDuration(t.duration)}</span></span>
         <button class="btn btn-ghost btn-icon fix-confirm-close" aria-label="Close">✕</button>
       </div>
-      <div class="pr-controls">
-        <div class="ma-dim">Group: <strong>${esc(plan.group.name)}</strong>${plan.last ? ` · last lookup: ${esc(plan.last.status)} (${new Date(plan.last.at * 1000).toLocaleDateString()})` : ''}
-          ${plan.queries.length ? ` · its queries: ${plan.queries.map((q, i) => `<button type="button" class="btn btn-link btn-sm" data-use-query="${i}">${esc([q.title, q.artist || '(any artist)', q.album].filter(Boolean).join(' · '))}</button>`).join(' ')}` : ''}</div>
+      <div class="pr-controls ls-controls">
+        <div class="ma-dim">Group: <strong>${esc(plan.group.name)}</strong>${plan.last ? ` · last lookup: ${esc(plan.last.status)} (${new Date(plan.last.at * 1000).toLocaleDateString()})` : ''}</div>
+        ${plan.queries.length ? `<div class="ls-queries"><span class="ma-dim">Its queries:</span> ${plan.queries.map((q, i) => `<button type="button" class="ls-query" data-use-query="${i}" title="Search with this">${esc([q.title, q.artist || '(any artist)', q.album].filter(Boolean).join(' · '))}</button>`).join('')}</div>` : ''}
         <div class="ls-fields">
           <label class="field-label">Title<input id="ls-title" type="text" value="${esc(first.title)}" /></label>
           <label class="field-label">Artist<input id="ls-artist" type="text" value="${esc(first.artist)}" placeholder="blank: any" /></label>
@@ -35,8 +35,8 @@ export async function openLyricsSearch(trackId: number, onChosen?: (text: string
       </div>
       <div class="pr-summary" id="ls-summary"></div>
       <div class="fix-confirm-body pr-body ls-body">
-        <table class="pr-table"><thead><tr><th>Title</th><th>Artist</th><th>Album</th><th>Length</th><th>Lyrics</th></tr></thead>
-          <tbody id="ls-rows"></tbody></table>
+        <div class="ls-results"><table class="pr-table ls-table"><thead><tr><th>Title</th><th>Artist</th><th>Album</th><th>Length</th><th>Lyrics</th></tr></thead>
+          <tbody id="ls-rows"></tbody></table></div>
         <div id="ls-preview" class="ls-preview" hidden></div>
       </div>
       <div class="fix-confirm-footer">
@@ -70,12 +70,13 @@ export async function openLyricsSearch(trackId: number, onChosen?: (text: string
       const kind = h.synced ? '<span class="mb-score mb-good">synced</span>' : h.plain ? '<span class="mb-score mb-ok">plain</span>'
         : h.instrumental ? '<span class="mb-score mb-none">instrumental</span>' : '<span class="mb-score mb-none">none</span>'
       return `<tr class="pr-row ls-hit${picked === h ? ' ls-picked' : ''}" data-hit="${i}">
-        <td>${esc(h.title ?? '')}</td><td>${esc(h.artist ?? '')}</td><td>${esc(h.album ?? '')}</td>
+        <td>${esc(h.title ?? '')}</td><td class="ls-clip" title="${esc(h.artist ?? '')}">${esc(h.artist ?? '')}</td><td class="ls-clip" title="${esc(h.album ?? '')}">${esc(h.album ?? '')}</td>
         <td>${fmtDuration(h.duration)}${d !== null ? ` <span class="${Math.abs(d) > 3 ? 'ls-off' : 'ma-dim'}">(${d > 0 ? '+' : ''}${d}s)</span>` : ''}</td>
         <td>${kind}</td></tr>`
     }).join('')
     const pv = $('#ls-preview')
     pv.hidden = !picked
+    $('.ls-body').classList.toggle('ls-split', !!picked)
     if (picked) pv.innerHTML = `<pre>${esc(picked.synced ?? picked.plain ?? '(no text)')}</pre>`
     $<HTMLButtonElement>('#ls-synced').disabled = !picked?.synced
     $<HTMLButtonElement>('#ls-plain').disabled = !picked?.plain

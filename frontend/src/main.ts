@@ -3,7 +3,7 @@ import { api, Track, Artist, Album, AlbumRow, LookupResult, AppSettings, setUnau
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
-import { COL_DEFS, orderedCols } from './columns'
+import { COL_DEFS, orderedCols, viewCols } from './columns'
 import {
   trackQuality, qualityTitle, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
@@ -78,6 +78,8 @@ const genreInput = tagForm.elements.namedItem('genre') as HTMLInputElement
 genreInput.closest('.field-label')!.after(genreChips.el)
 const editorTitle    = document.getElementById('editor-title')!
 const bulkActions    = document.getElementById('bulk-actions')!
+const lyricsLookupBtn = document.getElementById('lyrics-lookup-btn') as HTMLButtonElement
+const lyricsSearchBtn = document.getElementById('lyrics-search-btn') as HTMLButtonElement
 const selectionCount = document.getElementById('selection-count')!
 const searchEl       = document.getElementById('search') as HTMLInputElement
 const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
@@ -334,9 +336,40 @@ function getVisibleAlbums(): Album[] {
   return all
 }
 
-function makeAlbumCard(alb: Album): HTMLElement {
+// Album views multi-select: Ctrl/⌘-click picks an album, Shift-click a range;
+// their tracks become the selection (toolbar, editor). A plain click opens one.
+const albumPicks = new Map<string, number[]>()   // album key -> its track ids
+let albumAnchor: number | null = null
+
+async function pickAlbum(e: MouseEvent, i: number, key: (j: number) => string, ids: (j: number) => Promise<number[]>) {
+  const [lo, hi] = e.shiftKey && albumAnchor !== null ? [Math.min(albumAnchor, i), Math.max(albumAnchor, i)] : [i, i]
+  const on = e.shiftKey || !albumPicks.has(key(i))
+  const span = Array.from({ length: hi - lo + 1 }, (_, k) => lo + k)
+  try {
+    const got = on ? await Promise.all(span.map(ids)) : []
+    span.forEach((j, k) => on ? albumPicks.set(key(j), got[k]) : albumPicks.delete(key(j)))
+  } catch (err) { toast(`Select failed: ${errText(err)}`, 'error'); return }
+  albumAnchor = i
+  state.selectedIds = new Set([...albumPicks.values()].flat())
+  if (on && span.some(j => !albumPicks.get(key(j))?.length)) toast('Read-only albums (and ones with no album name, in tiles) can\'t be selected', 'info')
+  updateBulkBar()
+  renderEditor()
+}
+
+function markAlbumPicks() {
+  if (!state.selectedIds.size) { albumPicks.clear(); albumAnchor = null }
+  document.querySelectorAll<HTMLElement>('[data-album-key]').forEach(el =>
+    el.classList.toggle('album-picked', albumPicks.has(el.dataset.albumKey!)))
+}
+
+const tileKey = (a: Album) => JSON.stringify([a.artist ?? '', a.album])
+
+function makeAlbumCard(alb: Album, i: number, albums: Album[]): HTMLElement {
   const card = document.createElement('div')
   card.className = 'album-card'
+  card.dataset.albumKey = tileKey(alb)
+  card.classList.toggle('album-picked', albumPicks.has(tileKey(alb)))
+  card.title = 'Click to open · Ctrl/⌘-click or Shift-click to select'
   const artistDisplay = esc(alb.album_artist || alb.artist || '(Unknown Artist)')
   card.innerHTML = `
     <div class="album-cover-wrap">
@@ -353,7 +386,13 @@ function makeAlbumCard(alb: Album): HTMLElement {
   const placeholder = card.querySelector<HTMLElement>('.album-cover-placeholder')!
   img.addEventListener('error', () => { img.style.display = 'none'; placeholder.style.display = 'flex' })
   img.addEventListener('load',  () => { img.style.display = 'block'; placeholder.style.display = 'none' })
-  card.addEventListener('click', () => {
+  card.addEventListener('click', (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      pickAlbum(e, i, j => tileKey(albums[j]), async j => albums[j].album
+        ? (await api.library.trackIds({ artist: albums[j].artist ?? '', album: albums[j].album })).ids : [])
+      return
+    }
+    albumPicks.clear()
     state.viewMode = 'list'
     renderViewMode()
     navigateTo(alb.artist ?? '', alb.album)
@@ -383,7 +422,7 @@ function renderAlbumGrid() {
   let rendered = 0
   const renderMore = () => {
     const next = albums.slice(rendered, rendered + ALBUM_BATCH)
-    for (const alb of next) albumGridEl.insertBefore(makeAlbumCard(alb), sentinel)
+    next.forEach((alb, k) => albumGridEl.insertBefore(makeAlbumCard(alb, rendered + k, albums), sentinel))
     rendered += next.length
     if (rendered >= albums.length) { albumObserver?.disconnect(); sentinel.remove() }
   }
@@ -409,6 +448,8 @@ try { if (localStorage.getItem('tagger.albumStyle') === 'tiles') albumStyle = 't
 
 function renderAlbumView() { if (albumStyle === 'list') renderAlbumList(); else renderAlbumGrid() }
 
+const listKey = (r: AlbumRow) => JSON.stringify([r.directory, r.album])
+
 async function renderAlbumList() {
   albumListEl.innerHTML = '<div class="album-empty">Loading albums…</div>'
   let rows: AlbumRow[]
@@ -429,7 +470,7 @@ async function renderAlbumList() {
   albumListEl.innerHTML = `<table class="track-table album-table"><thead><tr>
       <th class="al-cover"></th><th>Album</th><th title="Album artist, or the track artists when there is none">Artist</th><th class="al-num">Tracks</th><th class="al-num">Discs</th>
       <th>Year</th><th>Genre</th><th>Format</th><th>Folder</th></tr></thead><tbody>
-    ${rows.map((r, i) => `<tr data-i="${i}" title="${esc(r.directory)}">
+    ${rows.map((r, i) => `<tr data-i="${i}" data-album-key="${esc(listKey(r))}" class="${albumPicks.has(listKey(r)) ? 'album-picked' : ''}" title="${esc(r.directory)}\nClick to open · Ctrl/⌘-click or Shift-click to select">
       <td class="al-cover"><img loading="lazy" src="${coverUrl(r.cover_track_id)}" alt="" onerror="this.style.visibility='hidden'" /></td>
       <td>${esc(r.album || '(no album)')}</td><td>${artist(r)}</td><td class="al-num">${tracks(r)}</td>
       <td class="al-num">${r.discs > 1 ? r.discs : ''}</td><td>${v(r, 'year')}</td><td>${v(r, 'genre')}</td>
@@ -439,6 +480,11 @@ async function renderAlbumList() {
   albumListEl.querySelector('tbody')!.addEventListener('click', async (e) => {
     const tr = (e.target as HTMLElement).closest<HTMLElement>('tr[data-i]')
     if (!tr) return
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      pickAlbum(e, Number(tr.dataset.i), j => listKey(rows[j]), async j => rows[j].ids)
+      return
+    }
+    albumPicks.clear()
     const r = rows[Number(tr.dataset.i)]
     // Open the album: its folder in the Files tab, tracks in the list. (The
     // track view filters by folder only in Files mode.)
@@ -717,6 +763,16 @@ function renderTracks() {
     + (state.filterFormat || state.filterQuality ? ' (filtered)' : '')
 
   const visibleCols = orderedCols().filter(c => state.visibleCols.has(c.key))
+  // The Quality view's own column(s), right after Title (else last), so
+  // they're never scrolled off; the header follows the view.
+  const extra = viewCols()
+  const afterTitle = visibleCols.some(c => c.key === 'title')
+  trackTheadRow.querySelectorAll('th.col-view').forEach(th => th.remove())
+  const titleTh = trackTheadRow.querySelector('th[data-col="title"]')
+  const viewThs = extra.map(c => `<th class="col-view">${esc(c.label)}</th>`).join('')
+  if (titleTh) titleTh.insertAdjacentHTML('afterend', viewThs)
+  else trackTheadRow.insertAdjacentHTML('beforeend', viewThs)
+  const extraCells = (t: Track) => extra.map(col => `<td class="${col.cls}">${col.render(t)}</td>`).join('')
 
   for (const t of displayedTracks) {
     const selected = state.selectedIds.has(t.id)
@@ -747,7 +803,9 @@ function renderTracks() {
       cells += was === undefined
         ? `<td class="${col.cls}">${col.render(t)}</td>`
         : `<td class="${col.cls} cell-staged" title="Staged — on file: ${esc(was || '(empty)')}">${col.render(t)}</td>`
+      if (col.key === 'title') cells += extraCells(t)
     }
+    if (!afterTitle) cells += extraCells(t)
     tr.innerHTML = cells
     tr.querySelectorAll<HTMLElement>('.tag-link').forEach(link => {
       link.addEventListener('click', (e) => {
@@ -784,6 +842,8 @@ function updateBulkBar() {
   selectViewBtn.textContent = `Select all ${state.total.toLocaleString()} in this view`
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
   replaygainBtn.hidden = !(n > 0 && replaygainAvailable)
+  markAlbumPicks()
+  lyricsLookupBtn.textContent = n ? `Look up ${n.toLocaleString()} selected…` : `Look up all ${state.total.toLocaleString()}…`
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
@@ -835,6 +895,7 @@ function renderEditor() {
   // Only show lookup/infer for single selection; hide panel when selection changes
   lookupBtn.hidden = state.selectedIds.size !== 1
   inferBtn.hidden = state.selectedIds.size !== 1
+  lyricsSearchBtn.hidden = state.selectedIds.size !== 1
   autoFixBtn.hidden = state.selectedIds.size === 0
   if (state.selectedIds.size !== 1) lookupPanel.hidden = true
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
@@ -1324,7 +1385,6 @@ autoFixBtn.addEventListener('click', async () => {
 const fixAllBtn      = document.getElementById('fix-all-btn') as HTMLButtonElement
 const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElement
 const refileBtn      = document.getElementById('refile-btn') as HTMLButtonElement
-const lyricsLookupBtn = document.getElementById('lyrics-lookup-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
 
 dedupeBtn.addEventListener('click', async () => {
@@ -1896,7 +1956,7 @@ document.getElementById('lyrics-group-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (ids.length) openAssignGroup(ids, refreshAfterBulk)
 })
-document.getElementById('lyrics-search-btn')!.addEventListener('click', () => {
+lyricsSearchBtn.addEventListener('click', () => {
   if (state.selectedIds.size !== 1) { toast('Select one track to search its lyrics', 'info'); return }
   openLyricsSearch([...state.selectedIds][0], undefined, refreshAfterBulk)
 })
@@ -2497,7 +2557,11 @@ async function navigateTo(artist: string, album?: string) {
 }
 
 // Track table clicks
-trackTbody.addEventListener('click', (e) => {
+let rangeAnchor: number | null = null   // the last track clicked: shift-click ranges start here
+
+trackTbody.addEventListener('click', async (e) => {
+  const search = (e.target as HTMLElement).closest<HTMLElement>('[data-lyrics-search]')
+  if (search) { openLyricsSearch(Number(search.dataset.lyricsSearch), undefined, refreshAfterBulk); return }
   const tr = (e.target as HTMLElement).closest<HTMLTableRowElement>('tr')
   if (!tr) return
   const id = parseInt(tr.dataset.id!, 10)
@@ -2510,19 +2574,25 @@ trackTbody.addEventListener('click', (e) => {
     const only = state.selectedIds.size === 1 && state.selectedIds.has(id)
     state.selectedIds.clear()
     if (!only) state.selectedIds.add(id)
-  } else if (e.shiftKey && state.selectedIds.size > 0) {
-    const rows  = [...trackTbody.querySelectorAll<HTMLTableRowElement>('tr')]
-    const ids   = rows.map(r => parseInt(r.dataset.id!, 10))
-    const idArr = [...state.selectedIds]
-    const last  = idArr[idArr.length - 1]
-    const from = ids.indexOf(last), to = ids.indexOf(id)
-    const [lo, hi] = from < to ? [from, to] : [to, from]
-    ids.slice(lo, hi + 1).forEach(i => { if (!readOnly.has(i)) state.selectedIds.add(i) })
+  } else if (e.shiftKey && rangeAnchor !== null && state.selectedIds.size > 0) {
+    // From the last clicked track to this one -- on another page too: then
+    // the range comes from the whole view, in its order.
+    let ids = [...trackTbody.querySelectorAll<HTMLTableRowElement>('tr')].map(r => parseInt(r.dataset.id!, 10))
+    if (!ids.includes(rangeAnchor)) {
+      try { ids = (await api.library.trackIds(viewParams())).ids } catch (err) { toast(`Select failed: ${errText(err)}`, 'error'); return }
+    }
+    const from = ids.indexOf(rangeAnchor), to = ids.indexOf(id)
+    if (from >= 0 && to >= 0) {
+      const [lo, hi] = from < to ? [from, to] : [to, from]
+      ids.slice(lo, hi + 1).forEach(i => { if (!readOnly.has(i)) state.selectedIds.add(i) })
+    }
     for (const i of readOnly) state.selectedIds.delete(i)
   } else if (isCheckbox && cb) {
     for (const i of readOnly) state.selectedIds.delete(i)
     cb.checked ? state.selectedIds.add(id) : state.selectedIds.delete(id)
+    rangeAnchor = id
   } else {
+    rangeAnchor = id
     if (state.selectedIds.has(id) && state.selectedIds.size === 1) {
       state.selectedIds.clear()
     } else {
