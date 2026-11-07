@@ -18,6 +18,7 @@ import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
 import { openMbAlbum } from './mbalbum'
 import { openLyrics } from './lyricsdialog'
+import { openDuplicates } from './duplicates'
 import { openLyricsSearch } from './lyricssearch'
 import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect, renderGroupLayouts } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
@@ -1387,25 +1388,12 @@ const dedupeBtn      = document.getElementById('dedupe-btn') as HTMLButtonElemen
 const refileBtn      = document.getElementById('refile-btn') as HTMLButtonElement
 const qualityToolbar = document.getElementById('quality-toolbar') as HTMLElement
 
-dedupeBtn.addEventListener('click', async () => {
-  dedupeBtn.disabled = true
-  try {
-    const { removed } = await api.library.dedupeKeepBest()
-    if (removed === 0) {
-      toast('No duplicates to remove', 'info')
-    } else {
-      toast(`Removed ${removed} duplicate${removed !== 1 ? 's' : ''} — kept best quality`, 'success')
-      state.qualityIssues = null
-      await loadTracks()
-      await renderQualityPanel()
-      await refreshUndoButton()
-    }
-  } catch (e) {
-    toast(`Dedupe failed: ${e}`, 'error')
-  } finally {
-    dedupeBtn.disabled = false
-  }
-})
+dedupeBtn.addEventListener('click', () => openDuplicates(async () => {
+  state.qualityIssues = null
+  await loadTracks()
+  await renderQualityPanel()
+  await refreshUndoButton()
+}))
 
 // "Missing lyrics" view: look up the selection, or every track listed, in the
 // background (Settings → Background); what's found is staged for review.
@@ -2757,12 +2745,16 @@ qualityListEl.addEventListener('click', async (e) => {
   state.selectedIssue = state.selectedIssue === issue ? null : issue
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
   const isDupes = state.selectedIssue === 'duplicate_tracks'
+  const isDupAlbums = state.selectedIssue === 'duplicate_albums'
   const isLayout = state.selectedIssue === 'not_in_layout'
   const isLyrics = state.selectedIssue === 'missing_lyrics'
   dedupeBtn.hidden = !isDupes
   refileBtn.hidden = !isLayout
   lyricsLookupBtn.hidden = !isLyrics
-  fixAllBtn.hidden = isDupes || isLayout || isLyrics
+  fixAllBtn.hidden = isDupes || isDupAlbums || isLayout || isLyrics
+  qualityToolbar.hidden ||= isDupAlbums
+  // The same album in several folders: the album list shows them side by side.
+  if (isDupAlbums) { state.viewMode = 'albums'; albumStyle = 'list'; renderViewMode() }
   state.selectedIds.clear()
   state.page = 0
   await renderQualityPanel()

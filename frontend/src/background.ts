@@ -1,4 +1,4 @@
-// Settings page panes: Background (the running scan and lyrics lookup with
+// Settings page panes: Background (the running scan, lyrics lookup and fingerprinting with
 // progress + Cancel, recent jobs) and About (version, build, deployed, environment).
 import { api, ScanJob } from './api'
 import { toast } from './toast'
@@ -36,6 +36,23 @@ function current(job: ScanJob): string {
     </div>`
 }
 
+function fingerprintCard(job: ScanJob): string {
+  const now = Date.now() / 1000
+  const elapsed = now - (job.started_at ?? now)
+  const pct = job.total ? Math.min(100, (job.scanned / job.total) * 100) : 0
+  const rate = job.scanned && elapsed > 2 ? job.scanned / elapsed : 0
+  const eta = rate && job.total > job.scanned ? (job.total - job.scanned) / rate : null
+  return `
+    <div class="bg-card">
+      <div class="bg-card-head"><strong>Fingerprinting</strong>
+        <button class="btn btn-ghost btn-sm" data-cancel="${esc(job.id)}">Cancel</button></div>
+      <div class="bg-progress"><div style="width:${pct}%"></div></div>
+      <div class="ma-dim">${job.scanned.toLocaleString()} of ${job.total.toLocaleString()} tracks (${pct.toFixed(1)}%)</div>
+      <div class="ma-dim">Started ${fmtTime(job.started_at)} · ${fmtDur(elapsed)} elapsed${eta !== null ? ` · about ${fmtDur(eta)} left` : ''}</div>
+      <div class="settings-hint">For duplicates by sound (Quality → Duplicate tracks → Review). Cancel keeps what's done; the next run continues.</div>
+    </div>`
+}
+
 function lyricsCard(job: ScanJob): string {
   const now = Date.now() / 1000
   const elapsed = now - (job.started_at ?? now)
@@ -59,9 +76,16 @@ export async function renderBackground(el: HTMLElement): Promise<ScanJob | null>
   try { jobs = await api.jobs.list() } catch (e) { el.innerHTML = `<div class="review-error">${esc(errText(e))}</div>`; return null }
   const running = (j: ScanJob) => j.status === 'running' || j.status === 'pending'
   const lyrics = jobs.find(j => j.kind === 'lyrics' && running(j)) ?? null
-  const scans = jobs.filter(j => j.kind !== 'lyrics')
+  const prints = jobs.find(j => j.kind === 'fingerprint' && running(j)) ?? null
+  const scans = jobs.filter(j => !j.kind || j.kind === 'scan')
   const active = scans.find(running) ?? null
   const rows = jobs.slice(0, 15).map(j => {
+    if (j.kind === 'fingerprint') {
+      const dur = j.finished_at && j.started_at ? fmtDur(j.finished_at - j.started_at) : j.started_at ? '…' : ''
+      return `<tr><td>${fmtTime(j.started_at)}</td><td>Fingerprints</td>
+        <td><span class="mb-score ${STATUS_CLS[j.status] ?? ''}">${esc(j.status)}</span>${j.error ? `<div class="pr-msg">${esc(j.error)}</div>` : ''}</td>
+        <td>${j.scanned.toLocaleString()} / ${j.total.toLocaleString()} tracks</td><td>${dur}</td></tr>`
+    }
     if (j.kind === 'lyrics') {
       const dur = j.finished_at && j.started_at ? fmtDur(j.finished_at - j.started_at) : j.started_at ? '…' : ''
       return `<tr><td>${fmtTime(j.started_at)}</td><td>Lyrics lookup</td>
@@ -83,6 +107,7 @@ export async function renderBackground(el: HTMLElement): Promise<ScanJob | null>
         <div class="settings-hint">Reads new and changed files and drops tracks whose files are gone. The automatic interval is under Settings → Scan Options.</div></div>`}
     </div>
     ${lyrics ? `<div class="settings-section"><div class="settings-section-title">Lyrics lookup</div>${lyricsCard(lyrics)}</div>` : ''}
+    ${prints ? `<div class="settings-section"><div class="settings-section-title">Fingerprints</div>${fingerprintCard(prints)}</div>` : ''}
     <div class="settings-section">
       <div class="settings-section-title">Recent jobs</div>
       ${jobs.length ? `<table class="pr-table bg-jobs"><thead><tr><th>Started</th><th>Scope</th><th>Status</th><th>Done</th><th>Took</th></tr></thead><tbody>${rows}</tbody></table>`

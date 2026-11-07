@@ -31,6 +31,7 @@ export const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: bool
   { key: 'missing_genre',        label: 'Missing genre'    },
   { key: 'missing_track_number', label: 'Missing track #'  },
   { key: 'duplicate_tracks',     label: 'Duplicate tracks', warn: true },
+  { key: 'duplicate_albums',     label: 'Duplicate albums', warn: true },
   { key: 'missing_files',        label: 'Missing files',    warn: true },
   { key: 'not_in_layout',        label: 'Not in layout'    },
   { key: 'missing_lyrics',       label: 'Missing lyrics'   },
