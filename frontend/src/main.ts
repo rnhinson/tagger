@@ -3,7 +3,7 @@ import { api, Track, Artist, Album, AlbumRow, LookupResult, AppSettings, setUnau
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
 import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
-import { COL_DEFS, orderedCols, viewCols } from './columns'
+import { COL_DEFS, orderedCols, viewCols, sourcePath } from './columns'
 import {
   trackQuality, qualityTitle, QUALITY_ISSUES,
   toTitleCase, needsNormalization, NORMALIZE_FIELDS,
@@ -21,6 +21,7 @@ import { openLyrics } from './lyricsdialog'
 import { openLyricsSearch } from './lyricssearch'
 import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect, renderGroupLayouts } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
+import { wirePathDiff } from './pathdiff'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -682,6 +683,9 @@ trackTheadRow.addEventListener('dragend', () => {
 let colWidths = loadColWidths()
 const trackTable = trackTheadRow.closest('table') as HTMLTableElement
 
+// A Quality view's own column sizes under "view:<key>", apart from the user's columns.
+const widthKey = (th: HTMLElement) => th.dataset.col ?? th.dataset.width
+
 function dataThs(): HTMLTableCellElement[] {
   return [...trackTheadRow.querySelectorAll<HTMLTableCellElement>('th')]
 }
@@ -695,7 +699,7 @@ function applyColWidths() {
   }
   let total = 0
   for (const th of ths) {
-    const key = th.dataset.col
+    const key = widthKey(th)
     // Unsized columns (new, or the check/quality cells) keep their current width.
     const w = (key && colWidths[key]) || th.getBoundingClientRect().width || 80
     th.style.width = `${w}px`
@@ -711,10 +715,10 @@ trackTheadRow.addEventListener('mousedown', (e) => {
   e.preventDefault()
   const th = grip.parentElement as HTMLTableCellElement
   if (!Object.keys(colWidths).length) {
-    for (const h of dataThs()) if (h.dataset.col) colWidths[h.dataset.col] = Math.round(h.getBoundingClientRect().width)
+    for (const h of dataThs()) { const k = widthKey(h); if (k) colWidths[k] = Math.round(h.getBoundingClientRect().width) }
     applyColWidths()
   }
-  const key = th.dataset.col!
+  const key = widthKey(th)!
   const startX = e.clientX, startW = th.getBoundingClientRect().width
   document.body.classList.add('col-resizing')
   const move = (ev: MouseEvent) => {
@@ -769,9 +773,10 @@ function renderTracks() {
   const afterTitle = visibleCols.some(c => c.key === 'title')
   trackTheadRow.querySelectorAll('th.col-view').forEach(th => th.remove())
   const titleTh = trackTheadRow.querySelector('th[data-col="title"]')
-  const viewThs = extra.map(c => `<th class="col-view">${esc(c.label)}</th>`).join('')
+  const viewThs = extra.map(c => `<th class="col-view" data-width="view:${c.key}">${esc(c.label)}<span class="col-resizer" title="Drag to resize · double-click to reset all widths"></span></th>`).join('')
   if (titleTh) titleTh.insertAdjacentHTML('afterend', viewThs)
   else trackTheadRow.insertAdjacentHTML('beforeend', viewThs)
+  if (extra.length) applyColWidths()
   const extraCells = (t: Track) => extra.map(col => `<td class="${col.cls}">${col.render(t)}</td>`).join('')
 
   for (const t of displayedTracks) {
@@ -885,7 +890,7 @@ function renderEditorFile(t: Track | null) {
     <div class="editor-file-name" title="${esc(t.filename)}">${esc(t.filename)}</div>
     <div class="editor-file-path" title="${esc(t.path)}">${esc(t.directory)}</div>
     ${t.staged?.new_path ? `<div class="editor-file-move" title="${esc(t.staged.new_path)}">→ ${esc(shortPath(t.staged.new_path))}</div>` : ''}
-    ${t.layout_path && !t.staged?.new_path ? `<div class="editor-file-layout" title="${esc(t.layout_path)}">Layout puts it at ${esc(shortPath(t.layout_path))}</div>` : ''}`
+    ${t.layout_path && !t.staged?.new_path ? `<div class="editor-file-layout" data-diff-from="${esc(sourcePath(t.path))}" data-diff-to="${esc(sourcePath(t.layout_path))}">Layout puts it at ${esc(shortPath(t.layout_path))}</div>` : ''}`
 }
 
 function renderEditor() {
@@ -3094,6 +3099,7 @@ settingsModal.querySelector('.settings-tabs')!.addEventListener('click', (e) => 
   if (t) showSettingsTab(t.dataset.tab!)
 })
 wireBackground(paneBackground, refreshBackground)
+wirePathDiff(document.body)
 scanStatusEl.addEventListener('click', async () => {
   if (!settingsModal.classList.contains('open')) await openSettings()
   showSettingsTab('background')

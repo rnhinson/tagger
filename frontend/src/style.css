@@ -1261,6 +1261,14 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* ── Libraries (settings) and read-only ───────────────────────────────────── */
 .libraries-list { list-style: none; margin: 0; padding: 0; }
 .layout-path { color: var(--accent); font-size: 11px; }
+.path-diff {
+  position: fixed; z-index: 1000; max-width: min(720px, 94vw); padding: 6px 8px; pointer-events: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  font-size: 12px; color: var(--text); overflow-wrap: anywhere; display: grid; gap: 3px;
+}
+.path-diff[hidden] { display: none; }
+.path-diff mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 2px; }
+.path-diff-label { display: inline-block; width: 52px; color: var(--text-muted); }
 .editor-file-layout { color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
 .readonly-note {
   font-size: 12px; padding: 6px 8px; border-radius: var(--radius);

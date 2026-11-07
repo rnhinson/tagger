@@ -49,7 +49,7 @@ export function viewCols(): ColDef[] {
       <span class="view-text" title="${esc(text)}">${esc(text)}</span></div>`
   }}]
   if (state.selectedIssue === 'not_in_layout') return [{ key: 'layout', label: 'Layout puts it at', cls: 'col-view', render: t =>
-    t.layout_path ? `<span class="layout-path" title="${esc(t.layout_path)}">→ ${esc(sourcePath(t.layout_path))}</span>` : '' }]
+    t.layout_path ? `<span class="layout-path" data-diff-from="${esc(sourcePath(t.path))}" data-diff-to="${esc(sourcePath(t.layout_path))}">→ ${esc(sourcePath(t.layout_path))}</span>` : '' }]
   return []
 }
 
