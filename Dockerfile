@@ -18,32 +18,14 @@ RUN npm run build
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────
 FROM python:3.14-slim
 
-# fpcalc (chromaprint) for AcoustID fingerprinting; ffmpeg for spectrograms
+# fpcalc (chromaprint) for AcoustID fingerprinting; ffmpeg for spectrograms;
+# rsgain for ReplayGain (Debian's own package: the upstream .deb targets
+# bookworm's libavcodec59 and never installed on this trixie base).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libchromaprint-tools \
     ffmpeg \
+    rsgain \
     && rm -rf /var/lib/apt/lists/*
-
-# ReplayGain scanning (optional). Installs rsgain from its GitHub .deb release.
-# Wrapped so a download/dependency failure only warns — the app detects rsgain
-# at runtime and disables the feature gracefully when it's absent. Override the
-# version with --build-arg RSGAIN_VERSION=x.y, or disable with
-# --build-arg INSTALL_RSGAIN=0.
-ARG INSTALL_RSGAIN=1
-ARG RSGAIN_VERSION=3.6
-# TARGETARCH is set automatically by buildx (amd64/arm64); defaults for plain builds.
-ARG TARGETARCH
-RUN if [ "$INSTALL_RSGAIN" = "1" ]; then \
-      arch="${TARGETARCH:-amd64}"; \
-      ( apt-get update \
-        && apt-get install -y --no-install-recommends curl ca-certificates \
-        && curl -fsSL -o /tmp/rsgain.deb \
-             "https://github.com/complexlogic/rsgain/releases/download/v${RSGAIN_VERSION}/rsgain_${RSGAIN_VERSION}_${arch}.deb" \
-        && apt-get install -y --no-install-recommends /tmp/rsgain.deb \
-        && rm -f /tmp/rsgain.deb ) \
-      || echo "WARNING: rsgain install failed — ReplayGain will be unavailable"; \
-      rm -rf /var/lib/apt/lists/*; \
-    fi
 
 WORKDIR /app
 
