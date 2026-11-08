@@ -283,8 +283,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   // Track field: your selection's titles (or file names) to pick from.
   function fillTitles() {
     const sel = state.tracks.filter(t => ids.includes(t.id))
-    const fromName = (t: { filename: string }) => t.filename.replace(/\.[^.]+$/, '').replace(/^\s*(\d+[\s.\-_]*)+/, '')
-    const placeholder = (s?: string | null) => !s || /^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track \d+)$/i.test(s.trim())
+    const fromName = (t: { filename: string }) => t.filename.replace(/\.[^.]+$/, '').replace(/^\s*(\d+[\s.\-_]*)+/, '').replace(/[\s_]+/g, ' ').trim()
+    const placeholder = (s?: string | null) => !s || /^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track ?\d+)$/i.test(s.replace(/[\s_]+/g, ' ').trim())
     const titles = [...new Set(sel.map(t => sourceEl.value === 'names' || (sourceEl.value === 'auto' && placeholder(t.title))
       ? fromName(t) : t.title).filter(t => !placeholder(t)) as string[])]
     $('#mb-track-list').innerHTML = titles.map(t => `<option value="${esc(t)}"></option>`).join('')

@@ -136,3 +136,15 @@ def test_unnamed_tracks_pair_by_number_and_length():
     m = albummatch.match(local, RELEASE["tracks"])
     assert m[1][0] == "1-1" and m[2][0] == "1-2" and m[3] == (None, 0.0)
     assert albummatch.quality(local, RELEASE["tracks"])["matched"] == 2
+
+
+def test_underscored_rips_are_unnamed_and_named_by_folder(tmp_path):
+    root = tmp_path / "CD Rips"
+    assert albummatch.names_from_path(str(root / "Heather_Dale" / "Angel_with_a_Sword" / "01_Track_1.flac"), root) \
+        == ("Angel with a Sword", "Heather Dale")
+    local = [{"id": 1, "title": "Track 1", "filename": "01_Track_1.flac", "track_number": "", "duration": 259},
+             {"id": 2, "title": "", "filename": "02_Track02.flac", "track_number": None, "duration": 183},
+             {"id": 3, "title": "Track 3", "filename": "track_03.flac", "track_number": "3", "duration": 207}]
+    assert all(albummatch.unnamed(l) for l in local)
+    m = albummatch.match(local, RELEASE["tracks"])
+    assert m[1][0] == "1-1" and m[2][0] == "1-2" and m[3][0] == "1-3"
