@@ -288,7 +288,7 @@ export interface MbReleaseTrack {
 
 export interface MbMatch {
   release: { mb_album_id: string; album: string; album_artist: string | null; date: string | null
-             year: string | null; original_year: string | null; country: string | null; discs: number; genre?: string | null }
+             year: string | null; original_year: string | null; country: string | null; discs: number; genre?: string | null; rg_id?: string | null }
   release_tracks: MbReleaseTrack[]
   items: { id: number; filename: string; title: string | null; artist: string | null; track_number: string | null
            disc_number: string | null; duration: number | null; key: string | null; score: number
@@ -564,10 +564,13 @@ export const api = {
     albumMatch: (trackIds: number[], mbAlbumId: string) =>
       request<MbMatch>('POST', '/api/lookup/album/match', { track_ids: trackIds, mb_album_id: mbAlbumId }),
     albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean
-                         keep?: string[]; unpaired?: number[] }) =>
+                         keep?: string[]; unpaired?: number[]; genre?: string }) =>
       request<EditResult & { changed: number; covers: number; folder_covers: number }>('POST', '/api/lookup/album/apply', body),
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
+    releaseTags: (mbAlbumId: string, mbTrackId: string | null) =>
+      request<{ album_artist: string | null; mb_album_artist_id: string | null; genre: string | null; composer: string | null }>(
+        'GET', `/api/lookup/release-tags/${encodeURIComponent(mbAlbumId)}?mb_track_id=${encodeURIComponent(mbTrackId ?? '')}`),
     infer: (trackId: number) =>
       request<LookupResult | null>('POST', `/api/lookup/infer/${trackId}`),
     releases: (mbTrackId: string) =>

@@ -80,6 +80,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   const quality = new Map<string, { quality: number; matched: number; local: number }>()
   const chosen = new Map<number, string | null>()     // track id -> release track key
   const skip = new Set<number>()
+  const offGenres = new Set<string>()          // single genres left out
+  const genres = (g: string) => g.split(';').map(x => x.trim()).filter(Boolean)
 
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey) }
   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
@@ -171,7 +173,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
       const m = await api.lookup.albumMatch(ids, id)
       if (openId !== id) return
       match = m
-      chosen.clear(); skip.clear()
+      chosen.clear(); skip.clear(); offGenres.clear()
       for (const it of m.items) chosen.set(it.id, it.key)
       renderCandidates()
       renderMatch()
@@ -183,7 +185,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     const m = match, rel = m.release
     $('#mb-release').innerHTML = `<strong>${esc(rel.album)}</strong> · ${esc(rel.album_artist ?? '')} ·
       ${esc(rel.date ?? '')}${rel.original_year && rel.original_year !== rel.year ? ` (original ${esc(rel.original_year)})` : ''} · ${m.release_tracks.length} tracks
-      · ${rel.genre ? esc(rel.genre) : '<span class="ma-dim">no genre on MusicBrainz</span>'}`
+      · ${rel.genre ? genres(rel.genre).map(g => `<button type="button" class="mbb-chip ${offGenres.has(g) ? 'mbb-off' : 'mbb-new'}" data-genre="${esc(g)}" title="Click to ${offGenres.has(g) ? 'include' : 'leave out'} this genre">${esc(g)}</button>`).join(' ')
+                    : '<span class="ma-dim">no genre on MusicBrainz</span>'}`
     const byKey = new Map(m.release_tracks.map(t => [t.key, t]))
     const counts = new Map<string, number>()
     for (const [id, k] of chosen) if (k && !skip.has(id)) counts.set(k, (counts.get(k) ?? 0) + 1)
@@ -246,6 +249,12 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     goBtn.textContent = anyField ? `Stage ${n} track${n !== 1 ? 's' : ''}` : `Write cover art`
   }
   $('#mb-fields').addEventListener('change', () => { if (match) renderMatch() })
+  $('#mb-release').addEventListener('click', (e) => {
+    const c = (e.target as HTMLElement).closest<HTMLElement>('[data-genre]')
+    if (!c) return
+    if (!offGenres.delete(c.dataset.genre!)) offGenres.add(c.dataset.genre!)
+    renderMatch()
+  })
 
   rowsEl.addEventListener('change', (e) => {
     const el = e.target as HTMLInputElement | HTMLSelectElement
@@ -271,6 +280,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
         mb_album_id: match.release.mb_album_id, pairs, fields,
         original_year: $<HTMLInputElement>('#mb-orig').checked, cover: $<HTMLInputElement>('#mb-cover').checked,
         keep: $<HTMLInputElement>('#mb-keep').checked ? KEEP : [],
+        genre: offGenres.size ? genres(match.release.genre ?? '').filter(g => !offGenres.has(g)).join('; ') : undefined,
       })
       if (!fields.length) {
         const bad = r.errors?.find(e => e.id === null)

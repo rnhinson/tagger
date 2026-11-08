@@ -235,7 +235,7 @@ export function openChangeCover(ids: number[], mbAlbumId: string | null, guess: 
 // its tags or folder names, the first release that has art); approve, or
 // search one by hand, then write them where Settings → Cover Art says.
 const PROBES = 8          // releases tried per album before giving up
-const caa = (id: string, size = 250) => `https://coverartarchive.org/release/${id}/front-${size}`
+export const caa = (id: string, size = 250) => `https://coverartarchive.org/release/${id}/front-${size}`
 
 const VARIOUS = /^various( artists)?$/i
 const words = (s: string) => new Set(s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean))
@@ -247,7 +247,7 @@ function overlap(a: string, b: string): number {
   return small.size ? [...small].filter(w => big.has(w)).length / small.size : 0
 }
 
-function hasArt(url: string): Promise<boolean> {
+export function hasArt(url: string): Promise<boolean> {
   return new Promise(res => {
     const i = new Image()
     const t = setTimeout(() => res(false), 15000)
