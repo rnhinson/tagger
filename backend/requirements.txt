@@ -7,3 +7,4 @@ musicbrainzngs==0.7.1
 pyacoustid==1.3.0
 aiofiles==25.1.0
 cryptography==50.0.2
+pillow==12.3.0

@@ -126,11 +126,28 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 _MAX_COVER_BYTES = 20 * 1024 * 1024  # 20 MB
 
 
-def _fetch_caa(mb_album_id: str) -> tuple[str, bytes]:
-    """Fetch the front cover from the Cover Art Archive. Raises on failure."""
-    url = f"https://coverartarchive.org/release/{mb_album_id}/front"
+def _fetch_caa(mb_album_id: str, size: int = 1200) -> tuple[str, bytes]:
+    """
+    Fetch the front cover from the Cover Art Archive. Raises on failure.
+    A sized JPEG (250/500/1200) first -- originals can be 8 MB PNGs; 0 = the original.
+    """
+    if size:
+        try:
+            return _fetch_caa_url(f"https://coverartarchive.org/release/{mb_album_id}/front-{size}")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+    return _fetch_caa_url(f"https://coverartarchive.org/release/{mb_album_id}/front")
+
+
+def _caa_size(size: int) -> int:
+    """The smallest Cover Art Archive size (250/500/1200) at least `size`; 0 = the original."""
+    return next((c for c in (250, 500, 1200) if size and size <= c), 0)
+
+
+def _fetch_caa_url(url: str) -> tuple[str, bytes]:
     req = urllib.request.Request(url, headers={"User-Agent": "tagger/0.2"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         mime = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
         data = resp.read(_MAX_COVER_BYTES + 1)
     if len(data) > _MAX_COVER_BYTES:
@@ -171,7 +188,7 @@ from pydantic import BaseModel
 
 from difflib import SequenceMatcher
 
-from core import albummatch, staging
+from core import albummatch, covers, staging
 from core.providers import musicbrainz as mbp
 
 
@@ -343,8 +360,8 @@ async def album_apply(req: AlbumApply):
     rel = await asyncio.to_thread(_release, req.mb_album_id)
     by_key = {t["key"]: t for t in rel["tracks"]}
     fields = [f for f in req.fields if f in albummatch.FIELDS]
-    if not fields:
-        raise HTTPException(400, "No fields chosen")
+    if not fields and not req.cover:
+        raise HTTPException(400, "Nothing chosen: pick tags or cover art")
     errors: list[dict] = []
     with db() as conn:
         rows = {r["id"]: r for r in _rows(conn, list(req.pairs))}
@@ -366,16 +383,28 @@ async def album_apply(req: AlbumApply):
             for row, change in todo:
                 staging.stage_edit(conn, row, change, step)
             res = _finish(conn, step, [r["id"] for r, _ in todo])
-    covered = 0
+    covered = folders = 0
     if req.cover and rows:
+        cfg = load_app_settings()
         try:
-            mime, data = await asyncio.to_thread(_fetch_caa, req.mb_album_id)
-            for row in rows.values():
-                try:
-                    write_cover(row["path"], mime, data)
-                    covered += 1
-                except Exception as e:  # noqa: BLE001 -- report per file
-                    errors.append({"id": row["id"], "error": f"cover: {e}"})
+            with db() as conn:
+                if cfg.cover_target in ("folder", "both"):
+                    mime, data = await asyncio.to_thread(_fetch_caa, req.mb_album_id, _caa_size(cfg.cover_folder_size))
+                    for d in {r["directory"] for r in rows.values()}:
+                        try:
+                            covers.write_folder(conn, d, mime, data, cfg.cover_folder_size)
+                            folders += 1
+                        except Exception as e:  # noqa: BLE001
+                            errors.append({"id": None, "error": f"folder cover: {e}"})
+                if cfg.cover_target in ("tracks", "both"):
+                    mime, data = await asyncio.to_thread(_fetch_caa, req.mb_album_id, _caa_size(cfg.cover_embed_size))
+                    for row in rows.values():
+                        try:
+                            covers.set_track(conn, row, mime, data, cfg.cover_embed_size)
+                            covered += 1
+                        except Exception as e:  # noqa: BLE001 -- report per file
+                            errors.append({"id": row["id"], "error": f"cover: {e}"})
         except Exception as e:  # noqa: BLE001
             errors.append({"id": None, "error": f"cover art: {e}"})
-    return {**res, "changed": len(todo), "covers": covered, "errors": errors + res.get("errors", [])}
+    return {**res, "changed": len(todo), "covers": covered, "folder_covers": folders,
+            "errors": errors + res.get("errors", [])}

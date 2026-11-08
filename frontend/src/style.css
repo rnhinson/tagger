@@ -1495,3 +1495,5 @@ button.scan-status[hidden] { display: none; }
 .dup-loser td { color: var(--text-dim); text-decoration: line-through; }
 .dup-loser td:nth-child(2) { text-decoration: none; }
 .dup-path { color: var(--text-muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quality-group { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); padding: 10px 12px 2px; list-style: none; }

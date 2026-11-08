@@ -16,6 +16,7 @@ import { overlayStaged, editToast, undoToast, missingText, openReview, openHisto
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
+import { openCovers } from './covers'
 import { openMbAlbum } from './mbalbum'
 import { openLyrics } from './lyricsdialog'
 import { openDuplicates } from './duplicates'
@@ -304,11 +305,19 @@ async function renderQualityPanel() {
 
   qualityListEl.innerHTML = ''
   let anyIssues = false
+  let group: string | undefined
 
   for (const issue of QUALITY_ISSUES) {
     const count = state.qualityIssues[issue.key] ?? 0
     if (count === 0) continue
     anyIssues = true
+    if (issue.group && issue.group !== group) {
+      const h = document.createElement('li')
+      h.className = 'quality-group'
+      h.textContent = issue.group
+      qualityListEl.appendChild(h)
+    }
+    group = issue.group
     const li = document.createElement('li')
     const isActive = state.selectedIssue === issue.key
     li.className = 'nav-item quality-issue-item' + (isActive ? ' active' : '')
@@ -1956,6 +1965,10 @@ lyricsSearchBtn.addEventListener('click', () => {
   if (state.selectedIds.size !== 1) { toast('Select one track to search its lyrics', 'info'); return }
   openLyricsSearch([...state.selectedIds][0], undefined, refreshAfterBulk)
 })
+document.getElementById('covers-btn')!.addEventListener('click', () => {
+  const ids = [...state.selectedIds]
+  if (ids.length) openCovers(ids, async () => { state.qualityIssues = null; await refreshAfterBulk() })
+})
 document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (ids.length) openMergeAlbums(ids, refreshAfterBulk)
@@ -2863,6 +2876,9 @@ const scanExcludeInput  = document.getElementById('setting-scan-exclude') as HTM
 const autoScanInput     = document.getElementById('setting-auto-scan') as HTMLInputElement
 const renameOnSaveInput = document.getElementById('setting-rename-on-save') as HTMLInputElement
 const stageChangesInput = document.getElementById('setting-stage-changes') as HTMLInputElement
+const coverTargetInput  = document.getElementById('setting-cover-target') as HTMLSelectElement
+const coverSizeInput    = document.getElementById('setting-cover-size') as HTMLSelectElement
+const coverFolderSizeInput = document.getElementById('setting-cover-folder-size') as HTMLSelectElement
 const libraryRootsInput = document.getElementById('setting-library-roots') as HTMLTextAreaElement
 const libraryRootsDefaultEl   = document.getElementById('library-roots-default')!
 const libraryRootsEffectiveEl = document.getElementById('library-roots-effective')!
@@ -2969,6 +2985,9 @@ async function openSettings() {
     autoScanInput.value       = String(s.auto_scan_minutes ?? 0)
     renameOnSaveInput.checked = s.rename_on_save
     stageChangesInput.checked = s.stage_changes ?? true
+    coverTargetInput.value    = s.cover_target ?? 'folder'
+    coverSizeInput.value      = String(s.cover_embed_size ?? 500)
+    coverFolderSizeInput.value = String(s.cover_folder_size ?? 1200)
     libraryRootsInput.value   = (s.library_roots ?? []).join('\n')
     libraryRootsDefaultEl.textContent = s.env_library_roots?.length
       ? `TAGGER_LIBRARY_ROOTS (${s.env_library_roots.join(', ')})`
@@ -3155,6 +3174,9 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     lrclib_app_id:     lrclibAppIdInput.value.trim(),
     rename_on_save:    renameOnSaveInput.checked,
     stage_changes:     stageChangesInput.checked,
+    cover_target:      coverTargetInput.value as AppSettings['cover_target'],
+    cover_embed_size:  parseInt(coverSizeInput.value, 10),
+    cover_folder_size: parseInt(coverFolderSizeInput.value, 10),
     library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,

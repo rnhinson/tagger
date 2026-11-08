@@ -148,3 +148,22 @@ def test_underscored_rips_are_unnamed_and_named_by_folder(tmp_path):
     assert all(albummatch.unnamed(l) for l in local)
     m = albummatch.match(local, RELEASE["tracks"])
     assert m[1][0] == "1-1" and m[2][0] == "1-2" and m[3][0] == "1-3"
+
+
+def test_cover_only_apply(client, lib, monkeypatch):
+    import api.lookup as lk
+    monkeypatch.setattr(mbp, "get_release", lambda _id: RELEASE)
+    sizes = []
+    monkeypatch.setattr(lk, "_fetch_caa", lambda _id, size=1200: sizes.append(size) or ("image/jpeg", b"jpg"))
+    wrote = []
+    monkeypatch.setattr(lk.covers, "set_track", lambda conn, row, mime, data, size=0: wrote.append(row["path"]))
+    (lib / "Shared" / "x").mkdir()
+    a = _insert(lib / "Shared" / "x" / "1.mp3", title="Come Together")
+    body = {"mb_album_id": REL_ID, "pairs": {str(a): "1-1"}, "fields": []}
+    assert client.post("/api/lookup/album/apply", json=body).status_code == 400
+    r = client.post("/api/lookup/album/apply", json={**body, "cover": True}).json()     # default: the folder
+    assert (r["folder_covers"], r["covers"], r["changed"]) == (1, 0, 0) and not wrote and sizes == [1200]
+    assert (lib / "Shared" / "x" / "cover.jpg").read_bytes() == b"jpg"
+    client.patch("/api/config", json={"cover_target": "both", "cover_embed_size": 500})
+    r = client.post("/api/lookup/album/apply", json={**body, "cover": True}).json()
+    assert (r["folder_covers"], r["covers"]) == (1, 1) and sizes[-2:] == [1200, 500]

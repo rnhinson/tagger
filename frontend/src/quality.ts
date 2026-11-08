@@ -23,7 +23,7 @@ export const QUALITY_TITLES = {
   poor: 'Missing critical tags (title or artist)',
 }
 
-export const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: boolean }[] = [
+export const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: boolean; group?: string }[] = [
   { key: 'missing_title',        label: 'Missing title'    },
   { key: 'missing_artist',       label: 'Missing artist'   },
   { key: 'missing_album',        label: 'Missing album'    },
@@ -35,6 +35,11 @@ export const QUALITY_ISSUES: { key: keyof IssueCount; label: string; warn?: bool
   { key: 'missing_files',        label: 'Missing files',    warn: true },
   { key: 'not_in_layout',        label: 'Not in layout'    },
   { key: 'missing_lyrics',       label: 'Missing lyrics'   },
+  { key: 'covers_none',          label: 'No cover',               group: 'Cover art' },
+  { key: 'covers_no_folder',     label: 'No folder cover',        group: 'Cover art' },
+  { key: 'covers_no_tracks',     label: 'No track covers',        group: 'Cover art' },
+  { key: 'covers_both',          label: 'Folder and track covers', group: 'Cover art' },
+  { key: 'covers_oversized',     label: 'Larger than the size settings', group: 'Cover art' },
 ]
 
 // ─── Case normalization ─────────────────────────────────────────────────────────

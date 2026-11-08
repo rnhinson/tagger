@@ -179,6 +179,26 @@ export const APP_HTML = `
         <p class="settings-hint">Edits, organizing and lookups are held as staged changes until you write them from <strong>Review</strong>. Off: each edit is written straight away.</p>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Cover Art</div>
+        <label class="field-label">New cover art goes to
+          <select id="setting-cover-target">
+            <option value="folder">The album folder (cover.jpg)</option>
+            <option value="tracks">Each track (embedded)</option>
+            <option value="both">Both</option>
+          </select></label>
+        <label class="field-label">Folder cover: shrink to
+          <select id="setting-cover-folder-size">
+            <option value="500">500 px</option><option value="800">800 px</option><option value="1000">1000 px</option>
+            <option value="1200">1200 px</option><option value="1500">1500 px</option><option value="0">Don't resize</option>
+          </select></label>
+        <label class="field-label">Track (embedded) art: shrink to
+          <select id="setting-cover-size">
+            <option value="250">250 px</option><option value="500">500 px</option><option value="800">800 px</option>
+            <option value="1200">1200 px</option><option value="0">Don't resize</option>
+          </select></label>
+        <p class="settings-hint">Plex, Jellyfin, Navidrome and Music Assistant read the folder's cover.jpg; embedded art is a copy in every track, for files that leave the folder. Any art written (Match album, Covers…, an uploaded cover) is shrunk to these sizes on its longest side, never enlarged. To move existing art: select tracks → Covers….</p>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Trash</div>
         <p class="settings-hint">Deleted files are moved to a trash folder and can be restored with Undo. Emptying trash frees that space permanently.</p>
         <div id="trash-status" class="acoustid-status"></div>
@@ -274,6 +294,7 @@ export const APP_HTML = `
         </span>
         <span class="bulk-group"><span class="bulk-group-label">Files</span>
           <button id="lyrics-group-btn" class="btn btn-ghost btn-sm" title="Put the selection in a group: how its lyrics are looked up (or No lyrics), and its layout">Group…</button>
+          <button id="covers-btn" class="btn btn-ghost btn-sm" title="Move, copy or delete cover art between the album folder (cover.jpg) and the tracks">Covers…</button>
           <button id="merge-albums-btn" class="btn btn-ghost btn-sm" title="Make the selected tracks one album: tags, disc numbers, optionally one folder — previewed, then staged">Merge albums…</button>
           <button id="bulk-rename-btn" class="btn btn-ghost btn-sm" title="Rename the selected files with search &amp; replace (regex, captures, counters) — previewed, then staged">Rename files…</button>
         </span>

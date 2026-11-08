@@ -13,6 +13,9 @@ const FIELDS: { key: string; label: string; on: boolean }[] = [
   { key: 'year', label: 'Year', on: true }, { key: 'track_number', label: 'Track #', on: true },
   { key: 'disc_number', label: 'Disc #', on: true }, { key: 'mb', label: 'MusicBrainz IDs', on: true },
 ]
+const coverWhere = (r: { covers: number; folder_covers: number }) =>
+  [r.folder_covers ? `cover.jpg in ${r.folder_covers} folder${r.folder_covers !== 1 ? 's' : ''}` : '',
+   r.covers ? `art in ${r.covers} track${r.covers !== 1 ? 's' : ''}` : ''].filter(Boolean).map(x => ` (${x})`).join('')
 const MB_IDS = ['mb_track_id', 'mb_artist_id', 'mb_album_id', 'mb_album_artist_id']
 
 export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
@@ -47,7 +50,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
           <div class="pr-options mb-fields" id="mb-fields">
             ${FIELDS.map(f => `<label class="settings-toggle"><input type="checkbox" data-field="${f.key}" ${f.on ? 'checked' : ''} /><span>${f.label}</span></label>`).join('')}
             <label class="settings-toggle"><input type="checkbox" id="mb-orig" checked /><span>Original year</span></label>
-            <label class="settings-toggle"><input type="checkbox" id="mb-cover" /><span>Cover art (written now)</span></label>
+            <label class="settings-toggle"><input type="checkbox" id="mb-cover" /><span title="Where it goes: Settings → Writing → Cover Art">Cover art (written now)</span></label>
           </div>
           <table class="pr-table mb-table"><thead><tr><th class="pr-check"></th><th>Your track</th><th class="mb-link">Match</th><th>MusicBrainz track</th></tr></thead>
             <tbody id="mb-rows"></tbody></table>
@@ -232,9 +235,12 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     const n = m.items.filter(it => chosen.get(it.id) && !skip.has(it.id)).length
     const dups = [...counts.values()].some(c => c > 1)
     sumEl.innerHTML = dups ? '<span class="pr-bad">Two tracks point at the same release track</span>' : `${n} of ${m.items.length} tracks`
-    goBtn.disabled = !n || dups
-    goBtn.textContent = `Stage ${n} track${n !== 1 ? 's' : ''}`
+    const anyField = [...overlay.querySelectorAll<HTMLInputElement>('#mb-fields input[data-field]')].some(cb => cb.checked)
+    const cover = $<HTMLInputElement>('#mb-cover').checked
+    goBtn.disabled = !n || dups || (!anyField && !cover)
+    goBtn.textContent = anyField ? `Stage ${n} track${n !== 1 ? 's' : ''}` : `Write cover art`
   }
+  $('#mb-fields').addEventListener('change', () => { if (match) renderMatch() })
 
   rowsEl.addEventListener('change', (e) => {
     const el = e.target as HTMLInputElement | HTMLSelectElement
@@ -260,7 +266,11 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
         mb_album_id: match.release.mb_album_id, pairs, fields,
         original_year: $<HTMLInputElement>('#mb-orig').checked, cover: $<HTMLInputElement>('#mb-cover').checked,
       })
-      editToast(r, `MusicBrainz tags on ${r.changed} track${r.changed !== 1 ? 's' : ''}${r.covers ? ` (cover art on ${r.covers})` : ''}`)
+      if (!fields.length) {
+        const bad = r.errors?.find(e => e.id === null)
+        if (bad || !(r.covers || r.folder_covers)) { toast(`Cover art: ${bad?.error ?? 'nothing written'}`, 'error'); goBtn.disabled = false; return }
+        toast(`Cover art written${coverWhere(r)}`, 'success')
+      } else editToast(r, `MusicBrainz tags on ${r.changed} track${r.changed !== 1 ? 's' : ''}${coverWhere(r)}`)
       close()
       await onDone()
     } catch (e) { toast(`Failed: ${errText(e)}`, 'error'); goBtn.disabled = false }
