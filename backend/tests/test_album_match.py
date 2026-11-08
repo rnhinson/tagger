@@ -204,7 +204,8 @@ def test_release_tags_give_album_artist_genre_and_composer(client, monkeypatch):
            "tracks": [{**RELEASE["tracks"][1], "composer": "George Harrison"}]}
     monkeypatch.setattr(mbp, "get_release", lambda _id: rel)
     r = client.get(f"/api/lookup/release-tags/{REL_ID}?mb_track_id=r2").json()
-    assert r == {"album_artist": "The Beatles", "mb_album_artist_id": "aa", "genre": "Rock", "composer": "George Harrison"}
+    assert r == {"album": "Abbey Road", "album_artist": "The Beatles", "mb_album_artist_id": "aa", "year": "1969",
+                 "genre": "Rock", "composer": "George Harrison", "track_number": "2", "disc_number": "1"}
     assert client.get(f"/api/lookup/release-tags/{REL_ID}?mb_track_id=zz").json()["composer"] is None
 
 
@@ -216,3 +217,17 @@ def test_apply_genre_override_writes_only_the_kept_genres(client, lib, monkeypat
     client.post("/api/lookup/album/apply", json={**body, "genre": "Rock"})
     assert client.get(f"/api/library/track/{a}").json()["staged"]["tags"] == {"genre": "Rock"}
     assert client.post("/api/lookup/album/apply", json={**body, "genre": ""}).json()["changed"] == 0
+
+
+def test_pick_release_prefers_the_files_album_then_official_albums():
+    rels = [
+        {"id": "c", "title": "Greatest Hits", "date": "1990", "release-group": {"primary-type": "Album", "secondary-type-list": ["Compilation"]}},
+        {"id": "s", "title": "Something", "date": "1969-10", "release-group": {"primary-type": "Single"}},
+        {"id": "a2", "title": "Abbey Road", "date": "2019", "release-group": {"primary-type": "Album"}},
+        {"id": "a1", "title": "Abbey Road", "date": "1969", "release-group": {"primary-type": "Album"}},
+        {"id": "b", "title": "Bootleg Road", "date": "1968", "status": "Bootleg", "release-group": {"primary-type": "Album"}},
+    ]
+    assert mbp.pick_release(rels, "Greatest Hits")["id"] == "c"
+    assert mbp.pick_release(rels, None)["id"] == "a1"
+    assert mbp.pick_release(rels, "Not On Any")["id"] == "a1"
+    assert mbp.pick_release([], None) == {}

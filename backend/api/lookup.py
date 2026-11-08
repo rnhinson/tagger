@@ -39,6 +39,11 @@ def lookup_status():
     }
 
 
+def _real(v: str | None) -> str | None:
+    """A tag value, unless it's a ripper's placeholder ("Unknown Album")."""
+    return None if albummatch.is_placeholder(v) else v
+
+
 @router.post("/search/{track_id}")
 async def search_track(track_id: int):
     with db() as conn:
@@ -52,7 +57,7 @@ async def search_track(track_id: int):
             raise HTTPException(400, "fpcalc not found — install libchromaprint-tools to use AcoustID")
         try:
             from core.providers.acoustid_provider import AcoustIDProvider
-            results = await AcoustIDProvider(acoustid_key).lookup(row["path"])
+            results = await AcoustIDProvider(acoustid_key).lookup(row["path"], _real(row["album"]))
             if results:
                 return [
                     {k: v for k, v in dataclasses.asdict(r).items() if k != "raw"}
@@ -67,7 +72,7 @@ async def search_track(track_id: int):
     results = await _mb.search(
         title=row["title"],
         artist=row["artist"],
-        album=row["album"],
+        album=_real(row["album"]),
         duration=row["duration"],
     )
 
@@ -99,8 +104,12 @@ async def release_tags(mb_album_id: str, mb_track_id: str = ""):
     rel = await asyncio.to_thread(_release, mb_album_id)
     await asyncio.to_thread(mbp.release_genre, rel)
     track = next((t for t in rel["tracks"] if mb_track_id and t["mb_track_id"] == mb_track_id), None)
-    return {"album_artist": rel["album_artist"], "mb_album_artist_id": rel["mb_album_artist_id"],
-            "genre": rel.get("genre"), "composer": track["composer"] if track else None}
+    album = albummatch.album_tags(rel)        # album, album artist, (original) year, genre, release ids
+    if track:
+        album |= {"track_number": str(track["position"]), "disc_number": str(track["disc"]),
+                  "composer": track["composer"]}
+    keys = ("album", "album_artist", "mb_album_artist_id", "year", "genre", "composer", "track_number", "disc_number")
+    return {k: album.get(k) for k in keys}
 
 
 @router.get("/releases/{mb_track_id}")
