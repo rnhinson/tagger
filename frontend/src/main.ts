@@ -1286,11 +1286,9 @@ async function buildProposal(track: Track): Promise<FixProposal | null> {
   const found = { ...top } as unknown as Record<string, string | null | undefined>
   if (top.mb_album_id) {
     try {
+      // The release itself: its title, credited artist, original year, the track's position.
       const rel = await api.lookup.releaseTags(top.mb_album_id, top.mb_track_id)
-      found.album_artist = rel.album_artist ?? found.album_artist
-      found.mb_album_artist_id = rel.mb_album_artist_id ?? found.mb_album_artist_id
-      found.genre = rel.genre
-      found.composer = rel.composer
+      for (const [k, v] of Object.entries(rel)) if (v != null || k === 'genre' || k === 'composer') found[k] = v
     } catch { /* the track search's values stand */ }
   }
   const update: Record<string, string> = {}

@@ -569,7 +569,8 @@ export const api = {
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
     releaseTags: (mbAlbumId: string, mbTrackId: string | null) =>
-      request<{ album_artist: string | null; mb_album_artist_id: string | null; genre: string | null; composer: string | null }>(
+      request<{ album: string | null; album_artist: string | null; mb_album_artist_id: string | null; year: string | null
+                genre: string | null; composer: string | null; track_number: string | null; disc_number: string | null }>(
         'GET', `/api/lookup/release-tags/${encodeURIComponent(mbAlbumId)}?mb_track_id=${encodeURIComponent(mbTrackId ?? '')}`),
     infer: (trackId: number) =>
       request<LookupResult | null>('POST', `/api/lookup/infer/${trackId}`),

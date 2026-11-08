@@ -30,9 +30,32 @@ def _with_retry(fn, *args, attempts: int = 3, **kwargs):
             delay *= 2
 
 
-def recording_to_metadata(rec: dict, *, source: str, score: float) -> TrackMetadata:
+def _norm_title(s: str | None) -> str:
+    return " ".join("".join(c if c.isalnum() else " " for c in (s or "").lower()).split())
+
+
+def pick_release(releases: list[dict], prefer_album: str | None = None) -> dict:
+    """
+    The release a recording's tags should come from: the one titled like the
+    file's album tag, else an official album over compilations, singles and
+    bootlegs, earliest first. MusicBrainz lists them in no useful order.
+    """
+    want = _norm_title(prefer_album)
+
+    def rank(rel: dict) -> tuple:
+        rg = rel.get("release-group") or {}
+        secondary = set(rg.get("secondary-type-list") or [])
+        return (_norm_title(rel.get("title")) != want if want else True,
+                rg.get("primary-type", rg.get("type")) != "Album",
+                "Compilation" in secondary or rg.get("type") == "Compilation",
+                rel.get("status", "Official") != "Official",
+                rel.get("date") or "9999")
+    return min(releases, key=rank) if releases else {}
+
+
+def recording_to_metadata(rec: dict, *, source: str, score: float, prefer_album: str | None = None) -> TrackMetadata:
     """Convert a MusicBrainz recording dict into a normalised TrackMetadata."""
-    release = (rec.get("release-list") or [{}])[0]
+    release = pick_release(rec.get("release-list") or [], prefer_album)
     credit = (rec.get("artist-credit") or [{}])[0]
     artist_info = credit.get("artist", {}) if isinstance(credit, dict) else {}
     release_credits = release.get("artist-credit") or []
@@ -102,6 +125,7 @@ class MusicBrainzProvider(MetadataProvider):
                 rec,
                 source="musicbrainz",
                 score=int(rec.get("ext:score", 0)) / 100.0,
+                prefer_album=album,
             )
             for rec in resp.get("recording-list", [])
         ]
