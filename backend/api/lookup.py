@@ -89,6 +89,20 @@ async def search_track(track_id: int):
     ]
 
 
+@router.get("/release-tags/{mb_album_id}")
+async def release_tags(mb_album_id: str, mb_track_id: str = ""):
+    """
+    What a per-track match's release gives beyond the track search: its credited
+    album artist, its genres and the track's composer (Auto-fix). The release is
+    cached, so an album's tracks cost one MusicBrainz request.
+    """
+    rel = await asyncio.to_thread(_release, mb_album_id)
+    await asyncio.to_thread(mbp.release_genre, rel)
+    track = next((t for t in rel["tracks"] if mb_track_id and t["mb_track_id"] == mb_track_id), None)
+    return {"album_artist": rel["album_artist"], "mb_album_artist_id": rel["mb_album_artist_id"],
+            "genre": rel.get("genre"), "composer": track["composer"] if track else None}
+
+
 @router.get("/releases/{mb_track_id}")
 async def list_releases(mb_track_id: str):
     """List the releases/editions a recording appears on (for the edition picker)."""
@@ -356,6 +370,7 @@ class AlbumApply(BaseModel):
     cover: bool = False
     keep: list[str] = []                     # fields only filled where empty (genre, composer)
     unpaired: list[int] = []                 # tracks on no release track: album-level fields only
+    genre: Optional[str] = None              # the genres to write instead of the release's (some left out)
 
 
 @router.post("/album/apply")
@@ -382,6 +397,8 @@ async def album_apply(req: AlbumApply):
                 continue
             eff = staging.effective(row, entries.get(tid))
             tags = albummatch.tags_for(rel, mb, req.original_year)
+            if req.genre is not None:
+                tags = {k: v for k, v in tags.items() if k != "genre"} | ({"genre": req.genre} if req.genre.strip() else {})
             change = {f: tags[f] for f in fields if f in tags and (eff.get(f) or "") != tags[f]
                       and not (f in req.keep and (eff.get(f) or "").strip())}
             if change:

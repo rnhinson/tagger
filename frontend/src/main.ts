@@ -1252,12 +1252,10 @@ function applyLookupResult(r: LookupResult) {
 
 // ─── Auto-fix ─────────────────────────────────────────────────────────────────
 
-const FIX_SAVE_FIELDS: (keyof LookupResult)[] = [
-  'title', 'artist', 'album', 'album_artist', 'year', 'track_number', 'disc_number',
-  'mb_track_id', 'mb_artist_id', 'mb_album_id', 'mb_album_artist_id',
-]
-
-const FIX_DISPLAY_FIELDS: { key: keyof LookupResult; label: string }[] = [
+// Per track: the best recording match, plus what its release gives that the
+// track search doesn't (credited album artist, genres, the song's composer).
+// Only fields that would change are proposed; each field can be switched off.
+const FIX_FIELDS: { key: string; label: string; ids?: string[] }[] = [
   { key: 'title',        label: 'Title'        },
   { key: 'artist',       label: 'Artist'       },
   { key: 'album',        label: 'Album'        },
@@ -1265,7 +1263,14 @@ const FIX_DISPLAY_FIELDS: { key: keyof LookupResult; label: string }[] = [
   { key: 'year',         label: 'Year'         },
   { key: 'track_number', label: 'Track #'      },
   { key: 'disc_number',  label: 'Disc #'       },
+  { key: 'genre',        label: 'Genre'        },
+  { key: 'composer',     label: 'Composer'     },
+  { key: 'mb',           label: 'MusicBrainz IDs', ids: ['mb_track_id', 'mb_artist_id', 'mb_album_id', 'mb_album_artist_id'] },
 ]
+const sameValues = (a: string, b: string) => {
+  const set = (s: string) => s.split(';').map(x => x.trim().toLowerCase()).filter(Boolean).sort().join(';')
+  return set(a) === set(b)
+}
 
 interface FixProposal {
   track:  Track
@@ -1278,10 +1283,20 @@ async function buildProposal(track: Track): Promise<FixProposal | null> {
   const results = await api.lookup.search(track.id)
   if (!results.length) return null
   const top = results[0]
+  const found = { ...top } as unknown as Record<string, string | null | undefined>
+  if (top.mb_album_id) {
+    try {
+      const rel = await api.lookup.releaseTags(top.mb_album_id, top.mb_track_id)
+      found.album_artist = rel.album_artist ?? found.album_artist
+      found.mb_album_artist_id = rel.mb_album_artist_id ?? found.mb_album_artist_id
+      found.genre = rel.genre
+      found.composer = rel.composer
+    } catch { /* the track search's values stand */ }
+  }
   const update: Record<string, string> = {}
-  for (const f of FIX_SAVE_FIELDS) {
-    const v = top[f]
-    if (v != null) update[f as string] = v as string
+  for (const f of FIX_FIELDS) for (const k of f.ids ?? [f.key]) {
+    const v = found[k], cur = (track as unknown as Record<string, string | null>)[k] ?? ''
+    if (v != null && v !== '' && !sameValues(v, cur)) update[k] = v
   }
   if (!Object.keys(update).length) return null
   return { track, score: top.score, source: top.source, update }
@@ -1301,22 +1316,34 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
     <button class="btn btn-ghost btn-icon fix-confirm-close">✕</button>
   `
 
+  // Field switches: only the fields some proposal would change.
+  const offered = FIX_FIELDS.filter(f => proposals.some(p => (f.ids ?? [f.key]).some(k => k in p.update)))
+  const off = new Set<string>()
+  const fieldsEl = document.createElement('div')
+  fieldsEl.className = 'pr-options fix-fields'
+  fieldsEl.innerHTML = offered.map(f => `<label class="settings-toggle"><input type="checkbox" data-field="${f.key}" checked /><span>${esc(f.label)}</span></label>`).join('')
+
   const body = document.createElement('div')
   body.className = 'fix-confirm-body'
 
-  for (const p of proposals) {
+  // Genres: one chip each, any of them can be left out.
+  const offGenres = proposals.map(() => new Set<string>())
+  const splitG = (g: string) => g.split(';').map(x => x.trim()).filter(Boolean)
+  for (const [pi, p] of proposals.entries()) {
     const pct = Math.round(p.score * 100)
     const scoreClass = pct >= 90 ? 'score-high' : pct >= 70 ? 'score-mid' : 'score-low'
-    const rows = FIX_DISPLAY_FIELDS
-      .filter(f => p.update[f.key as string] != null)
+    const rows = FIX_FIELDS
+      .filter(f => !f.ids && p.update[f.key] != null)
       .map(f => {
-        const proposed = p.update[f.key as string]
+        const proposed = p.update[f.key]
         const current  = (p.track[f.key as keyof Track] as string | null) ?? ''
-        return `<tr>
+        return `<tr data-field="${f.key}">
           <td class="fix-col-field">${esc(f.label)}</td>
           <td class="fix-col-current">${current ? esc(current) : '<span class="fix-empty">empty</span>'}</td>
           <td class="fix-col-arrow">→</td>
-          <td class="fix-col-proposed">${esc(proposed)}</td>
+          <td class="fix-col-proposed">${f.key === 'genre'
+            ? splitG(proposed).map(g => `<button type="button" class="mbb-chip mbb-new" data-p="${pi}" data-genre="${esc(g)}" title="Click to leave this genre out">${esc(g)}</button>`).join(' ')
+            : esc(proposed)}</td>
         </tr>`
       }).join('')
 
@@ -1341,10 +1368,39 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
   cancelBtn.textContent = 'Cancel'
   const applyBtn = document.createElement('button')
   applyBtn.className = 'btn btn-primary'
-  applyBtn.textContent = `Apply ${proposals.length} change${proposals.length !== 1 ? 's' : ''}`
+  // The proposals with their switched-off fields removed (and any left empty dropped).
+  const chosen = () => proposals.map((p, pi) => {
+    const update = Object.fromEntries(Object.entries(p.update).filter(([k]) =>
+      !offered.some(f => off.has(f.key) && (f.ids ?? [f.key]).includes(k))))
+    if (update.genre && offGenres[pi].size) {
+      const keep = splitG(update.genre).filter(g => !offGenres[pi].has(g))
+      if (keep.length) update.genre = keep.join('; '); else delete update.genre
+    }
+    return { ...p, update }
+  }).filter(p => Object.keys(p.update).length)
+  const label = () => {
+    const n = chosen().length
+    applyBtn.textContent = `Apply ${n} change${n !== 1 ? 's' : ''}`
+    applyBtn.disabled = !n
+  }
+  label()
+  body.addEventListener('click', e => {
+    const c = (e.target as HTMLElement).closest<HTMLElement>('[data-genre]')
+    if (!c) return
+    const set = offGenres[Number(c.dataset.p)], g = c.dataset.genre!
+    if (!set.delete(g)) set.add(g)
+    c.classList.toggle('mbb-off', set.has(g)); c.classList.toggle('mbb-new', !set.has(g))
+    label()
+  })
+  fieldsEl.addEventListener('change', e => {
+    const cb = e.target as HTMLInputElement
+    if (cb.checked) off.delete(cb.dataset.field!); else off.add(cb.dataset.field!)
+    body.querySelectorAll<HTMLElement>(`tr[data-field="${cb.dataset.field}"]`).forEach(tr => tr.classList.toggle('fix-row-off', !cb.checked))
+    label()
+  })
   footer.append(cancelBtn, applyBtn)
 
-  modal.append(header, body, footer)
+  modal.append(header, fieldsEl, body, footer)
   overlay.appendChild(modal)
   document.body.appendChild(overlay)
 
@@ -1356,7 +1412,7 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
   applyBtn.addEventListener('click', async () => {
     applyBtn.disabled = true
     applyBtn.textContent = 'Applying…'
-    try { await onConfirm(proposals) } finally { close() }
+    try { await onConfirm(chosen()) } finally { close() }
   })
 }
 

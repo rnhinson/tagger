@@ -285,6 +285,7 @@ def get_release(mb_album_id: str) -> dict | None:
         "original_year": (rg.get("first-release-date") or "")[:4] or None,
         "year": (rel.get("date") or "")[:4] or None,
         "country": rel.get("country"),
+        "rg_id": rg.get("id"),
         # Voted tags: the release's own, else its release group's (where most votes are).
         "tag_list": rel.get("tag-list") or rg.get("tag-list") or [],
         "tracks": [],

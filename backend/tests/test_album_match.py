@@ -197,3 +197,22 @@ def test_genre_and_composer_fill_empty_and_unpaired_get_album_tags(client, lib, 
     assert tags(a) == {"album": "Abbey Road", "genre": "Rock", "composer": "John Lennon"}
     assert tags(b) == {"album": "Abbey Road"}                       # its own genre and composer kept
     assert tags(c) == {"album": "Abbey Road", "genre": "Rock"}      # on no release track: album tags only
+
+
+def test_release_tags_give_album_artist_genre_and_composer(client, monkeypatch):
+    rel = {**{k: v for k, v in RELEASE.items() if k != "genre"}, "tag_list": [{"name": "rock", "count": "2"}],
+           "tracks": [{**RELEASE["tracks"][1], "composer": "George Harrison"}]}
+    monkeypatch.setattr(mbp, "get_release", lambda _id: rel)
+    r = client.get(f"/api/lookup/release-tags/{REL_ID}?mb_track_id=r2").json()
+    assert r == {"album_artist": "The Beatles", "mb_album_artist_id": "aa", "genre": "Rock", "composer": "George Harrison"}
+    assert client.get(f"/api/lookup/release-tags/{REL_ID}?mb_track_id=zz").json()["composer"] is None
+
+
+def test_apply_genre_override_writes_only_the_kept_genres(client, lib, monkeypatch):
+    rel = {**{k: v for k, v in RELEASE.items() if k != "genre"}, "tag_list": [{"name": "rock", "count": "2"}, {"name": "pop", "count": "2"}]}
+    monkeypatch.setattr(mbp, "get_release", lambda _id: rel)
+    a = _insert(lib / "Shared" / "B" / "A" / "01.mp3", title="Come Together", track_number="1")
+    body = {"mb_album_id": REL_ID, "pairs": {str(a): "1-1"}, "fields": ["genre"]}
+    client.post("/api/lookup/album/apply", json={**body, "genre": "Rock"})
+    assert client.get(f"/api/library/track/{a}").json()["staged"]["tags"] == {"genre": "Rock"}
+    assert client.post("/api/lookup/album/apply", json={**body, "genre": ""}).json()["changed"] == 0
