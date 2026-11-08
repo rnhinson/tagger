@@ -1358,7 +1358,7 @@ button.scan-status[hidden] { display: none; }
   box-shadow: 0 4px 16px rgba(0,0,0,.35);
 }
 .scan-now-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-#scan-btn[hidden] { display: none; }
+.scan-btn { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Album match: wider, resizable, two-sided rows ────────────────────────── */
 .mb-modal { width: min(1400px, 96vw); height: 88vh; max-height: 96vh; max-width: 98vw; min-width: 640px; min-height: 420px; resize: both; overflow: hidden; }

@@ -13,7 +13,7 @@ export const APP_HTML = `
       <button id="undo-btn" class="btn btn-ghost btn-icon" title="Undo last change" aria-label="Undo last change" hidden>↶</button>
       <button id="cleanup-btn" class="btn btn-ghost btn-sm" title="Standardize tag separators (Folk/Celtic → Folk; Celtic)">Clean up</button>
       <button id="history-btn" class="btn btn-ghost btn-sm" title="Change history and undo">History</button>
-      <button id="scan-btn" class="btn btn-primary" hidden title="Index your music — after the first scan this lives under Settings → Background">Scan Library</button>
+      <button id="scan-btn" class="btn btn-ghost btn-sm scan-btn" title="Scan the whole library">Scan all</button>
       <button id="settings-btn" class="btn btn-ghost btn-icon" title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
@@ -208,7 +208,6 @@ export const APP_HTML = `
       </nav>
       <nav id="panel-files" class="sidebar-panel" hidden>
         <div class="nav-toolbar">
-          <button id="rescan-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rescan just the selected folder" disabled>Rescan</button>
           <button id="move-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Move the selected folder (and everything in it) — staged for review" disabled>Move…</button>
           <button id="rename-folder-btn" class="btn btn-ghost btn-sm" style="flex:1" title="Rename the selected folder — staged for review" disabled>Rename…</button>
         </div>
