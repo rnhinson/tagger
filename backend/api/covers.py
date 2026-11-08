@@ -137,6 +137,22 @@ async def set_covers(track_ids: str = Form(...), file: UploadFile | None = File(
     return out
 
 
+def _guess(rows: list[dict]) -> dict:
+    """What to search a folder's cover by: its tags, else (placeholders) its folder names; its release if shared."""
+    from api.config import get_library_roots
+    from api.lookup import _common
+    from core import albummatch
+    from core.fileops import root_for
+    album = _common(rows, "album")
+    artist = _common(rows, "album_artist") or _common(rows, "artist")
+    if not album or not artist:
+        f_album, f_artist = albummatch.names_from_path(rows[0]["path"], root_for(rows[0]["path"], get_library_roots()))
+        album, artist = album or f_album, artist or f_artist
+    mb = {r.get("mb_album_id") for r in rows}
+    return {"album": album or "", "artist": artist or "",
+            "mb_album_id": next(iter(mb)) if len(mb) == 1 and None not in mb and "" not in mb else None}
+
+
 @router.post("/albums")
 def album_covers(req: CoverAction):
     """Move, copy or delete cover art for the selection's album folders (core/covers.py)."""
@@ -152,7 +168,8 @@ def album_covers(req: CoverAction):
         if req.dry_run:
             folders = {r[0] for r in conn.execute("SELECT directory FROM folder_covers")}
             return {"albums": [{"directory": d, "track_ids": [r["id"] for r in rows],
-                                "embedded": sum(1 for r in rows if r["has_cover"]), "folder": d in folders}
+                                "embedded": sum(1 for r in rows if r["has_cover"]), "folder": d in folders,
+                                **_guess([dict(r) for r in rows])}
                                for d, rows in sorted(by_dir.items())]}
         results = []
         for d, rows in by_dir.items():

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 import musicbrainzngs
 
+from core.multivalue import join_values
 from core.providers.base import MetadataProvider, TrackMetadata
 
 musicbrainzngs.set_useragent("tagger", "0.2", "https://github.com/rnhinson/tagger")
@@ -201,6 +203,64 @@ def releases_with_recording(title: str, artist: str | None, limit: int = 25) -> 
     return out[:40]
 
 
+def _credit_name(name: str | None) -> str | None:
+    """MusicBrainz's special artists: "[traditional]" -> "Traditional"; "[unknown]" and the like -> None."""
+    if name and name.startswith("[") and name.endswith("]"):
+        inner = name[1:-1].strip()
+        return inner.capitalize() if inner.lower() in ("traditional", "anonymous") else None
+    return name
+
+
+def _composers(rec: dict) -> str | None:
+    """The recording's song credits: its composers, else its writers ("A; B")."""
+    found: dict[str, list[str]] = {"composer": [], "writer": []}
+    for wr in rec.get("work-relation-list") or []:
+        if wr.get("type") != "performance":
+            continue
+        for ar in (wr.get("work") or {}).get("artist-relation-list") or []:
+            name = _credit_name((ar.get("artist") or {}).get("name"))
+            if ar.get("type") in found and name and name not in found[ar["type"]]:
+                found[ar["type"]].append(name)
+    names = found["composer"] or found["writer"]
+    return join_values(names) if names else None
+
+
+_GENRES: set[str] | None = None
+_SMALL = {"and", "of", "n", "the", "a", "in", "for", "to"}
+
+
+def _genre_names(tag_list: list[dict], most: int = 3) -> list[str]:
+    """
+    MusicBrainz tags that are on its genre list (not "seen live" or moods),
+    the most voted first: those with at least half the top count, up to `most`.
+    """
+    global _GENRES
+    if _GENRES is None:
+        p = Path(__file__).with_name("mb_genres.txt")
+        _GENRES = {g.strip().lower() for g in p.read_text().splitlines() if g.strip()}
+    tags = sorted(((int(t.get("count") or 0), t.get("name", "").lower()) for t in tag_list
+                   if t.get("name", "").lower() in _GENRES), reverse=True)
+    if not tags or tags[0][0] < 1:
+        return []
+    keep = [n for c, n in tags if c >= max(1, tags[0][0] / 2)][:most]
+    title = lambda n: " ".join(w if i and w in _SMALL else w[:1].upper() + w[1:] for i, w in enumerate(n.split(" ")))
+    return [title(n) for n in keep]
+
+
+def release_genre(rel: dict) -> str | None:
+    """The release's genres ("Folk; Celtic"): its tags, else the album artist's. Kept on the (cached) release."""
+    if "genre" not in rel:
+        names = _genre_names(rel.get("tag_list") or [])
+        if not names and rel.get("mb_album_artist_id"):
+            try:
+                art = _with_retry(musicbrainzngs.get_artist_by_id, rel["mb_album_artist_id"], includes=["tags"])
+                names = _genre_names((art.get("artist") or {}).get("tag-list") or [])
+            except Exception:
+                names = []
+        rel["genre"] = join_values(names) or None
+    return rel["genre"]
+
+
 def get_release(mb_album_id: str) -> dict | None:
     """One release with every track (cached: the match and the apply both need it)."""
     hit = _RELEASE_CACHE.get(mb_album_id)
@@ -208,7 +268,8 @@ def get_release(mb_album_id: str) -> dict | None:
         return hit[1]
     try:
         resp = _with_retry(musicbrainzngs.get_release_by_id, mb_album_id,
-                           includes=["recordings", "artist-credits", "release-groups", "media"])
+                           includes=["recordings", "artist-credits", "release-groups", "media", "tags",
+                                     "recording-level-rels", "work-rels", "work-level-rels", "artist-rels"])
     except Exception:
         return None
     rel = resp.get("release") or {}
@@ -224,6 +285,8 @@ def get_release(mb_album_id: str) -> dict | None:
         "original_year": (rg.get("first-release-date") or "")[:4] or None,
         "year": (rel.get("date") or "")[:4] or None,
         "country": rel.get("country"),
+        # Voted tags: the release's own, else its release group's (where most votes are).
+        "tag_list": rel.get("tag-list") or rg.get("tag-list") or [],
         "tracks": [],
     }
     for medium in rel.get("medium-list") or []:
@@ -242,6 +305,7 @@ def get_release(mb_album_id: str) -> dict | None:
                 "mb_artist_id": rcred[0]["artist"]["id"] if rcred and rcred[0].get("artist") else aa_id,
                 "mb_track_id": rec.get("id"),
                 "duration": int(length) / 1000 if length else None,
+                "composer": _composers(rec),
             })
     out["discs"] = len({t["disc"] for t in out["tracks"]})
     _RELEASE_CACHE[mb_album_id] = (time.time(), out)

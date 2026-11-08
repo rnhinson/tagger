@@ -316,6 +316,7 @@ def _release(mb_album_id: str) -> dict:
 async def album_match(req: AlbumMatch):
     """Proposed pairing of the selection with one release, with each pair's tag changes."""
     rel = await asyncio.to_thread(_release, req.mb_album_id)
+    await asyncio.to_thread(mbp.release_genre, rel)
     with db() as conn:
         tracks = _selection(conn, req.track_ids)
     pairs = albummatch.match(tracks, rel["tracks"])
@@ -327,11 +328,13 @@ async def album_match(req: AlbumMatch):
         items.append({"id": t["id"], "filename": t["filename"], "title": t.get("title"),
                       "title_similarity": round(albummatch.title_similarity(t, mb), 3) if mb else None,
                       "artist": t.get("artist"), "track_number": t.get("track_number"),
+                      "genre": t.get("genre"), "composer": t.get("composer"),
                       "disc_number": t.get("disc_number"), "duration": t.get("duration"),
                       "key": key, "score": sc})
     used = {i["key"] for i in items if i["key"]}
-    release = {k: v for k, v in rel.items() if k != "tracks"}
-    return {"release": release, "release_tracks": rel["tracks"], "items": items,
+    release = {k: v for k, v in rel.items() if k not in ("tracks", "tag_list")}
+    current = {f: _common(tracks, f) for f in ("album", "album_artist", "year", "genre")}
+    return {"release": release, "release_tracks": rel["tracks"], "items": items, "current": current,
             "unmatched": [t["key"] for t in rel["tracks"] if t["key"] not in used]}
 
 
@@ -351,6 +354,8 @@ class AlbumApply(BaseModel):
     fields: list[str] = list(albummatch.FIELDS)
     original_year: bool = True
     cover: bool = False
+    keep: list[str] = []                     # fields only filled where empty (genre, composer)
+    unpaired: list[int] = []                 # tracks on no release track: album-level fields only
 
 
 @router.post("/album/apply")
@@ -358,23 +363,27 @@ async def album_apply(req: AlbumApply):
     """Stage the chosen pairs' tags as one step; cover art (optional) is written now."""
     from api.tags import _finish, _rows
     rel = await asyncio.to_thread(_release, req.mb_album_id)
+    if "genre" in req.fields:
+        await asyncio.to_thread(mbp.release_genre, rel)
     by_key = {t["key"]: t for t in rel["tracks"]}
     fields = [f for f in req.fields if f in albummatch.FIELDS]
     if not fields and not req.cover:
         raise HTTPException(400, "Nothing chosen: pick tags or cover art")
     errors: list[dict] = []
+    targets = {**{tid: by_key.get(key) for tid, key in req.pairs.items()}, **{tid: None for tid in req.unpaired}}
     with db() as conn:
-        rows = {r["id"]: r for r in _rows(conn, list(req.pairs))}
+        rows = {r["id"]: r for r in _rows(conn, list(targets))}
         entries = staging.load(conn, list(rows))
         todo = []
-        for tid, key in req.pairs.items():
-            row, mb = rows.get(tid), by_key.get(key)
-            if not row or not mb:
+        for tid, mb in targets.items():
+            row = rows.get(tid)
+            if not row or (tid in req.pairs and not mb):
                 errors.append({"id": tid, "error": "unknown track or release track"})
                 continue
             eff = staging.effective(row, entries.get(tid))
             tags = albummatch.tags_for(rel, mb, req.original_year)
-            change = {f: tags[f] for f in fields if f in tags and (eff.get(f) or "") != tags[f]}
+            change = {f: tags[f] for f in fields if f in tags and (eff.get(f) or "") != tags[f]
+                      and not (f in req.keep and (eff.get(f) or "").strip())}
             if change:
                 todo.append((row, change))
         res: dict = {"staged": True}

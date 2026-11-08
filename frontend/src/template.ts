@@ -3,7 +3,7 @@ import { LOGO_MARK } from './logo'
 export const APP_HTML = `
   <header class="topbar">
     <button id="sidebar-toggle" class="btn btn-ghost btn-icon" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-    <span class="logo">${LOGO_MARK}Tagger</span>
+    <a id="logo" class="logo" href="#" title="Home: all tracks">${LOGO_MARK}Tagger</a>
     <div class="search-wrap">
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
     </div>
@@ -377,4 +377,10 @@ export const APP_HTML = `
       </form>
     </aside>
   </div>
+
+  <footer id="statusbar" class="statusbar">
+    <span id="status-where" class="status-where"></span>
+    <span id="status-view" class="status-view"></span>
+    <span id="status-sel" class="status-sel"></span>
+  </footer>
 `

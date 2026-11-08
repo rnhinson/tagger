@@ -53,3 +53,30 @@ def test_releases_empty_on_error(monkeypatch):
     monkeypatch.setattr(mb.time, "sleep", lambda *_: None)
     monkeypatch.setattr(mb.musicbrainzngs, "get_recording_by_id", boom)
     assert mb.MusicBrainzProvider()._releases_sync("rec-id") == []
+
+
+def _work(*credits):
+    return {"type": "performance", "work": {"artist-relation-list": [
+        {"type": t, "artist": {"name": n}} for t, n in credits]}}
+
+
+def test_composers_prefer_composer_then_writer():
+    assert mb._composers({"work-relation-list": [_work(("composer", "A"), ("lyricist", "B"), ("composer", "C"))]}) == "A; C"
+    assert mb._composers({"work-relation-list": [_work(("writer", "W"), ("lyricist", "L"))]}) == "W"
+    assert mb._composers({"work-relation-list": [_work(("composer", "[traditional]"), ("composer", "[unknown]"))]}) == "Traditional"
+    assert mb._composers({}) is None
+
+
+def test_genre_names_keep_real_genres_most_voted():
+    tags = [{"name": "celtic punk", "count": "3"}, {"name": "seen live", "count": "9"},
+            {"name": "folk rock", "count": "2"}, {"name": "rock", "count": "1"}, {"name": "rock and roll", "count": "2"}]
+    assert mb._genre_names(tags) == ["Celtic Punk", "Rock and Roll", "Folk Rock"]
+    assert mb._genre_names([{"name": "favourites", "count": "5"}]) == []
+
+
+def test_release_genre_falls_back_to_artist(monkeypatch):
+    monkeypatch.setattr(mb.musicbrainzngs, "get_artist_by_id",
+                        lambda *a, **k: {"artist": {"tag-list": [{"name": "filk", "count": "2"}]}})
+    rel = {"tag_list": [], "mb_album_artist_id": "x"}
+    assert mb.release_genre(rel) == "Filk"
+    assert rel["genre"] == "Filk"
