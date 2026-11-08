@@ -34,20 +34,26 @@ def _int(v) -> int:
         return 0
 
 
-_PLACEHOLDER = re.compile(r"^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track \d+)$", re.I)
+_PLACEHOLDER = re.compile(r"^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track ?\d+)$", re.I)
 _DISC_DIR = re.compile(r"^(cd|dis[ck])\s*\d+$", re.I)
 _DIR_SUFFIX = re.compile(r"\s*[\(\[](\d{4}|flac|mp3|ogg|m4a|\d+\s*kbps|web|cd|lossless)[\)\]]\s*$", re.I)
 
 
 def is_placeholder(s: str | None) -> bool:
     """Empty, or a ripper's stand-in ("Unknown Album", "Track 3")."""
-    return not (s or "").strip() or bool(_PLACEHOLDER.match(s.strip()))
+    s = _spaces(s)
+    return not s or bool(_PLACEHOLDER.match(s))
+
+
+def _spaces(s: str | None) -> str:
+    """Underscores (older rips) as spaces."""
+    return re.sub(r"[\s_]+", " ", s or "").strip()
 
 
 def name_title(local: dict) -> str:
     """The file name without its extension and leading number."""
     stem = (local.get("filename") or "").rsplit(".", 1)[0]
-    return _LEADING_NUM.sub("", stem)
+    return _spaces(_LEADING_NUM.sub("", stem))
 
 
 def local_title(local: dict) -> str:
@@ -62,10 +68,10 @@ def names_from_path(path: str, root: Path | None) -> tuple[str | None, str | Non
         d = d.parent
     if d == root or not d.name:
         return None, None
-    album = d.name
+    album = _spaces(d.name)
     while _DIR_SUFFIX.search(album):
         album = _DIR_SUFFIX.sub("", album)
-    artist = d.parent.name if d.parent != root and d.parent.name else None
+    artist = _spaces(d.parent.name) if d.parent != root and d.parent.name else None
     if " - " in album:
         head, rest = album.split(" - ", 1)
         if not artist or _norm(head) == _norm(artist):
