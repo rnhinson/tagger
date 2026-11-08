@@ -161,17 +161,29 @@ def quality(local: list[dict], release_tracks: list[dict]) -> dict:
 
 
 FIELDS = ("title", "artist", "album", "album_artist", "year", "track_number", "disc_number",
-          "mb_track_id", "mb_artist_id", "mb_album_id", "mb_album_artist_id")
+          "mb_track_id", "mb_artist_id", "mb_album_id", "mb_album_artist_id", "genre", "composer")
+ALBUM_FIELDS = ("album", "album_artist", "year", "genre", "mb_album_id", "mb_album_artist_id")
 
 
-def tags_for(release: dict, mb: dict, original_year: bool = True) -> dict[str, str]:
-    """The tags release track `mb` gives a file."""
+def album_tags(release: dict, original_year: bool = True) -> dict[str, str]:
+    """The tags the release gives every file on it (genre once release_genre() has run)."""
     year = (release.get("original_year") if original_year else None) or release.get("year")
     tags = {
-        "title": mb.get("title"), "artist": mb.get("artist"),
-        "album": release.get("album"), "album_artist": release.get("album_artist"),
-        "year": year, "track_number": str(mb["position"]), "disc_number": str(mb["disc"]),
-        "mb_track_id": mb.get("mb_track_id"), "mb_artist_id": mb.get("mb_artist_id"),
+        "album": release.get("album"), "album_artist": release.get("album_artist"), "year": year,
+        "genre": release.get("genre"),
         "mb_album_id": release.get("mb_album_id"), "mb_album_artist_id": release.get("mb_album_artist_id"),
     }
     return {k: v for k, v in tags.items() if v}
+
+
+def tags_for(release: dict, mb: dict | None, original_year: bool = True) -> dict[str, str]:
+    """The tags release track `mb` gives a file (None: a file on no release track -- album tags only)."""
+    tags = album_tags(release, original_year)
+    if mb:
+        tags.update({k: v for k, v in {
+            "title": mb.get("title"), "artist": mb.get("artist"),
+            "track_number": str(mb["position"]), "disc_number": str(mb["disc"]),
+            "mb_track_id": mb.get("mb_track_id"), "mb_artist_id": mb.get("mb_artist_id"),
+            "composer": mb.get("composer"),
+        }.items() if v})
+    return tags

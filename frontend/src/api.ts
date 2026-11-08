@@ -264,7 +264,10 @@ export interface IssueCount {
 }
 
 export type CoverAction = 'copy_to_folder' | 'move_to_folder' | 'copy_to_tracks' | 'move_to_tracks' | 'delete_folder' | 'delete_tracks' | 'shrink'
-export interface CoverAlbum { directory: string; track_ids: number[]; embedded: number; folder: boolean }
+export interface CoverAlbum {
+  directory: string; track_ids: number[]; embedded: number; folder: boolean
+  album: string; artist: string; mb_album_id: string | null   // what to search its cover by
+}
 export interface CoverResult { directory: string; folder: number; tracks: number; note: string | null; errors: { id: number | null; error: string }[] }
 
 export interface TreeEntry {
@@ -280,17 +283,18 @@ export interface MbCandidate {
 
 export interface MbReleaseTrack {
   key: string; disc: number; position: number; number: string | null; title: string; artist: string | null
-  mb_artist_id: string | null; mb_track_id: string | null; duration: number | null
+  mb_artist_id: string | null; mb_track_id: string | null; duration: number | null; composer?: string | null
 }
 
 export interface MbMatch {
   release: { mb_album_id: string; album: string; album_artist: string | null; date: string | null
-             year: string | null; original_year: string | null; country: string | null; discs: number }
+             year: string | null; original_year: string | null; country: string | null; discs: number; genre?: string | null }
   release_tracks: MbReleaseTrack[]
   items: { id: number; filename: string; title: string | null; artist: string | null; track_number: string | null
            disc_number: string | null; duration: number | null; key: string | null; score: number
-           title_similarity: number | null }[]
+           title_similarity: number | null; genre?: string | null; composer?: string | null }[]
   unmatched: string[]
+  current?: { album: string | null; album_artist: string | null; year: string | null; genre: string | null }
 }
 
 export interface LyricsItem {
@@ -559,7 +563,8 @@ export const api = {
         'POST', '/api/lookup/album/score', { track_ids: trackIds, mb_album_id: mbAlbumId }),
     albumMatch: (trackIds: number[], mbAlbumId: string) =>
       request<MbMatch>('POST', '/api/lookup/album/match', { track_ids: trackIds, mb_album_id: mbAlbumId }),
-    albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean }) =>
+    albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean
+                         keep?: string[]; unpaired?: number[] }) =>
       request<EditResult & { changed: number; covers: number; folder_covers: number }>('POST', '/api/lookup/album/apply', body),
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
@@ -597,7 +602,8 @@ export const api = {
       return res.json() as Promise<{ folders: number; tracks: number; errors: { id: number | null; error: string }[] }>
     },
     search: (album: string, artist: string) =>
-      request<{ mb_album_id: string; album: string; artist: string | null; date?: string | null; country?: string | null }[]>(
+      request<{ mb_album_id: string; album: string; artist: string | null; date?: string | null; country?: string | null
+                 score?: number; tracks?: number | null; formats?: string[] }[]>(
         'GET', `/api/covers/search?album=${encodeURIComponent(album)}&artist=${encodeURIComponent(artist)}`),
     plan: (trackIds: number[]) =>
       request<{ albums: CoverAlbum[] }>('POST', '/api/covers/albums', { track_ids: trackIds, dry_run: true }),

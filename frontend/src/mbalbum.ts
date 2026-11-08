@@ -11,8 +11,11 @@ const FIELDS: { key: string; label: string; on: boolean }[] = [
   { key: 'title', label: 'Title', on: true }, { key: 'artist', label: 'Artist', on: true },
   { key: 'album', label: 'Album', on: true }, { key: 'album_artist', label: 'Album artist', on: true },
   { key: 'year', label: 'Year', on: true }, { key: 'track_number', label: 'Track #', on: true },
-  { key: 'disc_number', label: 'Disc #', on: true }, { key: 'mb', label: 'MusicBrainz IDs', on: true },
+  { key: 'disc_number', label: 'Disc #', on: true }, { key: 'genre', label: 'Genre', on: true },
+  { key: 'composer', label: 'Composer', on: true }, { key: 'mb', label: 'MusicBrainz IDs', on: true },
 ]
+// Genre and composer only fill empty tags unless asked: they're often set by hand.
+export const KEEP = ['genre', 'composer']
 const coverWhere = (r: { covers: number; folder_covers: number }) =>
   [r.folder_covers ? `cover.jpg in ${r.folder_covers} folder${r.folder_covers !== 1 ? 's' : ''}` : '',
    r.covers ? `art in ${r.covers} track${r.covers !== 1 ? 's' : ''}` : ''].filter(Boolean).map(x => ` (${x})`).join('')
@@ -50,6 +53,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
           <div class="pr-options mb-fields" id="mb-fields">
             ${FIELDS.map(f => `<label class="settings-toggle"><input type="checkbox" data-field="${f.key}" ${f.on ? 'checked' : ''} /><span>${f.label}</span></label>`).join('')}
             <label class="settings-toggle"><input type="checkbox" id="mb-orig" checked /><span>Original year</span></label>
+            <label class="settings-toggle" title="Off: replace the genre and composer tracks already have"><input type="checkbox" id="mb-keep" checked /><span>Keep existing genre &amp; composer</span></label>
             <label class="settings-toggle"><input type="checkbox" id="mb-cover" /><span title="Where it goes: Settings → Writing → Cover Art">Cover art (written now)</span></label>
           </div>
           <table class="pr-table mb-table"><thead><tr><th class="pr-check"></th><th>Your track</th><th class="mb-link">Match</th><th>MusicBrainz track</th></tr></thead>
@@ -178,7 +182,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     if (!match) return
     const m = match, rel = m.release
     $('#mb-release').innerHTML = `<strong>${esc(rel.album)}</strong> · ${esc(rel.album_artist ?? '')} ·
-      ${esc(rel.date ?? '')}${rel.original_year && rel.original_year !== rel.year ? ` (original ${esc(rel.original_year)})` : ''} · ${m.release_tracks.length} tracks`
+      ${esc(rel.date ?? '')}${rel.original_year && rel.original_year !== rel.year ? ` (original ${esc(rel.original_year)})` : ''} · ${m.release_tracks.length} tracks
+      · ${rel.genre ? esc(rel.genre) : '<span class="ma-dim">no genre on MusicBrainz</span>'}`
     const byKey = new Map(m.release_tracks.map(t => [t.key, t]))
     const counts = new Map<string, number>()
     for (const [id, k] of chosen) if (k && !skip.has(id)) counts.set(k, (counts.get(k) ?? 0) + 1)
@@ -194,7 +199,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
       <div class="ma-dim">${esc(it.artist ?? '')}${it.artist ? ' · ' : ''}${fmtDuration(it.duration ?? 0)} · ${esc(it.filename)}</div>`
     const theirs = (t: MbReleaseTrack) => `
       <div class="mb-side-title">${num(t)}. ${esc(t.title)}</div>
-      <div class="ma-dim">${esc(t.artist ?? '')} · ${fmtDuration(t.duration ?? 0)}</div>`
+      <div class="ma-dim">${esc(t.artist ?? '')} · ${fmtDuration(t.duration ?? 0)}${t.composer ? ` · ✎ ${esc(t.composer)}` : ''}</div>`
     const badgeFor = (it: MbMatch['items'][number], k: string, dup: boolean) => {
       if (dup) return '<span class="mb-score mb-bad">used twice</span>'
       if (k !== it.key) return '<span class="mb-score">manual</span>'
@@ -265,6 +270,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
       const r = await api.lookup.albumApply({
         mb_album_id: match.release.mb_album_id, pairs, fields,
         original_year: $<HTMLInputElement>('#mb-orig').checked, cover: $<HTMLInputElement>('#mb-cover').checked,
+        keep: $<HTMLInputElement>('#mb-keep').checked ? KEEP : [],
       })
       if (!fields.length) {
         const bad = r.errors?.find(e => e.id === null)

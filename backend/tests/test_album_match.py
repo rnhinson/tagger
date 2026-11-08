@@ -1,4 +1,6 @@
 """Album-level MusicBrainz match: pairing, the match endpoint, staged apply."""
+import pytest
+
 from core import albummatch
 from core.providers import musicbrainz as mbp
 from tests.test_staging import _insert, lib  # noqa: F401  (fixture)
@@ -17,6 +19,12 @@ RELEASE = {
          "artist": "The Beatles", "mb_artist_id": "aa", "mb_track_id": "r3", "duration": 207.0},
     ],
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_genre_lookup(monkeypatch):
+    """No MusicBrainz call for the artist's genres: the release's own tags only."""
+    monkeypatch.setattr(mbp.musicbrainzngs, "get_artist_by_id", lambda *a, **k: {"artist": {}})
 
 
 def test_pairs_on_number_title_and_duration_best_first():
@@ -167,3 +175,25 @@ def test_cover_only_apply(client, lib, monkeypatch):
     client.patch("/api/config", json={"cover_target": "both", "cover_embed_size": 500})
     r = client.post("/api/lookup/album/apply", json={**body, "cover": True}).json()
     assert (r["folder_covers"], r["covers"]) == (1, 1) and sizes[-2:] == [1200, 500]
+
+
+def test_genre_and_composer_fill_empty_and_unpaired_get_album_tags(client, lib, monkeypatch):
+    base = {k: v for k, v in RELEASE.items() if k != "genre"}      # other tests' matches cache one on it
+    rel = {**base, "tag_list": [{"name": "rock", "count": "4"}, {"name": "pop", "count": "1"}],
+           "tracks": [{**RELEASE["tracks"][0], "composer": "John Lennon"},
+                      {**RELEASE["tracks"][1], "composer": "George Harrison"}]}
+    monkeypatch.setattr(mbp, "get_release", lambda _id: rel)
+    d = lib / "Shared" / "Beatles" / "Abbey Road"
+    a = _insert(d / "01.mp3", title="Come Together", track_number="1", duration=259.0)
+    b = _insert(d / "02.mp3", title="Something", track_number="2", duration=182.0, genre="Pop", composer="G.H.")
+    c = _insert(d / "17.mp3", title="Her Majesty", track_number="17", duration=23.0)
+    m = client.post("/api/lookup/album/match", json={"track_ids": [a, b, c], "mb_album_id": REL_ID}).json()
+    assert m["release"]["genre"] == "Rock" and m["current"]["genre"] == "Pop"
+    res = client.post("/api/lookup/album/apply", json={
+        "mb_album_id": REL_ID, "pairs": {str(a): "1-1", str(b): "1-2"}, "unpaired": [c],
+        "fields": ["album", "genre", "composer"], "keep": ["genre", "composer"]}).json()
+    assert res["changed"] == 3
+    tags = lambda i: client.get(f"/api/library/track/{i}").json()["staged"]["tags"]
+    assert tags(a) == {"album": "Abbey Road", "genre": "Rock", "composer": "John Lennon"}
+    assert tags(b) == {"album": "Abbey Road"}                       # its own genre and composer kept
+    assert tags(c) == {"album": "Abbey Road", "genre": "Rock"}      # on no release track: album tags only

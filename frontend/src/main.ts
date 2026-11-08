@@ -2,7 +2,7 @@ import './style.css'
 import { api, Track, Artist, Album, AlbumRow, LookupResult, AppSettings, setUnauthorizedHandler, onSessionExpired } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
+import { state, PAGE_SIZE, TAG_FIELDS, DirNode, State, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
 import { COL_DEFS, orderedCols, viewCols, sourcePath } from './columns'
 import {
   trackQuality, qualityTitle, QUALITY_ISSUES,
@@ -16,8 +16,9 @@ import { overlayStaged, editToast, undoToast, missingText, openReview, openHisto
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
-import { openCovers, openChangeCover } from './covers'
+import { openCovers, openChangeCover, openBulkCovers } from './covers'
 import { openMbAlbum } from './mbalbum'
+import { openMbAlbums } from './mbbulk'
 import { openLyrics } from './lyricsdialog'
 import { openDuplicates } from './duplicates'
 import { openLyricsSearch } from './lyricssearch'
@@ -856,6 +857,7 @@ function updateBulkBar() {
   removeTracksBtn.style.display = n > 0 ? '' : 'none'
   replaygainBtn.hidden = !(n > 0 && replaygainAvailable)
   markAlbumPicks()
+  updateStatusBar()
   lyricsLookupBtn.textContent = n ? `Look up ${n.toLocaleString()} selected…` : `Look up all ${state.total.toLocaleString()}…`
 }
 
@@ -1576,6 +1578,7 @@ async function expandDirNode(node: DirNode) {
 }
 
 async function loadTracks() {
+  recordView()
   trackLoading.hidden = false
   trackTbody.innerHTML = ''
   trackEmpty.hidden = true
@@ -1948,9 +1951,14 @@ function showRenameFolder() {
 moveFolderBtn.addEventListener('click', showMoveFolder)
 
 // Bulk rename: list order = the view's order (counters number in that order).
-document.getElementById('mb-album-btn')!.addEventListener('click', () => {
+document.getElementById('mb-album-btn')!.addEventListener('click', async () => {
   const ids = [...state.selectedIds]
-  if (ids.length) openMbAlbum(ids, refreshAfterBulk)
+  if (!ids.length) return
+  // More than one album folder: match each, then approve the lot.
+  let plan
+  try { plan = await api.covers.plan(ids) } catch (e) { toast(`Match: ${errText(e)}`, 'error'); return }
+  if (plan.albums.length > 1) openMbAlbums(plan.albums, refreshAfterBulk)
+  else openMbAlbum(ids, refreshAfterBulk)
 })
 document.getElementById('lyrics-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
@@ -2439,6 +2447,7 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
     state.tracks = []; state.total = 0
     renderTracks()
     renderEditor()
+    recordView()
     return
   }
   state.selectedIds.clear()
@@ -2625,18 +2634,31 @@ viewListBtn.addEventListener('click', () => {
   if (state.viewMode === 'list') return
   state.viewMode = 'list'
   renderViewMode()
+  recordView()
 })
 
 viewAlbumsBtn.addEventListener('click', () => {
   if (state.viewMode === 'albums') return
   state.viewMode = 'albums'
   renderViewMode()
+  recordView()
 })
 
 // Change cover: from disk, the Cover Art Archive or a URL (covers.ts)
-document.getElementById('change-cover-btn')!.addEventListener('click', () => {
+document.getElementById('change-cover-btn')!.addEventListener('click', async () => {
   const ids = [...state.selectedIds]
   if (!ids.length) return
+  const done = async () => {
+    state.coverBust++
+    state.qualityIssues = null
+    updateCoverPreview()
+    if (state.viewMode === 'albums') renderAlbumView()
+    await loadTracks()
+  }
+  // More than one album folder: find a cover for each.
+  let plan
+  try { plan = await api.covers.plan(ids) } catch (e) { toast(`Covers: ${errText(e)}`, 'error'); return }
+  if (plan.albums.length > 1) { openBulkCovers(plan.albums, done); return }
   const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
   const mbIds = new Set(sel.map(t => t.staged?.tags?.mb_album_id ?? t.mb_album_id).filter(Boolean))
   // A search to start from: the tags, or the folder names when the tags are a ripper's placeholders.
@@ -2644,13 +2666,7 @@ document.getElementById('change-cover-btn')!.addEventListener('click', () => {
   const parts = (sel[0]?.directory ?? '').split('/').filter(Boolean)
   const guess = { album: real(sel[0]?.album) || (parts[parts.length - 1] ?? '').replace(/_/g, ' '),
                   artist: real(sel[0]?.album_artist) || real(sel[0]?.artist) || (parts[parts.length - 2] ?? '').replace(/_/g, ' ') }
-  openChangeCover(ids, mbIds.size === 1 ? [...mbIds][0] as string : null, guess, async () => {
-    state.coverBust++
-    state.qualityIssues = null
-    updateCoverPreview()
-    if (state.viewMode === 'albums') renderAlbumView()
-    await loadTracks()
-  })
+  openChangeCover(ids, mbIds.size === 1 ? [...mbIds][0] as string : null, guess, done)
 })
 
 // Column picker
@@ -2766,6 +2782,18 @@ qualityListEl.addEventListener('click', async (e) => {
   if (!li?.dataset.issue) return
   const issue = li.dataset.issue
   state.selectedIssue = state.selectedIssue === issue ? null : issue
+  showIssueToolbar()
+  // The same album in several folders: the album list shows them side by side.
+  if (state.selectedIssue === 'duplicate_albums') { state.viewMode = 'albums'; albumStyle = 'list'; renderViewMode() }
+  state.selectedIds.clear()
+  state.page = 0
+  await renderQualityPanel()
+  await loadTracks()
+  renderEditor()
+})
+
+/** The Quality toolbar's buttons for the selected issue. */
+function showIssueToolbar() {
   qualityToolbar.hidden = !state.selectedIssue || state.selectedIssue === 'missing_files'
   const isDupes = state.selectedIssue === 'duplicate_tracks'
   const isDupAlbums = state.selectedIssue === 'duplicate_albums'
@@ -2776,14 +2804,7 @@ qualityListEl.addEventListener('click', async (e) => {
   lyricsLookupBtn.hidden = !isLyrics
   fixAllBtn.hidden = isDupes || isDupAlbums || isLayout || isLyrics
   qualityToolbar.hidden ||= isDupAlbums
-  // The same album in several folders: the album list shows them side by side.
-  if (isDupAlbums) { state.viewMode = 'albums'; albumStyle = 'list'; renderViewMode() }
-  state.selectedIds.clear()
-  state.page = 0
-  await renderQualityPanel()
-  await loadTracks()
-  renderEditor()
-})
+}
 
 document.getElementById('close-editor')!.addEventListener('click', () => {
   state.selectedIds.clear(); renderTracks(); renderEditor()
@@ -3264,6 +3285,166 @@ function showLogin() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+// ─── Status bar ───────────────────────────────────────────────────────────────
+
+const statusWhere = document.getElementById('status-where')!
+const statusView  = document.getElementById('status-view')!
+const statusSel   = document.getElementById('status-sel')!
+const plural = (n: number, w: string) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`
+
+function updateStatusBar() {
+  const where: string[] = []
+  if (state.sidebarMode === 'files') {
+    where.push('Files', state.selectedDirectory ? shortPath(state.selectedDirectory) : 'All tracks')
+  } else if (state.sidebarMode === 'quality') {
+    where.push('Quality', QUALITY_ISSUES.find(i => i.key === state.selectedIssue)?.label ?? 'pick an issue')
+  } else if (state.selectedArtist !== null) {
+    where.push(state.selectedArtist || '(no artist)')
+    if (state.selectedAlbum !== null) where.push(state.selectedAlbum || '(no album)')
+  } else if (state.selectedTag) {
+    where.push(BROWSE_TAGS.find(t => t.field === state.selectedTag!.field)?.label ?? state.selectedTag.field,
+               state.selectedTag.value || '(none)')
+  } else {
+    where.push('All tracks')
+  }
+  if (state.query) where.push(`“${state.query}”`)
+  statusWhere.textContent = where.join(' › ')
+  statusWhere.title = statusWhere.textContent
+
+  const from = state.page * PAGE_SIZE
+  statusView.textContent = state.total > state.tracks.length
+    ? `${(from + 1).toLocaleString()}–${(from + state.tracks.length).toLocaleString()} of ${plural(state.total, 'track')}`
+    : plural(state.total, 'track')
+
+  // Albums: the picked ones, else the folders of the selected tracks when they're all loaded.
+  const n = state.selectedIds.size
+  const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
+  const albums = albumPicks.size || (sel.length === n ? new Set(sel.map(t => t.path.slice(0, t.path.lastIndexOf('/')))).size : 0)
+  statusSel.innerHTML = n
+    ? `${plural(n, 'track')}${albums ? ` in ${plural(albums, 'album')}` : ''} selected<button type="button" class="btn btn-link" id="status-clear">Clear</button>`
+    : ''
+}
+
+statusSel.addEventListener('click', (e) => {
+  if (!(e.target as HTMLElement).closest('#status-clear')) return
+  state.selectedIds.clear(); albumPicks.clear()
+  renderTracks(); renderEditor()
+})
+
+// The logo: home (all tracks, nothing selected, no search).
+document.getElementById('logo')!.addEventListener('click', async (e) => {
+  e.preventDefault()
+  await restoreView({ mode: 'tags', view: 'list', page: 0, q: '', artist: null, album: null, tag: null, dir: null, issue: null })
+  recordView()
+})
+
+// ─── History ──────────────────────────────────────────────────────────────────
+// Each view (tab, selection, search, page, tracks/albums) is a history entry
+// in the URL hash: Back returns to the previous view, a reload keeps it.
+
+interface View {
+  mode: State['sidebarMode']; view: State['viewMode']; page: number; q: string
+  artist: string | null; album: string | null; tag: { field: string; value: string } | null
+  dir: string | null; issue: string | null
+}
+
+let restoring = false
+
+/** The view, with only the selection its tab uses. */
+function currentView(): View {
+  const m = state.sidebarMode
+  return {
+    mode: m, view: state.viewMode, page: state.page, q: state.query,
+    artist: m === 'tags' ? state.selectedArtist : null, album: m === 'tags' ? state.selectedAlbum : null,
+    tag: m === 'tags' ? state.selectedTag : null,
+    dir: m === 'files' ? state.selectedDirectory : null, issue: m === 'quality' ? state.selectedIssue : null,
+  }
+}
+
+function viewHash(v: View): string {
+  const p = new URLSearchParams({ mode: v.mode })
+  if (v.view !== 'list') p.set('view', v.view)
+  if (v.page) p.set('page', String(v.page + 1))
+  if (v.q) p.set('q', v.q)
+  if (v.artist !== null) p.set('artist', v.artist)
+  if (v.album !== null) p.set('album', v.album)
+  if (v.tag) { p.set('tag', v.tag.field); p.set('value', v.tag.value) }
+  if (v.dir) p.set('dir', v.dir)
+  if (v.issue) p.set('issue', v.issue)
+  return '#' + p.toString()
+}
+
+function parseHash(): View | null {
+  const p = new URLSearchParams(location.hash.slice(1))
+  const mode = p.get('mode')
+  if (mode !== 'tags' && mode !== 'files' && mode !== 'quality') return null
+  return {
+    mode, view: p.get('view') === 'albums' ? 'albums' : 'list',
+    page: Math.max(0, (parseInt(p.get('page') ?? '1', 10) || 1) - 1), q: p.get('q') ?? '',
+    artist: p.get('artist'), album: p.get('album'),
+    tag: p.has('tag') ? { field: p.get('tag')!, value: p.get('value') ?? '' } : null,
+    dir: p.get('dir'), issue: p.get('issue'),
+  }
+}
+
+/** A new entry for a new view; typing in the search box only updates the current one. */
+function recordView() {
+  if (restoring) return
+  const v = currentView(), hash = viewHash(v)
+  if (hash === location.hash) return
+  const prev = history.state as View | null
+  const typing = prev && prev.q && viewHash({ ...prev, q: v.q }) === hash
+  if (prev && !typing) history.pushState(v, '', hash)
+  else history.replaceState(v, '', hash)
+}
+
+/** Open the Files tree down to `dir`. */
+async function revealDir(dir: string) {
+  let node = state.rootNode
+  while (node?.children) {
+    const next: DirNode | undefined = node.children.find(c => dir === c.path || dir.startsWith(c.path + '/'))
+    if (!next || next.path === dir) break
+    if (!next.expanded) await expandDirNode(next)
+    node = next
+  }
+}
+
+async function restoreView(v: View) {
+  restoring = true
+  try {
+    state.sidebarMode = v.mode; state.viewMode = v.view; state.page = v.page
+    state.query = v.q; searchEl.value = v.q
+    state.selectedArtist = v.artist; state.selectedAlbum = v.album; state.selectedTag = v.tag
+    state.selectedDirectory = v.dir; state.selectedIssue = v.issue
+    state.selectedIds.clear(); albumPicks.clear()
+    if (v.mode === 'tags') {
+      if (v.artist !== null) { state.expandedTags.add('artist'); state.expandedArtists.add(v.artist) }
+      if (v.tag) state.expandedTags.add(v.tag.field)
+      await Promise.all([...state.expandedTags].filter(f => !state.tagValues.has(f)).map(loadTagValues))
+      renderTagsPanel()
+    } else if (v.mode === 'files') {
+      if (!state.rootNode) await loadTree()
+      if (v.dir) await revealDir(v.dir)
+      renderFilesPanel()
+    } else {
+      showIssueToolbar()
+      await renderQualityPanel()
+    }
+    updateScanBtns()
+    renderSidebarTabs()
+    renderViewMode()
+    await loadTracks()
+    renderEditor()
+  } finally {
+    restoring = false
+  }
+}
+
+window.addEventListener('popstate', () => {
+  const v = (history.state as View | null) ?? parseHash()
+  if (v) restoreView(v)
+})
+
 async function init() {
   renderColHeaders()
   renderViewMode()
@@ -3300,7 +3481,10 @@ async function startApp() {
   api.spectrogram.status().then(s => { spectrogramAvailable = s.available }).catch(() => {})
   await refreshUndoButton()
   await loadLibrary()
-  await loadTracks()
+  const v = parseHash()
+  if (v) await restoreView(v)
+  else await loadTracks()
+  history.replaceState(currentView(), '', viewHash(currentView()))
 }
 
 init()
