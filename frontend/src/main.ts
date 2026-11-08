@@ -16,7 +16,7 @@ import { overlayStaged, editToast, undoToast, missingText, openReview, openHisto
 import { openBulkRename } from './bulkrename'
 import { openParseNames } from './parsenames'
 import { openMergeAlbums } from './mergealbums'
-import { openCovers } from './covers'
+import { openCovers, openChangeCover } from './covers'
 import { openMbAlbum } from './mbalbum'
 import { openLyrics } from './lyricsdialog'
 import { openDuplicates } from './duplicates'
@@ -95,7 +95,6 @@ const viewListBtn    = document.getElementById('view-list-btn')!
 const viewAlbumsBtn  = document.getElementById('view-albums-btn')!
 const coverImg         = document.getElementById('cover-img') as HTMLImageElement
 const coverPlaceholder = document.getElementById('cover-placeholder')!
-const coverInput       = document.getElementById('cover-input') as HTMLInputElement
 const playerEl         = document.getElementById('player') as HTMLAudioElement
 const editorRenamePreviewEl = document.getElementById('editor-rename-preview')!
 const spectroSection   = document.getElementById('spectro-section')!
@@ -2634,22 +2633,18 @@ viewAlbumsBtn.addEventListener('click', () => {
   renderViewMode()
 })
 
-// Cover art upload
-coverInput.addEventListener('change', async () => {
-  const file = coverInput.files?.[0]
-  if (!file) return
+// Change cover: from disk, the Cover Art Archive or a URL (covers.ts)
+document.getElementById('change-cover-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (!ids.length) return
-  try {
-    await Promise.all(ids.map(id => api.covers.update(id, file)))
+  const mbIds = new Set(state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.staged?.tags?.mb_album_id ?? t.mb_album_id).filter(Boolean))
+  openChangeCover(ids, mbIds.size === 1 ? [...mbIds][0] as string : null, async () => {
     state.coverBust++
+    state.qualityIssues = null
     updateCoverPreview()
     if (state.viewMode === 'albums') renderAlbumView()
-    toast(`Cover art updated`, 'success')
-  } catch (err) {
-    toast(`Failed to update cover: ${err}`, 'error')
-  }
-  coverInput.value = ''
+    await loadTracks()
+  })
 })
 
 // Column picker

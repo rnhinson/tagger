@@ -105,3 +105,86 @@ export function openCovers(ids: number[], onDone: () => Promise<void>) {
     .then(r => { albums = r.albums; render() })
     .catch(e => { errEl.textContent = errText(e); errEl.hidden = false; sumEl.textContent = '' })
 }
+
+// Change cover: one image for the selection, from disk, the Cover Art
+// Archive (the tracks' MusicBrainz release) or a URL; written where
+// Settings → Cover Art says, at its sizes.
+export function openChangeCover(ids: number[], mbAlbumId: string | null, onDone: () => Promise<void>) {
+  const overlay = document.createElement('div')
+  overlay.className = 'fix-confirm-overlay'
+  overlay.innerHTML = `
+    <div class="fix-confirm-modal cc-modal" role="dialog" aria-label="Change cover">
+      <div class="fix-confirm-header">
+        <span class="fix-confirm-title">Change cover · ${ids.length.toLocaleString()} track${ids.length !== 1 ? 's' : ''}</span>
+        <button class="btn btn-ghost btn-icon fix-confirm-close" aria-label="Close">✕</button>
+      </div>
+      <div class="cc-body">
+        <div class="cc-sources">
+          <label class="btn btn-ghost btn-sm">From disk…<input id="cc-file" type="file" accept="image/jpeg,image/png,image/webp" hidden /></label>
+          <button type="button" class="btn btn-ghost btn-sm" id="cc-caa" ${mbAlbumId ? '' : 'disabled title="The selection has no MusicBrainz release — use Match album… first"'}>Cover Art Archive</button>
+          <form id="cc-url-form" class="cc-url"><input id="cc-url" type="url" placeholder="https://… image URL" autocomplete="off" />
+            <button class="btn btn-ghost btn-sm" type="submit">Load</button></form>
+        </div>
+        <div class="cc-preview"><img id="cc-img" alt="" hidden /><span id="cc-none" class="ma-dim">Pick an image</span></div>
+        <div id="cc-where" class="settings-hint"></div>
+        <div id="cc-error" class="review-error" hidden></div>
+      </div>
+      <div class="fix-confirm-footer">
+        <button class="btn btn-ghost" id="cc-cancel">Cancel</button>
+        <button class="btn btn-primary" id="cc-go" disabled>Apply</button>
+      </div>
+    </div>`
+  document.body.appendChild(overlay)
+  const $ = <T extends HTMLElement>(sel: string) => overlay.querySelector<T>(sel)!
+  const img = $<HTMLImageElement>('#cc-img'), none = $('#cc-none'), goBtn = $<HTMLButtonElement>('#cc-go')
+  const errEl = $('#cc-error')
+  let src: { file?: File; url?: string; mb_album_id?: string } | null = null
+  let objectUrl: string | null = null
+
+  const close = () => { if (objectUrl) URL.revokeObjectURL(objectUrl); overlay.remove(); document.removeEventListener('keydown', onKey) }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+  document.addEventListener('keydown', onKey)
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+  $('.fix-confirm-close').addEventListener('click', close)
+  $('#cc-cancel').addEventListener('click', close)
+
+  function show(s: typeof src, preview: string) {
+    src = s; errEl.hidden = true
+    img.onload = () => { img.hidden = false; none.hidden = true; goBtn.disabled = false }
+    img.onerror = () => { img.hidden = true; none.hidden = false; none.textContent = 'No preview (the server may still fetch it)'; goBtn.disabled = false }
+    img.src = preview
+  }
+  $<HTMLInputElement>('#cc-file').addEventListener('change', e => {
+    const f = (e.target as HTMLInputElement).files?.[0]
+    if (!f) return
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+    objectUrl = URL.createObjectURL(f)
+    show({ file: f }, objectUrl)
+  })
+  $('#cc-caa').addEventListener('click', () => {
+    if (mbAlbumId) show({ mb_album_id: mbAlbumId }, `https://coverartarchive.org/release/${mbAlbumId}/front-500`)
+  })
+  $<HTMLFormElement>('#cc-url-form').addEventListener('submit', e => {
+    e.preventDefault()
+    const u = $<HTMLInputElement>('#cc-url').value.trim()
+    if (u) show({ url: u }, u)
+  })
+
+  api.settings.get().then(s => {
+    const where = { folder: 'the album folder (cover.jpg)', tracks: 'each track (embedded)', both: 'the album folder and each track' }[s.cover_target ?? 'folder']
+    $('#cc-where').textContent = `Goes to ${where}, shrunk to the size settings (Settings → Writing → Cover Art).`
+  }).catch(() => { /* hint only */ })
+
+  goBtn.addEventListener('click', async () => {
+    if (!src) return
+    goBtn.disabled = true
+    try {
+      const r = await api.covers.set(ids, src)
+      const parts = [r.folders ? `${r.folders} folder${r.folders !== 1 ? 's' : ''}` : '', r.tracks ? `${r.tracks} track${r.tracks !== 1 ? 's' : ''}` : ''].filter(Boolean)
+      if (r.errors.length) toast(`Cover: ${r.errors.length} failed — ${r.errors[0].error}`, 'error')
+      else toast(`Cover art written to ${parts.join(' and ')}`, 'success')
+      close()
+      await onDone()
+    } catch (e) { errEl.textContent = errText(e); errEl.hidden = false; goBtn.disabled = false }
+  })
+}
