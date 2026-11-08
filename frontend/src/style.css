@@ -733,8 +733,6 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 .cover-preview img { width: 100%; height: 100%; object-fit: cover; }
 .cover-placeholder { font-size: 40px; color: var(--text-muted); }
 
-.cover-upload-label { cursor: pointer; }
-.cover-upload-label input[type=file] { display: none; }
 
 /* ─── Auto-fix confirmation modal ────────────────────────────────────────────── */
 
@@ -1497,3 +1495,11 @@ button.scan-status[hidden] { display: none; }
 .dup-path { color: var(--text-muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .quality-group { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); padding: 10px 12px 2px; list-style: none; }
+
+.cc-modal { width: min(520px, 94vw); }
+.cc-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.cc-sources { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cc-url { display: flex; gap: 6px; flex: 1; min-width: 220px; }
+.cc-url input { flex: 1; }
+.cc-preview { min-height: 200px; display: flex; align-items: center; justify-content: center; background: var(--surface2); border-radius: 6px; }
+.cc-preview img { max-width: 100%; max-height: 300px; }

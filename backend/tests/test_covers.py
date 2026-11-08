@@ -140,3 +140,29 @@ def test_sizes_tracked_oversized_and_shrink(client, lib):
     assert client.get("/api/library/issues").json()["covers_oversized"] == 0
     r = client.post("/api/covers/albums", json={"track_ids": _ids(d), "action": "shrink"}).json()["albums"][0]
     assert r["note"] == "nothing larger than the size settings"
+
+
+def test_set_from_file_url_and_caa(client, lib, monkeypatch):
+    import api.covers as ac
+    import api.lookup as lk
+    from io import BytesIO
+    from PIL import Image
+    b = BytesIO(); Image.new("RGB", (2000, 2000)).save(b, "JPEG"); big = b.getvalue()
+    d = _album(lib, "Set")
+    scan_library(music_dirs=[str(lib / "Shared")])
+    ids = str(_ids(d))
+    r = client.post("/api/covers/set", data={"track_ids": ids}, files={"file": ("x.jpg", big, "image/jpeg")}).json()
+    assert (r["folders"], r["tracks"]) == (1, 0) and Image.open(d / "cover.jpg").size == (1200, 1200)   # default: folder
+    assert client.get(f"/api/covers/{_ids(d)[0]}").status_code == 200     # the editor shows the folder's cover
+
+    client.patch("/api/config", json={"cover_target": "both"})
+    monkeypatch.setattr(lk, "_fetch_caa", lambda _id, size=1200: ("image/jpeg", big))
+    r = client.post("/api/covers/set", data={"track_ids": ids, "mb_album_id": "11111111-2222-3333-4444-555555555555"}).json()
+    assert (r["folders"], r["tracks"]) == (1, 2)
+    assert Image.open(BytesIO(read_cover(next(d.glob("*.mp3")))[1])).size == (500, 500)
+
+    assert client.post("/api/covers/set", data={"track_ids": ids, "url": "http://127.0.0.1/x.jpg"}).status_code == 400
+    assert client.post("/api/covers/set", data={"track_ids": ids, "url": "file:///etc/passwd"}).status_code == 400
+    monkeypatch.setattr(ac, "_public_image", lambda url: ("image/jpeg", big))
+    assert client.post("/api/covers/set", data={"track_ids": ids, "url": "https://example.com/c.jpg"}).json()["tracks"] == 2
+    assert client.post("/api/covers/set", data={"track_ids": ids}).status_code == 400

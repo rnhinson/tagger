@@ -343,10 +343,7 @@ export const APP_HTML = `
             <img id="cover-img" alt="Cover art" />
             <div id="cover-placeholder" class="cover-placeholder">♪</div>
           </div>
-          <label class="btn btn-ghost btn-sm cover-upload-label">
-            Change Cover
-            <input id="cover-input" type="file" accept="image/jpeg,image/png,image/webp" />
-          </label>
+          <button type="button" id="change-cover-btn" class="btn btn-ghost btn-sm" title="From disk, the Cover Art Archive or a URL">Change Cover…</button>
         </div>
         <audio id="player" class="editor-player" controls preload="none" hidden></audio>
         <div id="spectro-section" class="spectro-section" hidden>

@@ -582,6 +582,20 @@ export const api = {
 
   covers: {
     url: (trackId: number) => `/api/covers/${trackId}`,
+    set: async (trackIds: number[], src: { file?: File; url?: string; mb_album_id?: string }) => {
+      const form = new FormData()
+      form.append('track_ids', JSON.stringify(trackIds))
+      if (src.file) form.append('file', src.file)
+      if (src.url) form.append('url', src.url)
+      if (src.mb_album_id) form.append('mb_album_id', src.mb_album_id)
+      const res = await fetch('/api/covers/set', { method: 'POST', body: form })
+      if (!res.ok) {
+        let msg = await res.text()
+        try { msg = JSON.parse(msg).detail ?? msg } catch { /* plain text */ }
+        throw new Error(msg)
+      }
+      return res.json() as Promise<{ folders: number; tracks: number; errors: { id: number | null; error: string }[] }>
+    },
     plan: (trackIds: number[]) =>
       request<{ albums: CoverAlbum[] }>('POST', '/api/covers/albums', { track_ids: trackIds, dry_run: true }),
     albums: (trackIds: number[], action: CoverAction) =>
