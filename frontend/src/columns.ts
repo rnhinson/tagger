@@ -2,6 +2,8 @@ import { Track } from './api'
 import { state, loadColOrder } from './state'
 import { esc, fmtDuration, fmtBitrate, fmtSampleRate, fmtChannels } from './util'
 
+const fmtBytes = (n: number) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`
+
 export interface ColDef {
   key:    string
   label:  string
@@ -31,6 +33,8 @@ export const COL_DEFS: ColDef[] = [
     const k = lyricsKind(t.lyrics)
     return k === 'none' ? '' : `<span class="mb-score ${k === 'synced' ? 'mb-good' : 'mb-ok'}">${k}</span>`
   }},
+  { key: 'cover',        label: 'Cover',        cls: 'col-cover', render: t => !t.has_cover ? '' :
+    `<span title="Embedded cover art">${t.cover_width ? `${t.cover_width}×${t.cover_height}` : '?'}${t.cover_bytes ? ` · ${fmtBytes(t.cover_bytes)}` : ''}</span>` },
   { key: 'source',       label: 'Source Folder', cls: 'col-source', render: t =>
     `<span title="${esc(t.directory)}">${t.read_only ? '🔒 ' : ''}${esc(sourcePath(t.directory))}</span>` },
 ]

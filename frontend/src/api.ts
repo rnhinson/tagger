@@ -6,6 +6,10 @@ export interface Track {
   missing?: boolean                  // the file isn't at its scanned path any more
   layout_path?: string | null        // where its library's layout puts it, when that's elsewhere
   lyrics_group?: string              // its lyrics group's name
+  has_cover?: number | null          // embedded cover art (1/0; null = not scanned since covers were tracked)
+  cover_width?: number | null
+  cover_height?: number | null
+  cover_bytes?: number | null
   lyrics_lookup?: { status: string; at: number } | null   // the last lyrics lookup
   path: string
   filename: string
@@ -156,6 +160,9 @@ export interface AppSettings {
   library_lyrics_groups: Record<string, string>
   lrclib_api_key: string
   lrclib_app_id: string
+  cover_target: 'folder' | 'tracks' | 'both'
+  cover_embed_size: number
+  cover_folder_size: number
   secrets_set?: Record<string, boolean>   // keys/tokens are never sent back, only whether set
   secrets_encrypted?: boolean
   default_music_dir?: string
@@ -249,7 +256,16 @@ export interface IssueCount {
   missing_files: number
   not_in_layout: number
   missing_lyrics: number
+  covers_none: number
+  covers_no_folder: number
+  covers_no_tracks: number
+  covers_both: number
+  covers_oversized: number
 }
+
+export type CoverAction = 'copy_to_folder' | 'move_to_folder' | 'copy_to_tracks' | 'move_to_tracks' | 'delete_folder' | 'delete_tracks' | 'shrink'
+export interface CoverAlbum { directory: string; track_ids: number[]; embedded: number; folder: boolean }
+export interface CoverResult { directory: string; folder: number; tracks: number; note: string | null; errors: { id: number | null; error: string }[] }
 
 export interface TreeEntry {
   name: string
@@ -544,7 +560,7 @@ export const api = {
     albumMatch: (trackIds: number[], mbAlbumId: string) =>
       request<MbMatch>('POST', '/api/lookup/album/match', { track_ids: trackIds, mb_album_id: mbAlbumId }),
     albumApply: (body: { mb_album_id: string; pairs: Record<number, string>; fields: string[]; original_year: boolean; cover: boolean }) =>
-      request<EditResult & { changed: number; covers: number }>('POST', '/api/lookup/album/apply', body),
+      request<EditResult & { changed: number; covers: number; folder_covers: number }>('POST', '/api/lookup/album/apply', body),
     search: (trackId: number) =>
       request<LookupResult[]>('POST', `/api/lookup/search/${trackId}`),
     infer: (trackId: number) =>
@@ -566,6 +582,10 @@ export const api = {
 
   covers: {
     url: (trackId: number) => `/api/covers/${trackId}`,
+    plan: (trackIds: number[]) =>
+      request<{ albums: CoverAlbum[] }>('POST', '/api/covers/albums', { track_ids: trackIds, dry_run: true }),
+    albums: (trackIds: number[], action: CoverAction) =>
+      request<{ albums: CoverResult[] }>('POST', '/api/covers/albums', { track_ids: trackIds, action }),
     update: async (trackId: number, file: File): Promise<{ ok: boolean }> => {
       const form = new FormData()
       form.append('file', file)

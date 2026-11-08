@@ -56,6 +56,11 @@ class AppSettings(BaseModel):
     # How lyrics are looked up (core/lyricsgroups.py); [] = the defaults.
     lyrics_groups: list[LyricsGroup] = []
     library_lyrics_groups: dict[str, str] = {}     # library root -> its default group
+    # Where new cover art goes (core/covers.py): folder (cover.jpg) | tracks (embedded) | both.
+    cover_target: str = "folder"
+    # Art written is shrunk to these (longest side, px; 0 = as is): never blow up a folder or every track.
+    cover_folder_size: int = 1200
+    cover_embed_size: int = 500
 
 
 def get_music_dirs() -> list[str]:

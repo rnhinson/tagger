@@ -17,6 +17,7 @@ from typing import Callable
 
 from core.config import settings
 from core.database import get_conn
+from core import covers
 from core.tagger import read_tags, is_audio_file, TAG_FIELDS
 
 _BATCH_SIZE = 200
@@ -40,7 +41,8 @@ def _excluded(path: str, patterns: list[str]) -> bool:
 # Bump when read_tags() reads existing files differently, so the next full
 # scan re-reads every file instead of skipping unchanged ones.
 #   1: multi-value tags keep every value ("; "-joined), not just the first.
-READER_VERSION = 1
+#   2: embedded cover art: has_cover, its size in px and bytes.
+READER_VERSION = 2
 
 
 class ScanCancelled(Exception):
@@ -77,6 +79,7 @@ def scan_library(
 
     # Collect all audio files first so we know the total
     all_files: list[str] = []
+    folder_art: dict[str, str | None] = {}   # album folder -> its cover image's name
     for music_dir in music_dirs:
         if not os.path.isdir(music_dir):
             continue
@@ -85,6 +88,8 @@ def scan_library(
             dirs[:] = [d for d in dirs if not _excluded(os.path.join(root, d), patterns)]
             if stop():
                 raise ScanCancelled()
+            if any(is_audio_file(f) for f in files):
+                folder_art[root] = covers.folder_image(files)
             for fname in sorted(files):
                 fpath = os.path.join(root, fname)
                 if is_audio_file(fpath) and not _excluded(fpath, patterns):
@@ -133,13 +138,13 @@ def scan_library(
                             bitrate, sample_rate, channels,
                             title, artist, album, album_artist, year, genre,
                             track_number, disc_number, comment, composer, bpm,
-                            lyrics, compilation, scanned_at
+                            lyrics, compilation, has_cover, cover_width, cover_height, cover_bytes, scanned_at
                         ) VALUES (
                             :path, :filename, :directory, :format, :size, :mtime, :duration,
                             :bitrate, :sample_rate, :channels,
                             :title, :artist, :album, :album_artist, :year, :genre,
                             :track_number, :disc_number, :comment, :composer, :bpm,
-                            :lyrics, :compilation, :scanned_at
+                            :lyrics, :compilation, :has_cover, :cover_width, :cover_height, :cover_bytes, :scanned_at
                         )
                         ON CONFLICT(path) DO UPDATE SET
                             filename     = excluded.filename,
@@ -164,6 +169,10 @@ def scan_library(
                             bpm          = excluded.bpm,
                             lyrics       = excluded.lyrics,
                             compilation  = excluded.compilation,
+                            has_cover    = excluded.has_cover,
+                            cover_width  = excluded.cover_width,
+                            cover_height = excluded.cover_height,
+                            cover_bytes  = excluded.cover_bytes,
                             scanned_at   = excluded.scanned_at
                         """,
                         {
@@ -190,6 +199,10 @@ def scan_library(
                             "bpm": tags.get("bpm"),
                             "lyrics": tags.get("lyrics"),
                             "compilation": tags.get("compilation"),
+                            "has_cover": tags.get("has_cover"),
+                            "cover_width": tags.get("cover_width"),
+                            "cover_height": tags.get("cover_height"),
+                            "cover_bytes": tags.get("cover_bytes"),
                             "scanned_at": now,
                         },
                     )
@@ -204,6 +217,8 @@ def scan_library(
                 if progress_cb:
                     progress_cb(i + 1, total)
 
+        for d, name in folder_art.items():
+            covers.record_folder(conn, d, name)
         conn.commit()
         if reread and prune_under is None:  # only a full scan covers every file
             conn.execute(f"PRAGMA user_version = {READER_VERSION}")

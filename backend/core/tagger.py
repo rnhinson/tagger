@@ -101,6 +101,8 @@ def read_tags(path: str | Path, extended: bool = True) -> dict:
         result.update(_read_extended(str(path)))
     else:
         result["lyrics"] = result["compilation"] = None
+        art = read_cover(path)
+        result.update(cover_info(art[1] if art else None))
     info = f.info
     result["duration"] = getattr(info, "length", None)
     result["format"] = _detect_format(str(path))
@@ -208,11 +210,13 @@ def _write_mb_ids(path: str, mb_updates: dict) -> None:
 def _read_extended(path: str) -> dict:
     """Read lyrics/compilation via format-specific frames. Never raises."""
     ext = Path(path).suffix.lower()
-    out: dict = {"lyrics": None, "compilation": None}
+    out: dict = {"lyrics": None, "compilation": None, **cover_info(None)}
     try:
         if ext == ".mp3":
             from mutagen.id3 import ID3
             tags = ID3(path)
+            apic = tags.getall("APIC")
+            out.update(cover_info(apic[0].data if apic else None))
             uslt = tags.getall("USLT")
             if uslt:
                 out["lyrics"] = uslt[0].text
@@ -222,11 +226,20 @@ def _read_extended(path: str) -> dict:
         elif ext in (".m4a", ".aac"):
             from mutagen.mp4 import MP4
             f = MP4(path)
+            covr = f.get("covr")
+            out.update(cover_info(bytes(covr[0]) if covr else None))
             lyr = f.get("\xa9lyr")
             out["lyrics"] = lyr[0] if lyr else None
             out["compilation"] = "1" if f.get("cpil") else None
         elif ext in (".flac", ".ogg", ".oga"):
             f = mutagen.File(path)
+            pics = getattr(f, "pictures", None)
+            if pics:
+                out.update(cover_info(pics[0].data))
+            elif f.get("metadata_block_picture"):
+                import base64
+                from mutagen.flac import Picture
+                out.update(cover_info(Picture(base64.b64decode(f["metadata_block_picture"][0])).data))
             lyr = f.get("lyrics")
             out["lyrics"] = lyr[0] if lyr else None
             comp = f.get("compilation")
@@ -303,6 +316,24 @@ def _detect_format(path: str) -> str:
 
 def is_audio_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in AUDIO_EXTENSIONS
+
+
+def image_size(data: bytes) -> tuple[int | None, int | None]:
+    """(width, height) from an image's header; (None, None) if unreadable."""
+    try:
+        from io import BytesIO
+        from PIL import Image
+        return Image.open(BytesIO(data)).size
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def cover_info(data: bytes | None) -> dict:
+    """has_cover + cover_width/height/bytes columns for embedded art `data` (None = none)."""
+    if not data:
+        return {"has_cover": 0, "cover_width": None, "cover_height": None, "cover_bytes": None}
+    w, h = image_size(data)
+    return {"has_cover": 1, "cover_width": w, "cover_height": h, "cover_bytes": len(data)}
 
 
 def read_cover(path: str | Path) -> tuple[str, bytes] | None:
@@ -399,3 +430,33 @@ def write_cover(path: str | Path, mime_type: str, image_data: bytes) -> None:
 
     else:
         raise ValueError(f"Cover art not supported for format: {ext}")
+
+
+def remove_cover(path: str | Path) -> None:
+    """Remove all embedded cover art from an audio file."""
+    p = str(path)
+    ext = Path(path).suffix.lower()
+    if ext == ".mp3":
+        from mutagen.id3 import ID3
+        f = ID3(p)
+        f.delall("APIC")
+        f.save(p)
+    elif ext == ".flac":
+        from mutagen.flac import FLAC
+        f = FLAC(p)
+        f.clear_pictures()
+        f.save()
+    elif ext in (".m4a", ".aac"):
+        from mutagen.mp4 import MP4
+        f = MP4(p)
+        if f.tags and "covr" in f.tags:
+            del f.tags["covr"]
+            f.save()
+    elif ext in (".ogg", ".oga"):
+        from mutagen.oggvorbis import OggVorbis
+        f = OggVorbis(p)
+        if "metadata_block_picture" in f:
+            del f["metadata_block_picture"]
+            f.save()
+    else:
+        raise ValueError(f"cover art not supported for {ext}")

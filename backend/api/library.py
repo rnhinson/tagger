@@ -17,6 +17,8 @@ from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_cha
 
 router = APIRouter()
 
+_NO_FOLDER = "directory NOT IN (SELECT directory FROM folder_covers)"
+
 _ISSUE_CLAUSES: dict[str, str] = {
     "missing_title":        "(title IS NULL OR title = '')",
     "missing_artist":       "(artist IS NULL OR artist = '')",
@@ -32,7 +34,28 @@ _ISSUE_CLAUSES: dict[str, str] = {
     # (core/duplicates.py; refresh() first).
     "duplicate_tracks": "dup_rank(id) IS NOT NULL",
     "duplicate_albums": "dup_album(directory) IS NOT NULL",
+    # Cover art (core/covers.py): embedded (has_cover) and the folder's image.
+    "covers_none":   f"COALESCE(has_cover, 0) = 0 AND {_NO_FOLDER}",
+    "covers_no_folder": _NO_FOLDER,
+    "covers_no_tracks": "COALESCE(has_cover, 0) = 0",
+    "covers_both":   f"has_cover = 1 AND NOT {_NO_FOLDER}",
+    "covers_oversized": "",          # from the size settings: _issue_clause()
 }
+
+
+def _issue_clause(key: str) -> str:
+    """The SQL for an issue; oversized cover art depends on the size settings."""
+    if key != "covers_oversized":
+        return _ISSUE_CLAUSES[key]
+    from api.config import _load
+    cfg = _load()
+    parts = []
+    if cfg.cover_embed_size:
+        parts.append(f"MAX(COALESCE(cover_width, 0), COALESCE(cover_height, 0)) > {int(cfg.cover_embed_size)}")
+    if cfg.cover_folder_size:
+        parts.append("directory IN (SELECT directory FROM folder_covers"
+                     f" WHERE MAX(COALESCE(width, 0), COALESCE(height, 0)) > {int(cfg.cover_folder_size)})")
+    return f"({' OR '.join(parts)})" if parts else "0"
 
 
 def _row(row) -> dict:
@@ -96,6 +119,7 @@ _SORT = {
     **{c: f"CAST({c} AS INTEGER)" for c in ("year", "track_number", "disc_number", "bpm")},
     **{c: c for c in ("bitrate", "sample_rate", "channels", "duration")},
     "source": "directory COLLATE NOCASE",
+    "cover": "COALESCE(cover_bytes, 0)",
     # none < plain < synced ("[mm:ss" timestamps)
     "has_lyrics": f"CASE WHEN {_blank('lyrics')} THEN 0 WHEN lyrics GLOB '*[[][0-9][0-9]:[0-9][0-9]*' THEN 2 ELSE 1 END",
 }
@@ -152,7 +176,7 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         if v.issue.startswith("duplicate_"):
             with db() as conn:
                 duplicates.refresh(conn)
-        clauses.append(_ISSUE_CLAUSES[v.issue])
+        clauses.append(_issue_clause(v.issue))
     if v.format:
         clauses.append("format = ?")
         params.append(v.format)
@@ -165,7 +189,7 @@ def _track_filters(v: View) -> tuple[str, list, str]:
         direction = "DESC" if v.sort_dir == "desc" else "ASC"
         # Blanks last either way (title never is: it falls back to the file
         # name), then a stable tiebreak.
-        blanks = "" if v.sort in ("title", "has_lyrics") else _blank("directory" if v.sort == "source" else v.sort) + ", "
+        blanks = "" if v.sort in ("title", "has_lyrics", "cover") else _blank("directory" if v.sort == "source" else v.sort) + ", "
         order = f"ORDER BY {blanks}{col} {direction}, directory, path"
     elif v.issue == "duplicate_tracks":
         # Each group together, in the order the duplicates dialog lists them
@@ -186,9 +210,9 @@ def get_issues():
     with db() as conn:
         duplicates.refresh(conn)
         result = {}
-        for key, clause in _ISSUE_CLAUSES.items():
+        for key in _ISSUE_CLAUSES:
             result[key] = conn.execute(
-                f"SELECT COUNT(*) FROM tracks WHERE {clause}"
+                f"SELECT COUNT(*) FROM tracks WHERE {_issue_clause(key)}"
             ).fetchone()[0]
         rows = conn.execute("SELECT path FROM tracks").fetchall()
         result["missing_files"] = sum(1 for r in rows if not Path(r["path"]).exists())
