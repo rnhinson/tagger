@@ -166,3 +166,16 @@ def test_set_from_file_url_and_caa(client, lib, monkeypatch):
     monkeypatch.setattr(ac, "_public_image", lambda url: ("image/jpeg", big))
     assert client.post("/api/covers/set", data={"track_ids": ids, "url": "https://example.com/c.jpg"}).json()["tracks"] == 2
     assert client.post("/api/covers/set", data={"track_ids": ids}).status_code == 400
+
+
+def test_search_by_name_or_id(client, monkeypatch):
+    from core.providers import musicbrainz as mbp
+    rid = "11111111-2222-3333-4444-555555555555"
+    monkeypatch.setattr(mbp, "search_releases", lambda album, artist, limit=15: [{"mb_album_id": rid, "album": album, "artist": artist}])
+    monkeypatch.setattr(mbp, "get_release", lambda i: {"mb_album_id": i, "album": "Abbey Road", "album_artist": "The Beatles",
+                                                       "date": "1969", "country": "GB"} if i == rid else None)
+    assert client.get("/api/covers/search", params={"album": "Abbey Road", "artist": "The Beatles"}).json()[0]["mb_album_id"] == rid
+    r = client.get("/api/covers/search", params={"album": f"https://musicbrainz.org/release/{rid.upper()}"}).json()
+    assert r[0]["album"] == "Abbey Road"
+    assert client.get("/api/covers/search", params={"album": "22222222-2222-3333-4444-555555555555"}).status_code == 404
+    assert client.get("/api/covers/search").status_code == 400

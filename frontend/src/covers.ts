@@ -109,7 +109,8 @@ export function openCovers(ids: number[], onDone: () => Promise<void>) {
 // Change cover: one image for the selection, from disk, the Cover Art
 // Archive (the tracks' MusicBrainz release) or a URL; written where
 // Settings → Cover Art says, at its sizes.
-export function openChangeCover(ids: number[], mbAlbumId: string | null, onDone: () => Promise<void>) {
+export function openChangeCover(ids: number[], mbAlbumId: string | null, guess: { album: string; artist: string },
+                                onDone: () => Promise<void>) {
   const overlay = document.createElement('div')
   overlay.className = 'fix-confirm-overlay'
   overlay.innerHTML = `
@@ -121,10 +122,15 @@ export function openChangeCover(ids: number[], mbAlbumId: string | null, onDone:
       <div class="cc-body">
         <div class="cc-sources">
           <label class="btn btn-ghost btn-sm">From disk…<input id="cc-file" type="file" accept="image/jpeg,image/png,image/webp" hidden /></label>
-          <button type="button" class="btn btn-ghost btn-sm" id="cc-caa" ${mbAlbumId ? '' : 'disabled title="The selection has no MusicBrainz release — use Match album… first"'}>Cover Art Archive</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="cc-caa" ${mbAlbumId ? '' : 'disabled title="The selection has no MusicBrainz release — search below"'}>This album's release</button>
           <form id="cc-url-form" class="cc-url"><input id="cc-url" type="url" placeholder="https://… image URL" autocomplete="off" />
             <button class="btn btn-ghost btn-sm" type="submit">Load</button></form>
         </div>
+        <form id="cc-search" class="cc-search">
+          <input id="cc-album" type="text" placeholder="Album, or a MusicBrainz release id / link" autocomplete="off" />
+          <input id="cc-artist" type="text" placeholder="Artist" autocomplete="off" />
+          <button class="btn btn-ghost btn-sm" type="submit">Search MusicBrainz</button></form>
+        <div id="cc-results" class="cc-results"></div>
         <div class="cc-preview"><img id="cc-img" alt="" hidden /><span id="cc-none" class="ma-dim">Pick an image</span></div>
         <div id="cc-where" class="settings-hint"></div>
         <div id="cc-error" class="review-error" hidden></div>
@@ -169,6 +175,35 @@ export function openChangeCover(ids: number[], mbAlbumId: string | null, onDone:
     const u = $<HTMLInputElement>('#cc-url').value.trim()
     if (u) show({ url: u }, u)
   })
+
+  const albumEl = $<HTMLInputElement>('#cc-album'), artistEl = $<HTMLInputElement>('#cc-artist'), resEl = $('#cc-results')
+  albumEl.value = guess.album; artistEl.value = guess.artist
+  $<HTMLFormElement>('#cc-search').addEventListener('submit', async e => {
+    e.preventDefault()
+    resEl.textContent = 'Searching…'
+    try {
+      const found = await api.covers.search(albumEl.value, artistEl.value)
+      if (!found.length) { resEl.textContent = 'No releases found'; return }
+      resEl.innerHTML = found.map(r => `<button type="button" class="cc-hit" data-id="${esc(r.mb_album_id)}" title="${esc(`${r.album} · ${r.artist ?? ''} · ${r.date ?? ''} ${r.country ?? ''}`)}">
+        <img src="https://coverartarchive.org/release/${esc(r.mb_album_id)}/front-250" alt="" loading="lazy" />
+        <span>${esc(r.album)}</span><span class="ma-dim">${esc(r.artist ?? '')}${r.date ? ` · ${esc(r.date.slice(0, 4))}` : ''}${r.country ? ` · ${esc(r.country)}` : ''}</span></button>`).join('')
+        + '<div id="cc-hidden" class="ma-dim cc-hidden"></div>'
+      let hidden = 0
+      resEl.querySelectorAll<HTMLImageElement>('.cc-hit img').forEach(i => i.addEventListener('error', () => {
+        i.closest('.cc-hit')!.remove()
+        hidden++
+        const left = resEl.querySelectorAll('.cc-hit').length
+        $('#cc-hidden').textContent = `${hidden} release${hidden !== 1 ? 's' : ''} without art hidden${left ? '' : ' — try another release or search'}`
+      }))
+    } catch (err) { resEl.textContent = errText(err) }
+  })
+  resEl.addEventListener('click', e => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('.cc-hit')
+    if (!b) return
+    resEl.querySelectorAll('.cc-hit').forEach(x => x.classList.toggle('cc-picked', x === b))
+    show({ mb_album_id: b.dataset.id! }, `https://coverartarchive.org/release/${b.dataset.id}/front-500`)
+  })
+  if (!mbAlbumId && (guess.album || guess.artist)) $<HTMLFormElement>('#cc-search').requestSubmit()
 
   api.settings.get().then(s => {
     const where = { folder: 'the album folder (cover.jpg)', tracks: 'each track (embedded)', both: 'the album folder and each track' }[s.cover_target ?? 'folder']

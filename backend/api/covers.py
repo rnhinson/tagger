@@ -62,6 +62,26 @@ def _public_image(url: str) -> tuple[str, bytes]:
     return mime, data
 
 
+@router.get("/search")
+def search_releases(album: str = "", artist: str = ""):
+    """
+    MusicBrainz releases to take cover art from: by album and/or artist, or by
+    a release id / musicbrainz.org release link pasted as the album.
+    """
+    import re
+    from core.providers import musicbrainz as mbp
+    m = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", album.lower())
+    if m:
+        rel = mbp.get_release(m.group(0))
+        if not rel:
+            raise HTTPException(404, "No MusicBrainz release with that id")
+        return [{"mb_album_id": rel["mb_album_id"], "album": rel["album"], "artist": rel["album_artist"],
+                 "date": rel["date"], "country": rel["country"]}]
+    if not album.strip() and not artist.strip():
+        raise HTTPException(400, "Type an album or artist")
+    return mbp.search_releases(album.strip() or None, artist.strip() or None, 30)
+
+
 @router.post("/set")
 async def set_covers(track_ids: str = Form(...), file: UploadFile | None = File(None),
                      url: str = Form(""), mb_album_id: str = Form("")):

@@ -596,6 +596,9 @@ export const api = {
       }
       return res.json() as Promise<{ folders: number; tracks: number; errors: { id: number | null; error: string }[] }>
     },
+    search: (album: string, artist: string) =>
+      request<{ mb_album_id: string; album: string; artist: string | null; date?: string | null; country?: string | null }[]>(
+        'GET', `/api/covers/search?album=${encodeURIComponent(album)}&artist=${encodeURIComponent(artist)}`),
     plan: (trackIds: number[]) =>
       request<{ albums: CoverAlbum[] }>('POST', '/api/covers/albums', { track_ids: trackIds, dry_run: true }),
     albums: (trackIds: number[], action: CoverAction) =>
