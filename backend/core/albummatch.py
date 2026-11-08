@@ -12,6 +12,7 @@ before anything is staged -- this only proposes.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from difflib import SequenceMatcher
 
 MIN_SCORE = 0.35
@@ -33,12 +34,43 @@ def _int(v) -> int:
         return 0
 
 
-def local_title(local: dict) -> str:
-    """The title to compare: the tag, else the file name without its leading number."""
-    if local.get("title"):
-        return local["title"]
+_PLACEHOLDER = re.compile(r"^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track \d+)$", re.I)
+_DISC_DIR = re.compile(r"^(cd|dis[ck])\s*\d+$", re.I)
+_DIR_SUFFIX = re.compile(r"\s*[\(\[](\d{4}|flac|mp3|ogg|m4a|\d+\s*kbps|web|cd|lossless)[\)\]]\s*$", re.I)
+
+
+def is_placeholder(s: str | None) -> bool:
+    """Empty, or a ripper's stand-in ("Unknown Album", "Track 3")."""
+    return not (s or "").strip() or bool(_PLACEHOLDER.match(s.strip()))
+
+
+def name_title(local: dict) -> str:
+    """The file name without its extension and leading number."""
     stem = (local.get("filename") or "").rsplit(".", 1)[0]
     return _LEADING_NUM.sub("", stem)
+
+
+def local_title(local: dict) -> str:
+    """The title to compare: the tag, else (missing or a placeholder) the file name."""
+    return name_title(local) if is_placeholder(local.get("title")) else local["title"]
+
+
+def names_from_path(path: str, root: Path | None) -> tuple[str | None, str | None]:
+    """(album, artist) from .../Artist/Album[/Disc 1]/file, never above the library root."""
+    d = Path(path).parent
+    if _DISC_DIR.match(d.name):
+        d = d.parent
+    if d == root or not d.name:
+        return None, None
+    album = d.name
+    while _DIR_SUFFIX.search(album):
+        album = _DIR_SUFFIX.sub("", album)
+    artist = d.parent.name if d.parent != root and d.parent.name else None
+    if " - " in album:
+        head, rest = album.split(" - ", 1)
+        if not artist or _norm(head) == _norm(artist):
+            artist, album = artist or head, rest
+    return album.strip() or None, artist
 
 
 def title_similarity(local: dict, mb: dict) -> float:
@@ -50,7 +82,9 @@ def score(local: dict, mb: dict) -> float:
     """0..1: how likely `local` (a track row) is release track `mb`."""
     s = 0.0
     disc = _int(local.get("disc_number")) or 1
-    num = _int(local.get("track_number"))
+    num = local_number(local)
+    if unnamed(local):
+        return _score_by_position(local, mb, disc, num)
     if num and num == mb["position"] and disc == mb["disc"]:
         s += 0.4
     elif num and num == mb["position"]:
@@ -63,10 +97,36 @@ def score(local: dict, mb: dict) -> float:
     return round(s, 3)
 
 
+def local_number(local: dict) -> int:
+    """Track number: the tag, else the file name's leading number."""
+    n = _int(local.get("track_number"))
+    if n:
+        return n
+    m = re.match(r"\s*(\d+)", local.get("filename") or "")
+    return int(m.group(1)) if m else 0
+
+
+def unnamed(local: dict) -> bool:
+    """No usable title in the tag or the file name (an unidentified rip)."""
+    return is_placeholder(local_title(local)) or not _norm(local_title(local))
+
+
+def _score_by_position(local: dict, mb: dict, disc: int, num: int) -> float:
+    """An unnamed track pairs by number and length alone: both must agree."""
+    if not num or num != mb["position"]:
+        return 0.0
+    s = 0.6 if disc == mb["disc"] else 0.45
+    d1, d2 = local.get("duration"), mb.get("duration")
+    if not (d1 and d2):
+        return round(s + 0.2, 3)
+    diff = abs(d1 - d2)
+    return round(s + 0.4, 3) if diff <= 3 else round(s + 0.2, 3) if diff <= 10 else 0.0
+
+
 def match(local: list[dict], release_tracks: list[dict]) -> dict[int, tuple[str | None, float]]:
     """{track id: (release track key or None, score)}."""
     pairs = sorted(((score(l, m), l["id"], m["key"]) for l in local for m in release_tracks
-                    if title_similarity(l, m) >= TITLE_MIN), reverse=True)
+                    if unnamed(l) or title_similarity(l, m) >= TITLE_MIN), reverse=True)
     out: dict[int, tuple[str | None, float]] = {}
     used: set[str] = set()
     for sc, tid, key in pairs:

@@ -181,6 +181,7 @@ class AlbumSearch(BaseModel):
     artist: Optional[str] = None
     by: str = "album"                # album | artist (releases by the artist) | track (releases containing it)
     track: Optional[str] = None      # title for by="track"
+    source: str = "auto"             # auto (tags; Unknown/missing -> folder names) | names | tags
 
 
 def _selection(conn, ids: list[int]) -> list[dict]:
@@ -192,8 +193,21 @@ def _selection(conn, ids: list[int]) -> list[dict]:
 
 
 def _common(tracks: list[dict], field: str) -> str | None:
-    vals = [t.get(field) for t in tracks if t.get(field)]
+    vals = [t.get(field) for t in tracks if not albummatch.is_placeholder(t.get(field))]
     return max(set(vals), key=vals.count) if vals else None
+
+
+def _from_names(tracks: list[dict]) -> list[dict]:
+    """The selection as its folder and file names say: album, artist, title (other fields kept)."""
+    from api.config import get_library_roots
+    from core.fileops import root_for
+    roots = get_library_roots()
+    out = []
+    for t in tracks:
+        album, artist = albummatch.names_from_path(t["path"], root_for(t["path"], roots))
+        out.append({**t, "album": album, "album_artist": artist, "artist": artist,
+                    "title": albummatch.name_title(t)})
+    return out
 
 
 def _artist_releases(artist: str, tracks: list[dict]) -> list[dict]:
@@ -231,22 +245,29 @@ async def album_search(req: AlbumSearch):
         tracks = _selection(conn, req.track_ids)
     if not tracks:
         raise HTTPException(400, "No tracks")
-    album = req.album if req.album is not None else _common(tracks, "album")
-    artist = req.artist if req.artist is not None else (_common(tracks, "album_artist") or _common(tracks, "artist"))
+    names = _from_names(tracks)
+    if req.source == "names":
+        tracks = names
+    fallback = req.source == "auto"
+    album = req.album if req.album is not None else (
+        _common(tracks, "album") or (_common(names, "album") if fallback else None))
+    artist = req.artist if req.artist is not None else (
+        _common(tracks, "album_artist") or _common(tracks, "artist") or (_common(names, "artist") if fallback else None))
     if req.by == "track":
         title = (req.track or "").strip()
         if not title:
             raise HTTPException(400, "No track title to search for")
         found = await asyncio.to_thread(mbp.releases_with_recording, title, artist)
-        return {"album": album, "artist": artist, "track": title, "by": "track",
+        return {"album": album, "artist": artist, "track": title, "by": "track", "source": req.source,
                 "local_tracks": len(tracks), "candidates": found}
     if req.by == "artist":
         if not artist:
             raise HTTPException(400, "No artist to search for -- type one")
         found = await asyncio.to_thread(_artist_releases, artist, tracks)
-        return {"album": album, "artist": artist, "by": "artist", "local_tracks": len(tracks), "candidates": found}
+        return {"album": album, "artist": artist, "by": "artist", "source": req.source, "local_tracks": len(tracks), "candidates": found}
     if not album:
-        raise HTTPException(400, "No album name to search for -- type one")
+        raise HTTPException(400, "No album name to search for -- type one, or try " +
+                            ("tags" if req.source == "names" else "folder names" if req.source == "tags" else "naming the folder"))
     found = await asyncio.to_thread(mbp.search_releases, album, artist)
     tagged = _common(tracks, "mb_album_id")
     if tagged and _UUID_RE.match(tagged):
@@ -257,7 +278,7 @@ async def album_search(req: AlbumSearch):
                              "date": rel["date"], "country": rel["country"], "formats": [],
                              "discs": rel["discs"], "tracks": len(rel["tracks"]), "type": None,
                              "score": 1.0, "tagged": True})
-    return {"album": album, "artist": artist, "by": "album", "local_tracks": len(tracks), "candidates": found}
+    return {"album": album, "artist": artist, "by": "album", "source": req.source, "local_tracks": len(tracks), "candidates": found}
 
 
 class AlbumMatch(BaseModel):

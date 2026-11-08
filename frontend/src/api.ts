@@ -534,9 +534,10 @@ export const api = {
   },
 
   lookup: {
-    albumSearch: (trackIds: number[], album?: string, artist?: string, by: 'album' | 'artist' | 'track' = 'album', track?: string) =>
+    albumSearch: (trackIds: number[], album?: string, artist?: string, by: 'album' | 'artist' | 'track' = 'album', track?: string,
+                  source: 'auto' | 'names' | 'tags' = 'auto') =>
       request<{ album: string | null; artist: string | null; track?: string; by: string; local_tracks: number; candidates: MbCandidate[] }>(
-        'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist, by, track }),
+        'POST', '/api/lookup/album/search', { track_ids: trackIds, album, artist, by, track, source }),
     albumScore: (trackIds: number[], mbAlbumId: string) =>
       request<{ mb_album_id: string; quality: number; matched: number; local: number; release_tracks: number }>(
         'POST', '/api/lookup/album/score', { track_ids: trackIds, mb_album_id: mbAlbumId }),

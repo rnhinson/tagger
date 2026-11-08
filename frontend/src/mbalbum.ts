@@ -26,6 +26,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
       </div>
       <div class="pr-controls">
         <form class="mb-search" id="mb-search">
+          <label class="field-label">From<select id="mb-source" title="Where the album, artist and track titles come from">
+            <option value="auto" selected>Tags, else folder names</option><option value="names">Folder names</option><option value="tags">Tags only</option></select></label>
           <label class="field-label">Album<span class="mb-q-row"><input id="mb-album" type="text" autocomplete="off" />
             <button type="button" class="btn btn-ghost btn-sm mb-q" data-by="album" title="Releases with this album title (and artist)">🔍</button></span></label>
           <label class="field-label">Artist<span class="mb-q-row"><input id="mb-artist" type="text" autocomplete="off" />
@@ -63,6 +65,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
   const $ = <T extends HTMLElement>(sel: string) => overlay.querySelector<T>(sel)!
   const albumEl = $<HTMLInputElement>('#mb-album'), artistEl = $<HTMLInputElement>('#mb-artist')
   const trackEl = $<HTMLInputElement>('#mb-track'), contextEl = $('#mb-context')
+  const sourceEl = $<HTMLSelectElement>('#mb-source')
   const candEl = $('#mb-candidates'), matchEl = $('#mb-match'), rowsEl = $('#mb-rows')
   const errEl = $('#mb-error'), sumEl = $('#mb-summary'), goBtn = $<HTMLButtonElement>('#mb-apply')
   let localCount = ids.length, match: MbMatch | null = null
@@ -86,7 +89,8 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     candEl.textContent = 'Searching MusicBrainz…'; contextEl.textContent = ''
     try {
       const r = await api.lookup.albumSearch(ids, first ? undefined : albumEl.value, first ? undefined : artistEl.value,
-                                              by, by === 'track' ? trackEl.value : undefined)
+                                              by, by === 'track' ? trackEl.value : undefined,
+                                              sourceEl.value as 'auto' | 'names' | 'tags')
       if (t !== searchToken) return
       albumEl.value = r.album ?? ''; artistEl.value = r.artist ?? ''; localCount = r.local_tracks
       contextEl.textContent = r.by === 'artist' ? `Releases by ${r.artist} — ranked by how well they fit your ${localCount} tracks`
@@ -266,6 +270,7 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     e.preventDefault()
     search(false, document.activeElement === trackEl ? 'track' : document.activeElement === artistEl && !albumEl.value ? 'artist' : 'album')
   })
+  sourceEl.addEventListener('change', () => { fillTitles(); search(true) })
   overlay.querySelectorAll<HTMLButtonElement>('.mb-q').forEach(b =>
     b.addEventListener('click', () => search(false, b.dataset.by as 'album' | 'artist' | 'track')))
   overlay.addEventListener('click', (e) => {
@@ -275,9 +280,16 @@ export function openMbAlbum(ids: number[], onDone: () => Promise<void>) {
     trackEl.value = b.dataset.findTrack!
     search(false, 'track')
   })
-  // Track field: your selection's titles to pick from.
-  const titles = [...new Set(state.tracks.filter(t => ids.includes(t.id)).map(t => t.title).filter(Boolean) as string[])]
-  $('#mb-track-list').innerHTML = titles.map(t => `<option value="${esc(t)}"></option>`).join('')
-  trackEl.value = titles[0] ?? ''
+  // Track field: your selection's titles (or file names) to pick from.
+  function fillTitles() {
+    const sel = state.tracks.filter(t => ids.includes(t.id))
+    const fromName = (t: { filename: string }) => t.filename.replace(/\.[^.]+$/, '').replace(/^\s*(\d+[\s.\-_]*)+/, '')
+    const placeholder = (s?: string | null) => !s || /^(unknown( (artist|album|title|track))?|untitled|(audio ?)?track \d+)$/i.test(s.trim())
+    const titles = [...new Set(sel.map(t => sourceEl.value === 'names' || (sourceEl.value === 'auto' && placeholder(t.title))
+      ? fromName(t) : t.title).filter(t => !placeholder(t)) as string[])]
+    $('#mb-track-list').innerHTML = titles.map(t => `<option value="${esc(t)}"></option>`).join('')
+    trackEl.value = titles[0] ?? ''
+  }
+  fillTitles()
   search(true)
 }
