@@ -63,7 +63,7 @@ def test_search_puts_the_tagged_release_first(client, lib, monkeypatch):
         {"mb_album_id": "x-other", "album": album, "artist": artist, "tracks": 17, "score": 1.0},
         {"mb_album_id": REL_ID, "album": album, "artist": artist, "tracks": 3, "score": 0.9}])
     a = _insert(lib / "Shared" / "x" / "1.mp3", album="Abbey Road", artist="The Beatles", mb_album_id=REL_ID)
-    r = client.post("/api/lookup/album/search", json={"track_ids": [a]}).json()
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "source": "tags"}).json()
     assert [c["mb_album_id"] for c in r["candidates"]] == [REL_ID, "x-other"] and r["candidates"][0]["tagged"]
     assert (r["album"], r["artist"], r["local_tracks"]) == ("Abbey Road", "The Beatles", 1)
 
@@ -95,9 +95,44 @@ def test_search_by_artist_and_by_track(client, lib, monkeypatch):
     monkeypatch.setattr(mbp, "releases_with_recording", lambda title, artist: calls.append(("rec", title, artist)) or
                         [{"mb_album_id": "b", "album": "Y", "artist": artist, "tracks": 9, "score": 0.9}])
     a = _insert(lib / "Shared" / "x" / "1.mp3", title="Something", artist="The Beatles", album="Abbey Road")
-    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "artist"}).json()
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "artist", "source": "tags"}).json()
     assert r["by"] == "artist" and calls[-1] == ("rec", "Something", "The Beatles")   # by your titles
     assert r["candidates"][0]["titles_found"] == 1
-    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "track", "track": "Something"}).json()
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "track", "track": "Something", "source": "tags"}).json()
     assert r["by"] == "track" and r["track"] == "Something" and calls[-1] == ("rec", "Something", "The Beatles")
     assert client.post("/api/lookup/album/search", json={"track_ids": [a], "by": "track"}).status_code == 400
+
+
+def test_names_from_path(tmp_path):
+    root = tmp_path / "CD Rips"
+    f = albummatch.names_from_path
+    assert f(str(root / "Leslie Fish" / "Sea of Dreams" / "01 Tam Lin.flac"), root) == ("Sea of Dreams", "Leslie Fish")
+    assert f(str(root / "Leslie Fish" / "Sea of Dreams (1990) [FLAC]" / "Disc 2" / "01 x.flac"), root) == ("Sea of Dreams", "Leslie Fish")
+    assert f(str(root / "Leslie Fish - Sea of Dreams" / "01 x.flac"), root) == ("Sea of Dreams", "Leslie Fish")
+    assert f(str(root / "01 x.flac"), root) == (None, None)
+    assert albummatch.is_placeholder("Unknown Album") and albummatch.is_placeholder("Track 3")
+    assert not albummatch.is_placeholder("Unknown Pleasures")
+    assert albummatch.local_title({"title": "Track 1", "filename": "01 Tam Lin.flac"}) == "Tam Lin"
+
+
+def test_search_uses_folder_names_for_unknown_tags(client, lib, monkeypatch):
+    calls = []
+    monkeypatch.setattr(mbp, "search_releases", lambda album, artist: calls.append((album, artist)) or [])
+    d = lib / "Shared" / "Leslie Fish" / "Sea of Dreams"
+    a = _insert(d / "01 Tam Lin.flac", title="Track 1", album="Unknown Album", artist="Unknown Artist")
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a]}).json()
+    assert (r["album"], r["artist"], r["source"]) == ("Sea of Dreams", "Leslie Fish", "auto")    # Unknown -> folders
+    b = _insert(d / "02 Bonnie.flac", album="Real Album", artist="Unknown Artist")
+    r = client.post("/api/lookup/album/search", json={"track_ids": [b]}).json()
+    assert (r["album"], r["artist"]) == ("Real Album", "Leslie Fish")                            # real tag kept
+    r = client.post("/api/lookup/album/search", json={"track_ids": [a], "source": "tags"})
+    assert r.status_code == 400 and "folder names" in r.json()["detail"]     # placeholders aren't a name
+
+
+def test_unnamed_tracks_pair_by_number_and_length():
+    local = [{"id": 1, "title": "Track 1", "filename": "01 Track 1.flac", "track_number": "1", "duration": 260},
+             {"id": 2, "title": "", "filename": "02.flac", "track_number": "", "duration": 181},     # number from the name
+             {"id": 3, "title": "Track 3", "filename": "03 Track 3.flac", "track_number": "3", "duration": 150}]  # length off
+    m = albummatch.match(local, RELEASE["tracks"])
+    assert m[1][0] == "1-1" and m[2][0] == "1-2" and m[3] == (None, 0.0)
+    assert albummatch.quality(local, RELEASE["tracks"])["matched"] == 2
