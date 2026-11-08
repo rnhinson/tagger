@@ -85,7 +85,6 @@ const lyricsSearchBtn = document.getElementById('lyrics-search-btn') as HTMLButt
 const selectionCount = document.getElementById('selection-count')!
 const searchEl       = document.getElementById('search') as HTMLInputElement
 const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
-const rescanFolderBtn = document.getElementById('rescan-folder-btn') as HTMLButtonElement
 const scanStatusEl   = document.getElementById('scan-status')!
 const colPickerBtn   = document.getElementById('col-picker-btn')!
 const colPickerEl    = document.getElementById('col-picker')!
@@ -246,7 +245,7 @@ function renderFilesPanel() {
 
   dirTreeEl.innerHTML = ''
   dirTreeEl.appendChild(ul)
-  updateRescanBtn()
+  updateScanBtns()
 }
 
 function renderDirNode(node: DirNode, depth: number): HTMLElement {
@@ -1598,13 +1597,21 @@ async function loadTracks() {
 
 // ─── Scan ─────────────────────────────────────────────────────────────────────
 
-/** The header's Scan Library is for first-time setup; afterwards it lives in Settings. */
-async function updateScanBtnVisibility() {
-  try { scanBtn.hidden = (await api.about()).tracks > 0 } catch { /* keep as is */ }
+/** Primary (first-time setup) until there are tracks. */
+async function updateScanBtnStyle() {
+  try { scanBtn.classList.toggle('btn-primary', (await api.about()).tracks === 0) } catch { /* keep as is */ }
 }
 
-function updateRescanBtn() {
-  rescanFolderBtn.disabled = state.selectedDirectory === null || state.scanPollTimer !== null
+/** The folder the header's Scan covers: the Files tab's selection, any level; else everything. */
+function scanTarget(): string | undefined {
+  return state.sidebarMode === 'files' ? state.selectedDirectory ?? undefined : undefined
+}
+
+function updateScanBtns() {
+  const dir = scanTarget()
+  scanBtn.disabled = state.scanPollTimer !== null
+  scanBtn.textContent = dir ? `Scan ${dir.split('/').filter(Boolean).pop()}` : 'Scan all'
+  scanBtn.title = dir ? `Scan ${shortPath(dir)} — new, changed and removed files` : 'Scan the whole library'
   const movable = isMovableFolder(state.selectedDirectory)
   moveFolderBtn.disabled = renameFolderBtn.disabled = !movable
 }
@@ -1612,14 +1619,12 @@ function updateRescanBtn() {
 async function startScan(directory?: string) {
   try {
     scanBtn.disabled = true
-    rescanFolderBtn.disabled = true
     const { job_id } = await api.jobs.startScan(directory)
     pollScan(job_id)
   } catch (e) {
     const msg = String(e).includes('409') ? 'A scan is already running' : `Scan failed to start: ${e}`
     toast(msg, 'error')
-    scanBtn.disabled = false
-    updateRescanBtn()
+    updateScanBtns()
   }
 }
 
@@ -1633,9 +1638,8 @@ function pollScan(jobId: string) {
       if (job.status !== 'running' && job.status !== 'pending') {
         clearInterval(state.scanPollTimer!)
         state.scanPollTimer = null
-        scanBtn.disabled = false
-        updateRescanBtn()
-        updateScanBtnVisibility()
+        updateScanBtns()
+        updateScanBtnStyle()
         if (job.status === 'done') {
           toast(`Scan complete — ${job.total.toLocaleString()} files, ${(job.changed ?? 0).toLocaleString()} changed`, 'success')
           state.qualityIssues = null
@@ -1654,8 +1658,7 @@ function pollScan(jobId: string) {
     } catch (e) {
       clearInterval(state.scanPollTimer!)
       state.scanPollTimer = null
-      scanBtn.disabled = false
-      updateRescanBtn()
+      updateScanBtns()
       toast(`Scan polling failed: ${e}`, 'error')
     }
   }, 1000)
@@ -2406,6 +2409,7 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
   const mode = btn.dataset.mode as 'tags' | 'files' | 'quality'
   if (mode === state.sidebarMode) return
   state.sidebarMode = mode
+  updateScanBtns()
   if (mode === 'tags') {
     state.selectedDirectory = null
     if (!state.artists.length) await loadLibrary()
@@ -2794,7 +2798,7 @@ searchEl.addEventListener('input', () => {
   debouncedSearch()
 })
 
-scanBtn.addEventListener('click', () => startScan())
+scanBtn.addEventListener('click', () => startScan(scanTarget()))
 document.addEventListener('click', async (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-scan-now]')
   if (!b) return
@@ -2803,10 +2807,7 @@ document.addEventListener('click', async (e) => {
   if (settingsModal.classList.contains('open')) showSettingsTab('background')
   b.disabled = false
 })
-updateScanBtnVisibility()
-rescanFolderBtn.addEventListener('click', () => {
-  if (state.selectedDirectory) startScan(state.selectedDirectory)
-})
+updateScanBtnStyle()
 
 // ─── Settings modal ───────────────────────────────────────────────────────────
 
