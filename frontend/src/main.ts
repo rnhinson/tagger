@@ -2637,8 +2637,14 @@ viewAlbumsBtn.addEventListener('click', () => {
 document.getElementById('change-cover-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
   if (!ids.length) return
-  const mbIds = new Set(state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.staged?.tags?.mb_album_id ?? t.mb_album_id).filter(Boolean))
-  openChangeCover(ids, mbIds.size === 1 ? [...mbIds][0] as string : null, async () => {
+  const sel = state.tracks.filter(t => state.selectedIds.has(t.id))
+  const mbIds = new Set(sel.map(t => t.staged?.tags?.mb_album_id ?? t.mb_album_id).filter(Boolean))
+  // A search to start from: the tags, or the folder names when the tags are a ripper's placeholders.
+  const real = (v?: string | null) => v && !/^unknown( (artist|album))?$/i.test(v.trim()) ? v : ''
+  const parts = (sel[0]?.directory ?? '').split('/').filter(Boolean)
+  const guess = { album: real(sel[0]?.album) || (parts[parts.length - 1] ?? '').replace(/_/g, ' '),
+                  artist: real(sel[0]?.album_artist) || real(sel[0]?.artist) || (parts[parts.length - 2] ?? '').replace(/_/g, ' ') }
+  openChangeCover(ids, mbIds.size === 1 ? [...mbIds][0] as string : null, guess, async () => {
     state.coverBust++
     state.qualityIssues = null
     updateCoverPreview()
