@@ -60,6 +60,7 @@ def test_acoustid_enriches_only_the_best_few_and_prefers_the_files_album(monkeyp
     calls = []
 
     def get_rec(rid, includes=None):
+        musicbrainzngs.musicbrainz._check_includes("recording", includes)   # what the real call checks first
         calls.append(rid)
         return {"recording": {"id": rid, "title": "T", "release-list": [
             {"id": "comp", "title": "Hits", "release-group": {"primary-type": "Album", "secondary-type-list": ["Compilation"]}},

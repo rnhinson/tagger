@@ -15,6 +15,11 @@ musicbrainzngs.set_useragent("tagger", "0.2", "https://github.com/rnhinson/tagge
 musicbrainzngs.set_rate_limit(1.0, 1)
 
 _MB_INCLUDES = ["artists", "releases", "release-groups"]
+# MusicBrainz takes release-groups on a recording lookup (each release's type,
+# used to pick the album over singles); musicbrainzngs refused it client-side,
+# so every recording lookup failed and Auto-fix got only title/artist/id.
+if "release-groups" not in musicbrainzngs.musicbrainz.VALID_INCLUDES["recording"]:
+    musicbrainzngs.musicbrainz.VALID_INCLUDES["recording"].append("release-groups")
 
 
 def _with_retry(fn, *args, attempts: int = 3, **kwargs):
