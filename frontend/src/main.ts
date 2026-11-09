@@ -1327,7 +1327,7 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
   const off = new Set<string>()
   const fieldsEl = document.createElement('div')
   fieldsEl.className = 'pr-options fix-fields'
-  fieldsEl.innerHTML = offered.map(f => `<label class="settings-toggle"><input type="checkbox" data-field="${f.key}" checked /><span>${esc(f.label)}</span></label>`).join('')
+  fieldsEl.innerHTML = offered.map(f => `<button type="button" class="tog" aria-pressed="true" data-field="${f.key}" title="Click to leave ${esc(f.label)} out of every track">${esc(f.label)}</button>`).join('')
 
   const body = document.createElement('div')
   body.className = 'fix-confirm-body'
@@ -1354,11 +1354,11 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
     const rows = FIX_FIELDS
       .filter(f => f.ids ? f.ids.some(k => k in p.update) : p.update[f.key] != null)
       .map(f => {
-        const proposed = f.ids ? f.ids.filter(k => k in p.update).map(k => k.replace(/^mb_|_id$/g, '').replace('_', ' ')).join(', ') : p.update[f.key]
+        const proposed = f.ids ? f.ids.filter(k => k in p.update && !Object.entries(ID_OF).some(([t, id]) => id === k && rowOff(pi, t))).map(k => k.replace(/^mb_|_id$/g, '').replace('_', ' ')).join(', ') : p.update[f.key]
         const current  = f.ids ? '' : (p.track[f.key as keyof Track] as string | null) ?? ''
         const isOff = rowOff(pi, f.key)
-        return `<tr data-field="${f.key}" class="${isOff ? 'fix-row-off' : ''}">
-          <td class="fix-col-on"><input type="checkbox" data-row="${f.key}" ${isOff ? '' : 'checked'} ${off.has(f.key) ? 'disabled' : ''} /></td>
+        const tip = off.has(f.key) ? 'Left out of every track (switch above)' : isOff ? 'Click to write this' : 'Click to leave this out'
+        return `<tr data-row="${f.key}" class="fix-row${isOff ? ' fix-row-off' : ''}${off.has(f.key) ? ' fix-row-locked' : ''}" title="${tip}">
           <td class="fix-col-field">${esc(f.label)}</td>
           <td class="fix-col-current">${f.ids ? '' : current ? esc(current) : '<span class="fix-empty">empty</span>'}</td>
           <td class="fix-col-arrow">→</td>
@@ -1378,11 +1378,11 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
     section.classList.toggle('fix-track-skip', skip.has(pi))
     section.innerHTML = `
       <div class="fix-confirm-track-header">
-        <input type="checkbox" class="fix-track-on" title="Include this track" ${skip.has(pi) ? '' : 'checked'} />
         <span class="fix-confirm-track-name">${esc(p.track.title || p.track.filename)}</span>
         <span class="lookup-score ${scoreClass}">${pct}%</span>
         <span class="fix-confirm-source">${esc(p.source)}</span>
         <button type="button" class="lookup-editions-btn" data-other>Other matches ▾</button>
+        <button type="button" class="fix-skip" data-skip title="${skip.has(pi) ? 'Put this track back' : 'Leave this track out'}">${skip.has(pi) ? '↺' : '✕'}</button>
       </div>
       <ul class="fix-matches" hidden>${matches}</ul>
       ${rows ? `<table class="fix-confirm-table"><tbody>${rows}</tbody></table>`
@@ -1445,6 +1445,19 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
       label()
       return
     }
+    if (el.closest('[data-skip]')) {
+      if (!skip.delete(pi)) skip.add(pi)
+      render(pi); label()
+      return
+    }
+    const row = el.closest<HTMLElement>('tr[data-row]')
+    if (row) {
+      const key = row.dataset.row!
+      if (off.has(key) || skip.has(pi)) return
+      if (!offRows[pi].delete(key)) offRows[pi].add(key)
+      render(pi); label()
+      return
+    }
     if (el.closest('[data-other]')) {
       const ul = section.querySelector<HTMLElement>('.fix-matches')!
       ul.hidden = !ul.hidden
@@ -1482,22 +1495,14 @@ function showFixConfirmation(proposals: FixProposal[], onConfirm: (p: FixProposa
     if (el.closest('.lookup-editions')) return
     if (r !== p.picked) void pick(pi, r)
   })
-  body.addEventListener('change', e => {
-    const cb = e.target as HTMLInputElement
-    const section = cb.closest<HTMLElement>('.fix-confirm-track')!
-    const pi = Number(section.dataset.p)
-    if (cb.classList.contains('fix-track-on')) {
-      if (cb.checked) skip.delete(pi); else skip.add(pi)
-      section.classList.toggle('fix-track-skip', !cb.checked)
-    } else if (cb.dataset.row) {
-      if (cb.checked) offRows[pi].delete(cb.dataset.row); else offRows[pi].add(cb.dataset.row)
-      cb.closest('tr')!.classList.toggle('fix-row-off', !cb.checked)
-    }
-    label()
-  })
-  fieldsEl.addEventListener('change', e => {
-    const cb = e.target as HTMLInputElement
-    if (cb.checked) off.delete(cb.dataset.field!); else off.add(cb.dataset.field!)
+  fieldsEl.addEventListener('click', e => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-field]')
+    if (!b) return
+    const key = b.dataset.field!, on = off.has(key)
+    if (on) off.delete(key); else off.add(key)
+    const name = FIX_FIELDS.find(f => f.key === key)!.label
+    b.setAttribute('aria-pressed', String(on))
+    b.title = on ? `Click to leave ${name} out of every track` : `${name} is left out of every track; click to write it`
     proposals.forEach((_, pi) => render(pi))
     label()
   })
