@@ -167,6 +167,7 @@ export interface AppSettings {
   lrclib_app_id: string
   cover_target: 'folder' | 'tracks' | 'both'
   cover_embed_size: number
+  search_fields: string[]
   cover_folder_size: number
   secrets_set?: Record<string, boolean>   // keys/tokens are never sent back, only whether set
   secrets_encrypted?: boolean

@@ -61,6 +61,8 @@ class AppSettings(BaseModel):
     # Art written is shrunk to these (longest side, px; 0 = as is): never blow up a folder or every track.
     cover_folder_size: int = 1200
     cover_embed_size: int = 500
+    # Tags the search box looks in (core/search.py).
+    search_fields: list[str] = ["title", "artist", "album", "album_artist", "genre"]
 
 
 def get_music_dirs() -> list[str]:

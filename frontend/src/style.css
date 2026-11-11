@@ -65,6 +65,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .search-mode { border: 1px solid transparent; border-radius: 10px; background: none; color: var(--text-dim); font: 12px ui-monospace, monospace; padding: 2px 7px; cursor: pointer; }
 .search-mode:hover { color: var(--text); border-color: var(--border); }
 .search-mode[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.search-fields { display: flex; flex-wrap: wrap; gap: 6px; }
 .search-input.search-invalid, .search-input.search-invalid:focus { border-color: var(--danger); }
 
 .search-input {

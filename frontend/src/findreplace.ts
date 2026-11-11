@@ -11,8 +11,10 @@ const MAX_ROWS = 500
 const FIELDS: { key: string; label: string }[] = [
   { key: 'title', label: 'Title' }, { key: 'artist', label: 'Artist' },
   { key: 'album', label: 'Album' }, { key: 'album_artist', label: 'Album Artist' },
-  { key: 'genre', label: 'Genre' }, { key: 'composer', label: 'Composer' },
-  { key: 'comment', label: 'Comment' },
+  { key: 'year', label: 'Year' }, { key: 'track_number', label: 'Track #' },
+  { key: 'disc_number', label: 'Disc #' }, { key: 'genre', label: 'Genre' },
+  { key: 'composer', label: 'Composer' }, { key: 'bpm', label: 'BPM' },
+  { key: 'comment', label: 'Comment' }, { key: 'lyrics', label: 'Lyrics' },
 ]
 
 export function openFindReplace(ids: number[], onDone: (res: EditResult) => Promise<void>) {

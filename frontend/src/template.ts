@@ -6,8 +6,8 @@ export const APP_HTML = `
     <a id="logo" class="logo" href="#" title="Home: all tracks">${LOGO_MARK}Tagger</a>
     <div class="search-wrap">
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
-      <button type="button" class="search-mode" data-qmode="glob" aria-pressed="false" title="Glob: * any text, ? one character, [abc] one of; matches a whole title, artist, album, album artist, genre or file name (love* = starts with love). Click again for plain search">*</button>
-      <button type="button" class="search-mode" data-qmode="regex" aria-pressed="false" title="Regex: matches anywhere in the title, artist, album, album artist, genre or file name; ignores case. Click again for plain search">.*</button>
+      <button type="button" class="search-mode" data-qmode="glob" aria-pressed="false" title="Glob: * any text, ? one character, [abc] one of; matches a whole tag (love* = starts with love); which tags: Settings → Search. Click again for plain search">*</button>
+      <button type="button" class="search-mode" data-qmode="regex" aria-pressed="false" title="Regex: matches anywhere in a tag, ignoring case; which tags: Settings → Search. Click again for plain search">.*</button>
     </div>
     <div class="topbar-actions">
       <button id="scan-status" class="scan-status" type="button" title="Scan progress — click for details" hidden></button>
@@ -39,6 +39,7 @@ export const APP_HTML = `
         <button type="button" data-sect="scanning">Scanning</button>
         <button type="button" data-sect="sources">Sources</button>
         <button type="button" data-sect="writing">Writing</button>
+        <button type="button" data-sect="search">Search</button>
       </nav>
       <div class="settings-sect" data-sect="libraries">
       <div class="settings-section">
@@ -169,6 +170,24 @@ export const APP_HTML = `
         <div class="settings-section-title">ReplayGain</div>
         <p class="settings-hint">Scan volume levels and write ReplayGain tags, so players that read them play tracks at an even volume. Run it from the selection toolbar.</p>
         <div id="replaygain-status" class="acoustid-status"></div>
+      </div>
+      </div>
+      <div class="settings-sect" data-sect="search" hidden>
+      <div class="settings-section">
+        <div class="settings-section-title">Search Box</div>
+        <p class="settings-hint">The tags the search box looks in, in every mode (words, <code>*</code> glob, <code>.*</code> regex). Words search uses the index while you choose only Title, Artist, Album, Album Artist and Genre; any other tag is searched track by track, slower on a big library.</p>
+        <div id="search-fields" class="search-fields">
+          <button type="button" class="tog" data-search-field="title" aria-pressed="false" title="Click to search this tag, or to stop">Title</button>
+          <button type="button" class="tog" data-search-field="artist" aria-pressed="false" title="Click to search this tag, or to stop">Artist</button>
+          <button type="button" class="tog" data-search-field="album" aria-pressed="false" title="Click to search this tag, or to stop">Album</button>
+          <button type="button" class="tog" data-search-field="album_artist" aria-pressed="false" title="Click to search this tag, or to stop">Album Artist</button>
+          <button type="button" class="tog" data-search-field="year" aria-pressed="false" title="Click to search this tag, or to stop">Year</button>
+          <button type="button" class="tog" data-search-field="genre" aria-pressed="false" title="Click to search this tag, or to stop">Genre</button>
+          <button type="button" class="tog" data-search-field="composer" aria-pressed="false" title="Click to search this tag, or to stop">Composer</button>
+          <button type="button" class="tog" data-search-field="comment" aria-pressed="false" title="Click to search this tag, or to stop">Comment</button>
+          <button type="button" class="tog" data-search-field="lyrics" aria-pressed="false" title="Click to search this tag, or to stop">Lyrics</button>
+          <button type="button" class="tog" data-search-field="filename" aria-pressed="false" title="Click to search this tag, or to stop">File name</button>
+        </div>
       </div>
       </div>
       <div class="settings-sect" data-sect="writing" hidden>

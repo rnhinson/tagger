@@ -152,16 +152,21 @@ class View:
 def _track_filters(v: View) -> tuple[str, list, str]:
     """Build the shared WHERE clause + ORDER BY used by listing and export."""
     clauses, params = [], []
-    if v.q and v.q_mode in search.MODES:
-        try:
-            search.compile_query(v.q_mode, v.q)
-        except re.error as exc:
-            raise HTTPException(400, f"Bad regex: {exc}")
-        clauses.append(f"q_match(?, ?, {', '.join(search.FIELDS)})")
-        params.extend([v.q_mode, v.q])
-    elif v.q and _fts_query(v.q):
-        clauses.append("id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?)")
-        params.append(_fts_query(v.q))
+    if v.q:
+        from api.config import _load as load_settings
+        fields = search.fields(load_settings().search_fields)
+        mode = v.q_mode if v.q_mode in search.MODES else "words"
+        if mode == "words" and set(fields) <= set(search.FTS_FIELDS):
+            if search.terms(v.q):
+                clauses.append("id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?)")
+                params.append(_fts_query(v.q, fields))
+        elif mode != "words" or search.terms(v.q):
+            try:
+                search.compile_query(mode, v.q)
+            except re.error as exc:
+                raise HTTPException(400, f"Bad regex: {exc}")
+            clauses.append(f"q_match(?, ?, {', '.join(fields)})")
+            params.extend([mode, v.q])
     if v.tag in BROWSE_FIELDS and v.value is not None:
         # `tag` is whitelisted, so it is safe to interpolate.
         if v.value == "":
@@ -488,12 +493,10 @@ def export_m3u(view: View = Depends(), limit: int = Query(10000, le=100000)):
     )
 
 
-def _fts_query(q: str) -> str:
-    """Convert a user query into an FTS5 prefix-match expression."""
-    # Strip double quotes so a stray quote can't break out of the quoted term
-    # and produce a malformed MATCH expression (500 / query error).
-    terms = q.replace('"', " ").split()
-    return " ".join(f'"{t}"*' for t in terms if t)
+def _fts_query(q: str, fields: list[str] | None = None) -> str:
+    """Convert a user query into an FTS5 prefix-match expression, in only these columns."""
+    cols = "" if not fields or set(fields) == set(search.FTS_FIELDS) else "{" + " ".join(fields) + "} : "
+    return " ".join(f'{cols}"{t}"*' for t in search.terms(q))
 
 
 @router.get("/search")

@@ -3211,6 +3211,7 @@ async function openSettings() {
     getScanTagCheckboxes().forEach(cb => {
       cb.checked = s.scan_tags.includes(cb.dataset.tag!)
     })
+    for (const b of searchFieldBtns()) b.setAttribute('aria-pressed', String((s.search_fields ?? []).includes(b.dataset.searchField!)))
     renderLibraries()
     musicDirsDefaultEl.textContent = s.default_music_dir ?? ''
     localMusicDirs = [...(s.music_dirs ?? [])]
@@ -3376,6 +3377,16 @@ musicDirsListEl.addEventListener('click', (e) => {
   renderMusicDirsList()
 })
 
+const searchFieldBtns = () => [...document.querySelectorAll<HTMLButtonElement>('[data-search-field]')]
+document.getElementById('search-fields')!.addEventListener('click', e => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-search-field]')
+  if (!b) return
+  const on = b.getAttribute('aria-pressed') !== 'true'
+  // Never none: the server would fall back to the defaults anyway.
+  if (!on && searchFieldBtns().filter(x => x.getAttribute('aria-pressed') === 'true').length === 1) return
+  b.setAttribute('aria-pressed', String(on))
+})
+
 document.getElementById('settings-save')!.addEventListener('click', async () => {
   const scanTags: string[] = []
   getScanTagCheckboxes().forEach(cb => { if (cb.checked) scanTags.push(cb.dataset.tag!) })
@@ -3390,6 +3401,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
     library_roots:     libraryRootsInput.value.split('\n').map(x => x.trim()).filter(Boolean),
     rename_template:   renameTemplateInput.value.trim(),
     scan_tags:         scanTags,
+    search_fields:     searchFieldBtns().filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.searchField!),
     music_dirs:        localMusicDirs,
     scan_exclude:      scanExcludeInput.value.split('\n').map(x => x.trim()).filter(Boolean),
     auto_scan_minutes: Math.max(0, parseInt(autoScanInput.value, 10) || 0),
@@ -3427,6 +3439,7 @@ document.getElementById('settings-save')!.addEventListener('click', async () => 
       : 'Search MusicBrainz by title/artist/album'
     toast('Settings saved', 'success')
     closeSettings()
+    if (state.query) debouncedSearch()   // the search may look in other tags now
   } catch (e) {
     toast(`Failed to save settings: ${errText(e)}`, 'error')
   }

@@ -92,7 +92,22 @@ def test_search_modes(client):
     assert ids(q="love") == sorted([love, all_])                       # plain: word prefix
     assert ids(q="love*", q_mode="glob") == [love]                     # glob: the whole field
     assert ids(q="*LOVE", q_mode="glob") == [all_]
-    assert ids(q="track_??.flac", q_mode="glob") == [rip]              # file names too
+    assert ids(q="track_??.flac", q_mode="glob") == []                 # file names: only when chosen
+    client.patch("/api/config", json={"search_fields": ["title", "filename"]})
+    assert ids(q="track_??.flac", q_mode="glob") == [rip]
     assert ids(q=r"^\d\d ", q_mode="regex") == sorted([love, all_])     # regex: anywhere
     assert ids(q="need|do$", q_mode="regex") == sorted([love, all_])
     assert client.get("/api/library/tracks", params={"q": "(", "q_mode": "regex"}).status_code == 400
+
+
+def test_search_fields_setting(client):
+    a = _track("Yesterday", "The Beatles", "a.flac")
+    from core.database import db
+    with db() as conn:
+        conn.execute("UPDATE tracks SET year='1965', album='Help!' WHERE id=?", (a,))
+    ids = lambda q: [t["id"] for t in client.get("/api/library/tracks", params={"q": q}).json()["tracks"]]
+    assert ids("1965") == [] and ids("help") == [a]
+    client.patch("/api/config", json={"search_fields": ["title", "artist"]})       # index, fewer columns
+    assert ids("help") == [] and ids("beat yest") == [a]
+    client.patch("/api/config", json={"search_fields": ["title", "year"]})          # off the index
+    assert ids("1965") == [a] and ids("yest 196") == [a] and ids("beatles") == [] and ids("esterday") == []
