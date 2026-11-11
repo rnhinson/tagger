@@ -6,6 +6,8 @@ export const APP_HTML = `
     <a id="logo" class="logo" href="#" title="Home: all tracks">${LOGO_MARK}Tagger</a>
     <div class="search-wrap">
       <input id="search" class="search-input" type="search" placeholder="Search tracks…" aria-label="Search tracks" autocomplete="off" />
+      <button type="button" class="search-mode" data-qmode="glob" aria-pressed="false" title="Glob: * any text, ? one character, [abc] one of; matches a whole title, artist, album, album artist, genre or file name (love* = starts with love). Click again for plain search">*</button>
+      <button type="button" class="search-mode" data-qmode="regex" aria-pressed="false" title="Regex: matches anywhere in the title, artist, album, album artist, genre or file name; ignores case. Click again for plain search">.*</button>
     </div>
     <div class="topbar-actions">
       <button id="scan-status" class="scan-status" type="button" title="Scan progress — click for details" hidden></button>
@@ -286,7 +288,7 @@ export const APP_HTML = `
         <span class="bulk-group"><span class="bulk-group-label">Tags</span>
           <button id="normalize-case-btn" class="btn btn-ghost btn-sm">Normalize Case</button>
           <button id="autonumber-btn" class="btn btn-ghost btn-sm" title="Number selected tracks 1…N in filename order">Auto-number</button>
-          <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace text in one tag across the selection">Find/Replace</button>
+          <button id="find-replace-btn" class="btn btn-ghost btn-sm" title="Find and replace in one tag across the selection — plain text or regex with capture groups, previewed">Find/Replace</button>
           <button id="parse-names-btn" class="btn btn-ghost btn-sm" title="Read tags from the file and folder names with a pattern like %artist%/%album%/%track% - %title% — previewed, then staged">Tags from names…</button>
         </span>
         <span class="bulk-group"><span class="bulk-group-label">Look up</span>

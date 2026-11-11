@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,7 @@ from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from core.database import db
-from core import duplicates, layout, lyricsgroups, lyricsjob, staging
+from core import duplicates, layout, lyricsgroups, lyricsjob, search, staging
 from core.multivalue import MULTI_FIELDS, split_values
 from core.history import STAGEABLE, log_change, snapshot, list_changes, undo_change
 
@@ -137,20 +138,28 @@ class View:
         tag: Optional[str] = None,
         value: Optional[str] = None,
         q: Optional[str] = None,
+        q_mode: Optional[str] = None,
         format: Optional[str] = None,
         quality: Optional[str] = None,
         sort: Optional[str] = None,
         sort_dir: str = "asc",
     ):
         self.directory, self.artist, self.album, self.issue = directory, artist, album, issue
-        self.tag, self.value, self.q = tag, value, q
+        self.tag, self.value, self.q, self.q_mode = tag, value, q, q_mode
         self.format, self.quality, self.sort, self.sort_dir = format, quality, sort, sort_dir
 
 
 def _track_filters(v: View) -> tuple[str, list, str]:
     """Build the shared WHERE clause + ORDER BY used by listing and export."""
     clauses, params = [], []
-    if v.q and _fts_query(v.q):
+    if v.q and v.q_mode in search.MODES:
+        try:
+            search.compile_query(v.q_mode, v.q)
+        except re.error as exc:
+            raise HTTPException(400, f"Bad regex: {exc}")
+        clauses.append(f"q_match(?, ?, {', '.join(search.FIELDS)})")
+        params.extend([v.q_mode, v.q])
+    elif v.q and _fts_query(v.q):
         clauses.append("id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?)")
         params.append(_fts_query(v.q))
     if v.tag in BROWSE_FIELDS and v.value is not None:

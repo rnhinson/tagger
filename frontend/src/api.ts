@@ -51,6 +51,11 @@ export interface StagedEntry {
   new_path: string | null
 }
 
+export interface FindReplaceRequest {
+  track_ids: number[]; field: string; find: string; replace: string
+  regex: boolean; case_sensitive: boolean
+}
+
 export interface BulkRenameRequest {
   track_ids: number[]
   find: string
@@ -486,9 +491,11 @@ export const api = {
         'POST', '/api/tags/move-to', { track_ids: trackIds, folder }),
     autonumber: (trackIds: number[]) =>
       request<EditResult & { numbered: number }>('POST', '/api/tags/autonumber', { track_ids: trackIds }),
-    findReplace: (trackIds: number[], field: string, find: string, replace: string) =>
-      request<EditResult & { changed: number }>('POST', '/api/tags/find-replace',
-        { track_ids: trackIds, field, find, replace }),
+    findReplace: (req: FindReplaceRequest) =>
+      request<EditResult & { changed: number }>('POST', '/api/tags/find-replace', req),
+    findReplacePreview: (req: FindReplaceRequest) =>
+      request<{ changed: number; changes: { id: number; name: string; before: string; after: string }[] }>(
+        'POST', '/api/tags/find-replace', { ...req, preview: true }),
   },
 
   staged: {

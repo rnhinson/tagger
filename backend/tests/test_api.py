@@ -69,3 +69,30 @@ def test_health(client):
 
 def test_openapi_available(client):
     assert client.get("/openapi.json").status_code == 200
+
+
+def _track(title, artist, filename):
+    from core.database import db
+    with db() as conn:
+        return conn.execute(
+            "INSERT INTO tracks (path, filename, directory, format, scanned_at, title, artist) VALUES (?,?,?,?,?,?,?)",
+            (f"/m/{filename}", filename, "/m", "flac", 1.0, title, artist)).lastrowid
+
+
+def test_search_modes(client):
+    love = _track("Love Me Do", "The Beatles", "01 Love Me Do.flac")
+    all_ = _track("All You Need Is Love", "The Beatles", "02 All You Need Is Love.flac")
+    rip = _track("", "", "Track_01.flac")
+
+    def ids(**p):
+        r = client.get("/api/library/tracks", params=p)
+        assert r.status_code == 200, r.text
+        return sorted(t["id"] for t in r.json()["tracks"])
+
+    assert ids(q="love") == sorted([love, all_])                       # plain: word prefix
+    assert ids(q="love*", q_mode="glob") == [love]                     # glob: the whole field
+    assert ids(q="*LOVE", q_mode="glob") == [all_]
+    assert ids(q="track_??.flac", q_mode="glob") == [rip]              # file names too
+    assert ids(q=r"^\d\d ", q_mode="regex") == sorted([love, all_])     # regex: anywhere
+    assert ids(q="need|do$", q_mode="regex") == sorted([love, all_])
+    assert client.get("/api/library/tracks", params={"q": "(", "q_mode": "regex"}).status_code == 400

@@ -61,7 +61,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   flex-shrink: 0;
 }
 
-.search-wrap { flex: 1; max-width: 380px; margin: 0 8px; }
+.search-wrap { flex: 1; max-width: 440px; margin: 0 8px; display: flex; align-items: center; gap: 4px; }
+.search-mode { border: 1px solid transparent; border-radius: 10px; background: none; color: var(--text-dim); font: 12px ui-monospace, monospace; padding: 2px 7px; cursor: pointer; }
+.search-mode:hover { color: var(--text); border-color: var(--border); }
+.search-mode[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.search-input.search-invalid, .search-input.search-invalid:focus { border-color: var(--danger); }
 
 .search-input {
   width: 100%;
@@ -1047,7 +1051,7 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 @media (max-width: 820px) {
   .topbar { flex-wrap: wrap; height: auto; row-gap: 6px; padding: 6px 10px; }
   .search-wrap { order: 3; flex-basis: 100%; min-width: 0; }
-  .search-input { width: 100%; }
+  .search-input { width: 100%; min-width: 0; }
 
   /* Sidebar slides over the content instead of taking a fixed column. */
   .sidebar {

@@ -645,3 +645,26 @@ def test_a_folder_with_more_than_images_keeps_them(client, lib):
     client.post("/api/tags/reorganize", json={"track_ids": [tid]})
     client.post("/api/staged/apply", json={})
     assert (old / "cover.jpg").exists() and (old / "rip.log").exists()
+
+
+def test_find_replace_regex_captures_and_preview(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", title="Track 01 - Intro")
+    b = _insert(lib / "Shared" / "b.mp3", title="Track 02 - Overture")
+    c = _insert(lib / "Shared" / "c.mp3", title="Finale")
+    body = {"track_ids": [a, b, c], "field": "title", "find": r"^Track (\d+) - (.+)$", "replace": "$2 ($1)",
+            "regex": True}
+    prev = client.post("/api/tags/find-replace", json={**body, "preview": True}).json()
+    assert prev["changed"] == 2 and [x["after"] for x in prev["changes"]] == ["Intro (01)", "Overture (02)"]
+    assert client.get(f"/api/library/track/{a}").json()["staged"] is None            # preview stages nothing
+    client.post("/api/tags/find-replace", json=body)
+    assert client.get(f"/api/library/track/{b}").json()["staged"]["tags"]["title"] == "Overture (02)"
+    bad = client.post("/api/tags/find-replace", json={**body, "find": "(", "preview": True})
+    assert bad.status_code == 400
+
+
+def test_find_replace_plain_is_literal_and_case_option(client, lib):
+    a = _insert(lib / "Shared" / "a.mp3", artist="the beatles")
+    req = {"track_ids": [a], "field": "artist", "find": "The", "replace": "$1."}
+    assert client.post("/api/tags/find-replace", json={**req, "preview": True}).json()["changed"] == 0
+    after = client.post("/api/tags/find-replace", json={**req, "case_sensitive": False, "preview": True}).json()
+    assert after["changes"][0]["after"] == "$1. beatles"

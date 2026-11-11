@@ -8,7 +8,7 @@ import { errText, shortPath } from './staged'
 
 const MAX_ROWS = 1000
 
-const HELP = `
+export const HELP = `
   <table class="pr-help">
     <tr><td><code>$1</code> <code>\${name}</code></td><td>capture group (regex)</td></tr>
     <tr><td><code>$0</code></td><td>the whole match</td></tr>

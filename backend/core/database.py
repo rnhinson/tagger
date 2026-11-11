@@ -25,6 +25,9 @@ def get_conn() -> sqlite3.Connection:
     from core import duplicates
     conn.create_function("dup_rank", 1, duplicates.dup_rank)
     conn.create_function("dup_album", 1, duplicates.dup_album)
+    # q_match(mode, q, field, ...): the search box's glob/regex modes (core/search.py).
+    from core.search import q_match
+    conn.create_function("q_match", -1, q_match, deterministic=True)
     return conn
 
 

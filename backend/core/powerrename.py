@@ -157,6 +157,25 @@ def _transform(s: str, how: str) -> str:
     return s
 
 
+def substitute(text: str, pattern: re.Pattern, tpl: Template, index: int, count: int = 0) -> str:
+    """Replace matches of `pattern` in `text` by the template (index = position, for counters)."""
+    def expand(m: re.Match) -> str:
+        out = []
+        for kind, val in tpl.parts:
+            if kind == "lit":
+                out.append(val)
+            elif kind == "counter":
+                out.append(val.value(index))
+            else:
+                try:
+                    out.append(m.group(val) or "")
+                except IndexError:
+                    raise RenameError(f"no capture group {val!r} in the search")
+        return "".join(out)
+
+    return pattern.sub(expand, text, count=count)
+
+
 def rename_one(name: str, opts: Options, pattern: re.Pattern | None, tpl: Template, index: int) -> str:
     """The new file name for `name` (index = position, for counters)."""
     p = Path(name)
@@ -164,21 +183,7 @@ def rename_one(name: str, opts: Options, pattern: re.Pattern | None, tpl: Templa
     target = {"name": stem, "ext": ext, "both": name}[opts.apply_to]
 
     if pattern is not None:
-        def expand(m: re.Match) -> str:
-            out = []
-            for kind, val in tpl.parts:
-                if kind == "lit":
-                    out.append(val)
-                elif kind == "counter":
-                    out.append(val.value(index))
-                else:
-                    try:
-                        out.append(m.group(val) or "")
-                    except IndexError:
-                        raise RenameError(f"no capture group {val!r} in the search")
-            return "".join(out)
-
-        target = pattern.sub(expand, target, count=0 if opts.match_all else 1)
+        target = substitute(target, pattern, tpl, index, count=0 if opts.match_all else 1)
     target = _transform(target, opts.transform)
 
     if opts.apply_to == "name":

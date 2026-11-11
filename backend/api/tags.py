@@ -116,6 +116,9 @@ class FindReplace(BaseModel):
     field: str
     find: str
     replace: str = ""
+    regex: bool = False             # the replacement can then use $1, ${name}, $0
+    case_sensitive: bool = True
+    preview: bool = False           # list the changes, stage nothing
 
 
 @router.post("/autonumber")
@@ -134,28 +137,47 @@ def autonumber(req: AutoNumber):
 
 @router.post("/find-replace")
 def find_replace(req: FindReplace):
-    """Replace text within one tag field across the selection (case-sensitive)."""
+    """
+    Replace text (or a regex, with capture groups and counters as in Rename
+    files…) within one tag field across the selection. With preview, only the
+    changes: [{id, name, before, after}].
+    """
+    from core import powerrename as pr
+
     if req.field not in TAG_FIELDS:
         raise HTTPException(400, "Invalid field")
     if not req.find:
         raise HTTPException(400, "Nothing to find")
-    changed = []
+    opts = pr.Options(find=req.find, regex=req.regex, case_sensitive=req.case_sensitive)
+    try:
+        pattern = pr.compile_search(opts)
+        tpl = pr.parse_template(req.replace, req.regex)
+    except pr.RenameError as exc:
+        raise HTTPException(400, str(exc))
+    changes = []
     with db() as conn:
-        rows = _rows(conn, req.track_ids)
+        by_id = {r["id"]: r for r in _rows(conn, req.track_ids)}
+        rows = [by_id[t] for t in dict.fromkeys(req.track_ids) if t in by_id]   # counters in selection order
         pending = staging.load(conn, [r["id"] for r in rows])
-        step = staging.Step(conn, f"Find/replace “{req.find}” in {req.field}")
-        for row in rows:
+        for i, row in enumerate(rows):
             # Work on the value as staged, so edits build on each other.
             val = staging.effective(row, pending.get(row["id"]))[req.field]
-            if not val or req.find not in val:
+            if not val:
                 continue
-            new_val = val.replace(req.find, req.replace)
-            if new_val == val:
-                continue
+            try:
+                new_val = pr.substitute(val, pattern, tpl, i)
+            except pr.RenameError as exc:
+                raise HTTPException(400, str(exc))
+            if new_val != val:
+                changes.append((row, val, new_val))
+        if req.preview:
+            return {"changed": len(changes), "changes": [
+                {"id": r["id"], "name": r["filename"], "before": b, "after": a} for r, b, a in changes]}
+        step = staging.Step(conn, f"Find/replace “{req.find}” in {req.field}")
+        for row, _, new_val in changes:
             staging.stage_edit(conn, row, {req.field: new_val}, step)
-            changed.append(row["id"])
-        res = _finish(conn, step, changed)
-    return {"changed": len(changed), **res}
+        res = _finish(conn, step, [r["id"] for r, _, _ in changes])
+    return {"changed": len(changes), **res}
 
 
 class Reorganize(BaseModel):

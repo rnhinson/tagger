@@ -90,6 +90,7 @@ export interface State {
   total:             number
   selectedIds:       Set<number>
   query:             string
+  queryMode:         '' | 'glob' | 'regex'   // '' = plain word search
   // scan
   scanJob:           ScanJob | null
   scanPollTimer:     ReturnType<typeof setInterval> | null
@@ -136,6 +137,7 @@ export const state: State = {
   total:             0,
   selectedIds:       new Set(),
   query:             '',
+  queryMode:         '',
   scanJob:           null,
   scanPollTimer:     null,
   visibleCols:       loadColPrefs(),

@@ -22,6 +22,7 @@ import { openMbAlbums } from './mbbulk'
 import { openLyrics } from './lyricsdialog'
 import { openDuplicates } from './duplicates'
 import { openLyricsSearch } from './lyricssearch'
+import { openFindReplace } from './findreplace'
 import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect, renderGroupLayouts } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
 import { wirePathDiff } from './pathdiff'
@@ -87,6 +88,7 @@ const lyricsLookupBtn = document.getElementById('lyrics-lookup-btn') as HTMLButt
 const lyricsSearchBtn = document.getElementById('lyrics-search-btn') as HTMLButtonElement
 const selectionCount = document.getElementById('selection-count')!
 const searchEl       = document.getElementById('search') as HTMLInputElement
+const searchModeBtns = [...document.querySelectorAll<HTMLButtonElement>('[data-qmode]')]
 const scanBtn        = document.getElementById('scan-btn') as HTMLButtonElement
 const scanStatusEl   = document.getElementById('scan-status')!
 const colPickerBtn   = document.getElementById('col-picker-btn')!
@@ -700,6 +702,8 @@ function dataThs(): HTMLTableCellElement[] {
   return [...trackTheadRow.querySelectorAll<HTMLTableCellElement>('th')]
 }
 
+const FIXED_COL_WIDTHS: Record<string, number> = { 'col-check': 36, 'col-quality': 24 }
+
 function applyColWidths() {
   const ths = dataThs()
   if (!Object.keys(colWidths).length) {
@@ -710,8 +714,10 @@ function applyColWidths() {
   let total = 0
   for (const th of ths) {
     const key = widthKey(th)
-    // Unsized columns (new, or the check/quality cells) keep their current width.
-    const w = (key && colWidths[key]) || th.getBoundingClientRect().width || 80
+    // The check/quality cells have a set width: measured, they could come back
+    // stretched (auto layout shares spare width out) and stay so, with no grip.
+    // Other unsized columns (new ones) keep their current width.
+    const w = (key && colWidths[key]) || FIXED_COL_WIDTHS[th.className] || th.getBoundingClientRect().width || 80
     th.style.width = `${w}px`
     total += w
   }
@@ -754,6 +760,9 @@ trackTheadRow.addEventListener('dblclick', (e) => {
 
 function renderTracks() {
   gridBeforeRender()
+  // Emptying the table can clamp the scroll (Quality views measure widths
+  // mid-rebuild), so a click on a row would jump the view.
+  const { scrollTop, scrollLeft } = tableWrapEl
   trackTbody.innerHTML = ''
 
   if (!state.tracks.length) {
@@ -833,6 +842,7 @@ function renderTracks() {
     })
     trackTbody.appendChild(tr)
   }
+  tableWrapEl.scrollTop = scrollTop; tableWrapEl.scrollLeft = scrollLeft
   gridAfterRender()
 
   const sa = selectAll()
@@ -1608,7 +1618,7 @@ function pollLyrics(jobId: string) {
       else if (job.status === 'cancelled') toast(`Lyrics lookup cancelled — ${found}`, 'info')
       else toast(`Lyrics lookup ${job.status}: ${job.error ?? ''}`, 'error')
       await refreshReviewButton()
-      await refreshAfterBulk()
+      await refreshAfterEdit()
     } catch { clearInterval(timer) }
   }, 3000)
 }
@@ -1769,9 +1779,13 @@ async function loadTracks() {
     renderTracks()
     renderPagination()
     if (state.viewMode === 'albums' && albumStyle === 'list') renderAlbumList()   // same filters as the tracks
+    setSearchInvalid('')
   } catch (e) {
-    toast(`Failed to load tracks: ${e}`, 'error')
     trackLoading.hidden = true
+    // A regex half typed: say so on the box, not with a toast per keystroke.
+    const bad = /→ 400: .*"(Bad regex: [^"]*)"/.exec(String(e))
+    if (bad) { setSearchInvalid(bad[1]); state.tracks = []; state.total = 0; renderPagination(); return }
+    toast(`Failed to load tracks: ${e}`, 'error')
   }
 }
 
@@ -2126,12 +2140,12 @@ document.getElementById('mb-album-btn')!.addEventListener('click', async () => {
   // More than one album folder: match each, then approve the lot.
   let plan
   try { plan = await api.covers.plan(ids) } catch (e) { toast(`Match: ${errText(e)}`, 'error'); return }
-  if (plan.albums.length > 1) openMbAlbums(plan.albums, refreshAfterBulk)
-  else openMbAlbum(ids, refreshAfterBulk)
+  if (plan.albums.length > 1) openMbAlbums(plan.albums, refreshAfterEdit)
+  else openMbAlbum(ids, refreshAfterEdit)
 })
 document.getElementById('lyrics-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
-  if (ids.length) openLyrics(ids, refreshAfterBulk)
+  if (ids.length) openLyrics(ids, refreshAfterEdit)
 })
 document.getElementById('lyrics-group-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
@@ -2139,7 +2153,7 @@ document.getElementById('lyrics-group-btn')!.addEventListener('click', () => {
 })
 lyricsSearchBtn.addEventListener('click', () => {
   if (state.selectedIds.size !== 1) { toast('Select one track to search its lyrics', 'info'); return }
-  openLyricsSearch([...state.selectedIds][0], undefined, refreshAfterBulk)
+  openLyricsSearch([...state.selectedIds][0], undefined, refreshAfterEdit)
 })
 document.getElementById('covers-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
@@ -2147,11 +2161,11 @@ document.getElementById('covers-btn')!.addEventListener('click', () => {
 })
 document.getElementById('merge-albums-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
-  if (ids.length) openMergeAlbums(ids, refreshAfterBulk)
+  if (ids.length) openMergeAlbums(ids, refreshAfterEdit)
 })
 document.getElementById('parse-names-btn')!.addEventListener('click', () => {
   const ids = [...state.selectedIds]
-  if (ids.length) openParseNames(ids, refreshAfterBulk)
+  if (ids.length) openParseNames(ids, refreshAfterEdit)
 })
 document.getElementById('bulk-rename-btn')!.addEventListener('click', () => {
   const onPage = state.tracks.filter(t => state.selectedIds.has(t.id)).map(t => t.id)
@@ -2277,62 +2291,12 @@ async function autoNumber() {
   try {
     const res = await api.tags.autonumber(ids)
     editToast(res, `numbers on ${res.numbered} track${res.numbered !== 1 ? 's' : ''}`)
-    await refreshAfterBulk()
+    await (res.staged ? refreshAfterStage() : refreshAfterBulk())
   } catch (e) {
     toast(`Auto-number failed: ${e}`, 'error')
   } finally {
     autonumberBtn.disabled = false
   }
-}
-
-const FIND_REPLACE_FIELDS: { key: string; label: string }[] = [
-  { key: 'title', label: 'Title' }, { key: 'artist', label: 'Artist' },
-  { key: 'album', label: 'Album' }, { key: 'album_artist', label: 'Album Artist' },
-  { key: 'genre', label: 'Genre' }, { key: 'composer', label: 'Composer' },
-  { key: 'comment', label: 'Comment' },
-]
-
-function showFindReplace() {
-  const ids = [...state.selectedIds]
-  if (!ids.length) return
-  const overlay = document.createElement('div')
-  overlay.className = 'modal-overlay'
-  overlay.innerHTML = `
-    <form class="modal-card" id="fr-form">
-      <div class="modal-title">Find & replace in ${ids.length} track${ids.length !== 1 ? 's' : ''}</div>
-      <label class="field-label">Field
-        <select id="fr-field">${FIND_REPLACE_FIELDS.map(f => `<option value="${f.key}">${f.label}</option>`).join('')}</select>
-      </label>
-      <label class="field-label">Find<input id="fr-find" type="text" autocomplete="off" /></label>
-      <label class="field-label">Replace with<input id="fr-replace" type="text" autocomplete="off" /></label>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="fr-cancel">Cancel</button>
-        <button type="submit" class="btn btn-primary">Replace</button>
-      </div>
-    </form>
-  `
-  document.body.appendChild(overlay)
-  const close = () => overlay.remove()
-  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
-  overlay.querySelector('#fr-cancel')!.addEventListener('click', close)
-  const findInput = overlay.querySelector<HTMLInputElement>('#fr-find')!
-  findInput.focus()
-  overlay.querySelector<HTMLFormElement>('#fr-form')!.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const field = overlay.querySelector<HTMLSelectElement>('#fr-field')!.value
-    const find = findInput.value
-    const replace = overlay.querySelector<HTMLInputElement>('#fr-replace')!.value
-    if (!find) { findInput.focus(); return }
-    try {
-      const res = await api.tags.findReplace(ids, field, find, replace)
-      if (res.changed) editToast(res, `replacements in ${res.changed} track${res.changed !== 1 ? 's' : ''}`)
-      else toast('No matches found', 'info')
-      close()
-      await refreshAfterBulk()
-    } catch (err) {
-      toast(`Find/replace failed: ${err}`, 'error')
-    }
-  })
 }
 
 // ─── Infer tags from filename ───────────────────────────────────────────────────
@@ -2357,7 +2321,7 @@ async function inferFromFilename() {
 // ─── Export current view as M3U ─────────────────────────────────────────────────
 
 function currentViewParams(): Record<string, string | number> {
-  if (state.query) return { q: state.query }
+  if (state.query) return state.queryMode ? { q: state.query, q_mode: state.queryMode } : { q: state.query }
   if (state.sidebarMode === 'files') {
     return state.selectedDirectory !== null ? { directory: state.selectedDirectory } : {}
   }
@@ -2424,11 +2388,27 @@ async function refreshReviewButton() {
 
 /** Reload everything an edit, write or undo can change. */
 /** After staging only: nothing on disk moved, so leave the tree alone. */
+/** Views filter on the files, so staging changes no rows: show the staged
+ *  values where the rows are, and recalculate the view once they're written. */
 async function refreshAfterStage() {
-  await loadTracks()
+  if (state.sidebarMode === 'quality' && !state.query && state.selectedIssue === 'missing_files') {
+    await loadTracks()
+  } else {
+    try {
+      const res = await api.library.tracks({ ...viewParams(), limit: PAGE_SIZE, offset: state.page * PAGE_SIZE })
+      const fresh = new Map(res.tracks.map(t => [t.id, overlayStaged(t)]))
+      state.tracks = state.tracks.map(t => fresh.get(t.id) ?? t)
+    } catch (e) {
+      toast(`Failed to load tracks: ${errText(e)}`, 'error')
+    }
+    renderTracks()
+  }
   renderEditor()
   await refreshUndoButton()
 }
+
+/** After a bulk tag edit: staged, or written (Settings → Stage changes off). */
+const refreshAfterEdit = () => stageChanges ? refreshAfterStage() : refreshAfterBulk()
 
 async function refreshAfterWrite() {
   state.qualityIssues = null
@@ -2756,7 +2736,7 @@ initGridEdit({
 
 trackTbody.addEventListener('click', async (e) => {
   const search = (e.target as HTMLElement).closest<HTMLElement>('[data-lyrics-search]')
-  if (search) { openLyricsSearch(Number(search.dataset.lyricsSearch), undefined, refreshAfterBulk); return }
+  if (search) { openLyricsSearch(Number(search.dataset.lyricsSearch), undefined, refreshAfterEdit); return }
   const tr = (e.target as HTMLElement).closest<HTMLTableRowElement>('tr')
   if (!tr) return
   const id = parseInt(tr.dataset.id!, 10)
@@ -2879,9 +2859,11 @@ normalizeCaseBtn.addEventListener('click', normalizeCaseBulk)
 removeTracksBtn.addEventListener('click', removeFromLibrary)
 deleteFilesBtn.addEventListener('click', deleteFiles)
 autonumberBtn.addEventListener('click', autoNumber)
-findReplaceBtn.addEventListener('click', showFindReplace)
+findReplaceBtn.addEventListener('click', () => {
+  if (state.selectedIds.size) openFindReplace([...state.selectedIds], res => res.staged ? refreshAfterStage() : refreshAfterBulk())
+})
 document.getElementById('cleanup-btn')!.addEventListener('click', () =>
-  openCleanup([...state.selectedIds], async () => { state.tagValues = new Map(); await refreshAfterBulk() }))
+  openCleanup([...state.selectedIds], async () => { state.tagValues = new Map(); await refreshAfterEdit() }))
 replaygainBtn.addEventListener('click', scanReplayGain)
 inferBtn.addEventListener('click', inferFromFilename)
 exportM3uBtn.addEventListener('click', exportM3u)
@@ -3010,6 +2992,33 @@ const debouncedSearch = debounce(async () => {
 searchEl.addEventListener('input', () => {
   state.query = searchEl.value.trim()
   debouncedSearch()
+})
+
+function setSearchInvalid(msg: string) {
+  searchEl.classList.toggle('search-invalid', !!msg)
+  searchEl.title = msg
+}
+
+function renderSearchMode() {
+  for (const b of searchModeBtns) b.setAttribute('aria-pressed', String(b.dataset.qmode === state.queryMode))
+  searchEl.placeholder = { '': 'Search tracks…', glob: 'Glob: love*, *[Ll]ive*', regex: 'Regex: ^\\d+ |live$' }[state.queryMode]
+  if (state.queryMode !== 'regex') setSearchInvalid('')
+}
+
+try {
+  const m = localStorage.getItem('tagger.queryMode')
+  if (m === 'glob' || m === 'regex') state.queryMode = m
+} catch { /* storage blocked */ }
+renderSearchMode()
+
+// Glob, regex, or neither (click the pressed one again).
+for (const b of searchModeBtns) b.addEventListener('click', () => {
+  const m = b.dataset.qmode as 'glob' | 'regex'
+  state.queryMode = state.queryMode === m ? '' : m
+  try { localStorage.setItem('tagger.queryMode', state.queryMode) } catch { /* storage blocked */ }
+  renderSearchMode()
+  searchEl.focus()
+  if (state.query) debouncedSearch()
 })
 
 scanBtn.addEventListener('click', () => startScan(scanTarget()))
@@ -3486,7 +3495,7 @@ function updateStatusBar() {
   } else {
     where.push('All tracks')
   }
-  if (state.query) where.push(`“${state.query}”`)
+  if (state.query) where.push(state.queryMode === 'regex' ? `/${state.query}/` : state.queryMode === 'glob' ? `glob “${state.query}”` : `“${state.query}”`)
   statusWhere.textContent = where.join(' › ')
   statusWhere.title = statusWhere.textContent
 
@@ -3513,7 +3522,7 @@ statusSel.addEventListener('click', (e) => {
 // The logo: home (all tracks, nothing selected, no search).
 document.getElementById('logo')!.addEventListener('click', async (e) => {
   e.preventDefault()
-  await restoreView({ mode: 'tags', view: 'list', page: 0, q: '', artist: null, album: null, tag: null, dir: null, issue: null })
+  await restoreView({ mode: 'tags', view: 'list', page: 0, q: '', qm: '', artist: null, album: null, tag: null, dir: null, issue: null })
   recordView()
 })
 
@@ -3522,7 +3531,7 @@ document.getElementById('logo')!.addEventListener('click', async (e) => {
 // in the URL hash: Back returns to the previous view, a reload keeps it.
 
 interface View {
-  mode: State['sidebarMode']; view: State['viewMode']; page: number; q: string
+  mode: State['sidebarMode']; view: State['viewMode']; page: number; q: string; qm: State['queryMode']
   artist: string | null; album: string | null; tag: { field: string; value: string } | null
   dir: string | null; issue: string | null
 }
@@ -3533,7 +3542,7 @@ let restoring = false
 function currentView(): View {
   const m = state.sidebarMode
   return {
-    mode: m, view: state.viewMode, page: state.page, q: state.query,
+    mode: m, view: state.viewMode, page: state.page, q: state.query, qm: state.query ? state.queryMode : '',
     artist: m === 'tags' ? state.selectedArtist : null, album: m === 'tags' ? state.selectedAlbum : null,
     tag: m === 'tags' ? state.selectedTag : null,
     dir: m === 'files' ? state.selectedDirectory : null, issue: m === 'quality' ? state.selectedIssue : null,
@@ -3545,6 +3554,7 @@ function viewHash(v: View): string {
   if (v.view !== 'list') p.set('view', v.view)
   if (v.page) p.set('page', String(v.page + 1))
   if (v.q) p.set('q', v.q)
+  if (v.q && v.qm) p.set('qm', v.qm)
   if (v.artist !== null) p.set('artist', v.artist)
   if (v.album !== null) p.set('album', v.album)
   if (v.tag) { p.set('tag', v.tag.field); p.set('value', v.tag.value) }
@@ -3560,6 +3570,7 @@ function parseHash(): View | null {
   return {
     mode, view: p.get('view') === 'albums' ? 'albums' : 'list',
     page: Math.max(0, (parseInt(p.get('page') ?? '1', 10) || 1) - 1), q: p.get('q') ?? '',
+    qm: p.get('qm') === 'glob' || p.get('qm') === 'regex' ? p.get('qm') as State['queryMode'] : '',
     artist: p.get('artist'), album: p.get('album'),
     tag: p.has('tag') ? { field: p.get('tag')!, value: p.get('value') ?? '' } : null,
     dir: p.get('dir'), issue: p.get('issue'),
@@ -3593,6 +3604,7 @@ async function restoreView(v: View) {
   try {
     state.sidebarMode = v.mode; state.viewMode = v.view; state.page = v.page
     state.query = v.q; searchEl.value = v.q
+    if (v.q) { state.queryMode = v.qm; renderSearchMode() }
     state.selectedArtist = v.artist; state.selectedAlbum = v.album; state.selectedTag = v.tag
     state.selectedDirectory = v.dir; state.selectedIssue = v.issue
     state.selectedIds.clear(); albumPicks.clear()
