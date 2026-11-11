@@ -25,6 +25,7 @@ import { openLyricsSearch } from './lyricssearch'
 import { openAssignGroup, renderLyricsGroups, wireLyricsGroups, readLyricsGroups, libraryGroupSelect, renderGroupLayouts } from './lyricsgroups'
 import { renderBackground, renderAbout, wireBackground } from './background'
 import { wirePathDiff } from './pathdiff'
+import { initGridEdit, gridView, gridCell, gridBeforeRender, gridAfterRender, gridActive } from './gridedit'
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -752,6 +753,7 @@ trackTheadRow.addEventListener('dblclick', (e) => {
 })
 
 function renderTracks() {
+  gridBeforeRender()
   trackTbody.innerHTML = ''
 
   if (!state.tracks.length) {
@@ -792,7 +794,7 @@ function renderTracks() {
     const selected = state.selectedIds.has(t.id)
     const tr = document.createElement('tr')
     tr.dataset.id = String(t.id)
-    tr.draggable = true
+    tr.draggable = !gridActive()
     if (selected) tr.classList.add('selected')
     if (t.staged) {
       tr.classList.add('row-staged')
@@ -811,12 +813,14 @@ function renderTracks() {
     let cells = `${qualityCell}<td class="col-check">${check}</td>`
     if (t.read_only) tr.classList.add('row-readonly')
     if (t.missing) tr.classList.add('row-missing')
+    const shown = gridView(t)
     for (const col of visibleCols) {
       if (col.key === 'quality') continue
       const was = t._orig && col.key in t._orig ? t._orig[col.key] : undefined
-      cells += was === undefined
-        ? `<td class="${col.cls}">${col.render(t)}</td>`
-        : `<td class="${col.cls} cell-staged" title="Staged — on file: ${esc(was || '(empty)')}">${col.render(t)}</td>`
+      const g = gridCell(t, col.key)
+      cells += was === undefined || g.cls
+        ? `<td class="${col.cls}${g.cls}"${g.attrs}>${col.render(shown)}</td>`
+        : `<td class="${col.cls} cell-staged"${g.attrs} title="Staged — on file: ${esc(was || '(empty)')}">${col.render(shown)}</td>`
       if (col.key === 'title') cells += extraCells(t)
     }
     if (!afterTitle) cells += extraCells(t)
@@ -829,6 +833,7 @@ function renderTracks() {
     })
     trackTbody.appendChild(tr)
   }
+  gridAfterRender()
 
   const sa = selectAll()
   if (sa) {
@@ -2741,6 +2746,14 @@ async function navigateTo(artist: string, album?: string) {
 // Track table clicks
 let rangeAnchor: number | null = null   // the last track clicked: shift-click ranges start here
 
+initGridEdit({
+  tbody: trackTbody,
+  tracks: () => state.tracks,
+  rerender: renderTracks,
+  staging: () => stageChanges,
+  afterStage: res => res?.staged ? refreshAfterStage() : refreshAfterWrite(),
+})
+
 trackTbody.addEventListener('click', async (e) => {
   const search = (e.target as HTMLElement).closest<HTMLElement>('[data-lyrics-search]')
   if (search) { openLyricsSearch(Number(search.dataset.lyricsSearch), undefined, refreshAfterBulk); return }
@@ -2918,6 +2931,8 @@ const SHORTCUTS: [string, string][] = [
   ['Click', 'Select a track'],
   ['Shift-click', 'Select a range'],
   ['Ctrl/⌘ + S', 'Save tags'],
+  ['✎', 'Edit tags in the table: click a cell or move with Enter, Tab and the arrows'],
+  ['Ctrl/⌘ + Z / ⇧Z', 'Undo / redo an edit in the table'],
   ['Esc', 'Close the editor'],
   ['?', 'Show this help'],
 ]

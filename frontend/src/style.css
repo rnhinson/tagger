@@ -1065,6 +1065,15 @@ body.resizing-pane, body.resizing-pane * { cursor: col-resize !important; user-s
 /* ─── Staged changes ─────────────────────────────────────────────────────────── */
 
 .track-table td.cell-staged { color: var(--staged); font-style: italic; }
+/* Edit mode: tag cells edit in place (gridedit.ts). */
+.grid-edit-btn { font-size: 14px; }
+.grid-edit-btn[aria-pressed="true"]:not(.btn-primary) { background: var(--accent-dim); color: var(--accent); }
+.grid-editing .track-table td[data-edit] { cursor: text; }
+.grid-editing .track-table td[data-edit] .tag-link { pointer-events: none; color: inherit; }
+.track-table td.cell-edited { background: var(--accent-dim); box-shadow: inset 0 -2px 0 var(--accent); font-style: normal; }
+.track-table td.grid-cell-active { padding: 0; outline: 2px solid var(--accent); outline-offset: -2px; }
+.grid-input { width: 100%; height: 100%; min-height: 28px; padding: 0 8px; border: 0; outline: 0;
+  background: var(--surface3); color: var(--text); font: inherit; }
 .track-table tbody tr.row-staged td.col-check { box-shadow: inset 3px 0 0 var(--staged); }
 .track-table tbody tr.row-moving td.col-title::after { content: ' ⇢'; color: var(--staged); font-style: normal; }
 .tag-form .field-staged input, .tag-form .field-staged textarea { border-color: var(--staged); }
