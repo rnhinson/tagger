@@ -251,6 +251,8 @@ export const APP_HTML = `
       <div class="track-pane-toolbar">
         <div class="toolbar-left">
           <span id="track-count" class="track-count"></span>
+          <button id="grid-edit-btn" class="btn btn-ghost btn-sm grid-edit-btn" aria-pressed="false">✎</button>
+          <button id="grid-discard-btn" class="btn btn-ghost btn-sm" hidden>✕</button>
         </div>
         <div class="toolbar-right">
           <div class="filter-group">
