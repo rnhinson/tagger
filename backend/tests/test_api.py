@@ -111,3 +111,19 @@ def test_search_fields_setting(client):
     assert ids("help") == [] and ids("beat yest") == [a]
     client.patch("/api/config", json={"search_fields": ["title", "year"]})          # off the index
     assert ids("1965") == [a] and ids("yest 196") == [a] and ids("beatles") == [] and ids("esterday") == []
+
+
+def test_old_search_index_is_rebuilt(client):
+    from core.database import db, init_db
+    a = _track("Yesterday", "The Beatles", "a.flac")
+    with db() as conn:                                   # an index from before year was in it
+        conn.executescript("""
+            DROP TRIGGER tracks_ai; DROP TRIGGER tracks_ad; DROP TRIGGER tracks_au; DROP TABLE tracks_fts;
+            CREATE VIRTUAL TABLE tracks_fts USING fts5(title, artist, album, album_artist, genre,
+                content=tracks, content_rowid=id);""")
+        conn.execute("UPDATE tracks SET year='1965' WHERE id=?", (a,))
+    init_db()
+    with db() as conn:
+        assert "year" in [r[1] for r in conn.execute("PRAGMA table_info(tracks_fts)")]
+    client.patch("/api/config", json={"search_fields": ["year"]})
+    assert [t["id"] for t in client.get("/api/library/tracks", params={"q": "196"}).json()["tracks"]] == [a]

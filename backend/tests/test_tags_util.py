@@ -61,7 +61,7 @@ def test_m3u_format():
 # ── fts query ──────────────────────────────────────────────────────────────
 
 def test_fts_query_prefix_terms():
-    assert _fts_query("miles blue") == '"miles"* "blue"*'
+    assert _fts_query("miles blue", ["title", "year"]) == '{title year} : "miles"* {title year} : "blue"*'
     assert _fts_query("  ") == ""
 
 

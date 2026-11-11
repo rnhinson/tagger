@@ -175,7 +175,7 @@ export const APP_HTML = `
       <div class="settings-sect" data-sect="search" hidden>
       <div class="settings-section">
         <div class="settings-section-title">Search Box</div>
-        <p class="settings-hint">The tags the search box looks in, in every mode (words, <code>*</code> glob, <code>.*</code> regex). Words search uses the index while you choose only Title, Artist, Album, Album Artist and Genre; any other tag is searched track by track, slower on a big library.</p>
+        <p class="settings-hint">The tags the search box looks in, in every mode (words, <code>*</code> glob, <code>.*</code> regex). Every tag but Lyrics is indexed; with Lyrics on, words search goes track by track, slower on a big library.</p>
         <div id="search-fields" class="search-fields">
           <button type="button" class="tog" data-search-field="title" aria-pressed="false" title="Click to search this tag, or to stop">Title</button>
           <button type="button" class="tog" data-search-field="artist" aria-pressed="false" title="Click to search this tag, or to stop">Artist</button>

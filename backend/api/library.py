@@ -495,7 +495,7 @@ def export_m3u(view: View = Depends(), limit: int = Query(10000, le=100000)):
 
 def _fts_query(q: str, fields: list[str] | None = None) -> str:
     """Convert a user query into an FTS5 prefix-match expression, in only these columns."""
-    cols = "" if not fields or set(fields) == set(search.FTS_FIELDS) else "{" + " ".join(fields) + "} : "
+    cols = "{" + " ".join(fields or search.DEFAULT_FIELDS) + "} : "
     return " ".join(f'{cols}"{t}"*' for t in search.terms(q))
 
 

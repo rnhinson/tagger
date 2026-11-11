@@ -80,6 +80,36 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE staged_steps ADD COLUMN after TEXT")
 
 
+def _fts(conn) -> None:
+    """The search index over search.FTS_FIELDS, kept in step by triggers; rebuilt
+    once when that list changes."""
+    from core.search import FTS_FIELDS
+    have = [r[1] for r in conn.execute("PRAGMA table_info(tracks_fts)")]
+    if have == list(FTS_FIELDS):
+        return
+    cols = ", ".join(FTS_FIELDS)
+    new = ", ".join(f"new.{c}" for c in FTS_FIELDS)
+    old = ", ".join(f"old.{c}" for c in FTS_FIELDS)
+    conn.executescript(f"""
+        DROP TRIGGER IF EXISTS tracks_ai;
+        DROP TRIGGER IF EXISTS tracks_ad;
+        DROP TRIGGER IF EXISTS tracks_au;
+        DROP TABLE IF EXISTS tracks_fts;
+        CREATE VIRTUAL TABLE tracks_fts USING fts5({cols}, content=tracks, content_rowid=id);
+        CREATE TRIGGER tracks_ai AFTER INSERT ON tracks BEGIN
+            INSERT INTO tracks_fts(rowid, {cols}) VALUES (new.id, {new});
+        END;
+        CREATE TRIGGER tracks_ad AFTER DELETE ON tracks BEGIN
+            INSERT INTO tracks_fts(tracks_fts, rowid, {cols}) VALUES ('delete', old.id, {old});
+        END;
+        CREATE TRIGGER tracks_au AFTER UPDATE ON tracks BEGIN
+            INSERT INTO tracks_fts(tracks_fts, rowid, {cols}) VALUES ('delete', old.id, {old});
+            INSERT INTO tracks_fts(rowid, {cols}) VALUES (new.id, {new});
+        END;
+        INSERT INTO tracks_fts(tracks_fts) VALUES ('rebuild');
+    """)
+
+
 def init_db() -> None:
     with db() as conn:
         conn.executescript("""
@@ -124,32 +154,6 @@ def init_db() -> None:
                 ON tracks(album COLLATE NOCASE);
             CREATE INDEX IF NOT EXISTS idx_tracks_album_artist
                 ON tracks(album_artist COLLATE NOCASE);
-
-            CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
-                title, artist, album, album_artist, genre,
-                content=tracks,
-                content_rowid=id
-            );
-
-            CREATE TRIGGER IF NOT EXISTS tracks_ai
-            AFTER INSERT ON tracks BEGIN
-                INSERT INTO tracks_fts(rowid, title, artist, album, album_artist, genre)
-                VALUES (new.id, new.title, new.artist, new.album, new.album_artist, new.genre);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS tracks_ad
-            AFTER DELETE ON tracks BEGIN
-                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, album_artist, genre)
-                VALUES ('delete', old.id, old.title, old.artist, old.album, old.album_artist, old.genre);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS tracks_au
-            AFTER UPDATE ON tracks BEGIN
-                INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, album_artist, genre)
-                VALUES ('delete', old.id, old.title, old.artist, old.album, old.album_artist, old.genre);
-                INSERT INTO tracks_fts(rowid, title, artist, album, album_artist, genre)
-                VALUES (new.id, new.title, new.artist, new.album, new.album_artist, new.genre);
-            END;
 
             CREATE TABLE IF NOT EXISTS scan_jobs (
                 id          TEXT PRIMARY KEY,
@@ -217,3 +221,4 @@ def init_db() -> None:
             );
         """)
         _migrate(conn)
+        _fts(conn)

@@ -7,8 +7,10 @@ MODES = ("glob", "regex")
 # What can be searched; the full-text index covers only FTS_FIELDS.
 SEARCHABLE = ("title", "artist", "album", "album_artist", "year", "genre", "composer", "comment",
               "lyrics", "filename")
-FTS_FIELDS = ("title", "artist", "album", "album_artist", "genre")
-DEFAULT_FIELDS = list(FTS_FIELDS)
+# Indexed (core/database.py rebuilds the index when this changes); lyrics is
+# left out to keep the index small, so searching lyrics goes track by track.
+FTS_FIELDS = ("title", "artist", "album", "album_artist", "genre", "year", "composer", "comment", "filename")
+DEFAULT_FIELDS = ["title", "artist", "album", "album_artist", "genre"]
 
 
 def fields(chosen: list[str]) -> list[str]:
