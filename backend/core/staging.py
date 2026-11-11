@@ -391,12 +391,13 @@ def discard(conn, ids: list[int] | None = None, dirs: list[str] | None = None) -
 
 
 def apply(conn, ids: list[int] | None = None, summary: str | None = None,
-          dirs: list[str] | None = None) -> dict:
+          dirs: list[str] | None = None, progress=None) -> dict:
     """
     Write staged changes to the files. Per track: tags first, then the move;
     then folder moves (whole folders). Everything when ids and dirs are None.
     Each track/folder is committed on its own, so a failure part-way leaves
     everything written recorded and everything unwritten still staged.
+    progress(done, total, name) is called before each track and folder.
     """
     from api.config import get_library_roots
 
@@ -426,6 +427,14 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None,
     dests = Counter(e["new_path"] for e in entries.values() if e["new_path"])
     roots = get_library_roots()
 
+    total, done = len(entries) + len(staged_dirs), 0
+
+    def tick(name: str) -> None:
+        nonlocal done
+        if progress:
+            progress(done, total, name)
+        done += 1
+
     errors: list[dict] = []
     snaps: dict[int, dict] = {}   # first (pre-change) snapshot per track
     vacated: list[Path] = []
@@ -433,6 +442,7 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None,
     created: set[Path] = set()         # destination folders this write made
     for tid, entry in entries.items():
         row = rows.get(tid)
+        tick(row["title"] or row["filename"] if row else "")
         if row is None:
             discard(conn, [tid])
             continue
@@ -492,6 +502,7 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None,
 
     moved_dirs: list[dict] = []
     for src, dst in staged_dirs.items():
+        tick(Path(src).name)
         problem = None
         if not Path(src).is_dir():
             problem = "folder no longer exists"
@@ -521,6 +532,8 @@ def apply(conn, ids: list[int] | None = None, summary: str | None = None,
         moved_dirs.append({"src": src, "dst": dst})
         vacated.append(Path(src).parent)
 
+    if progress:
+        progress(total, total, "")
     moved_files = _clear_leftovers(went, created)
     for d in set(vacated):
         stop = root_for(d, roots) or settings.music_dir

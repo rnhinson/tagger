@@ -668,3 +668,21 @@ def test_find_replace_plain_is_literal_and_case_option(client, lib):
     assert client.post("/api/tags/find-replace", json={**req, "preview": True}).json()["changed"] == 0
     after = client.post("/api/tags/find-replace", json={**req, "case_sensitive": False, "preview": True}).json()
     assert after["changes"][0]["after"] == "$1. beatles"
+
+
+@needs_ffmpeg
+def test_background_write_reports_progress(client, lib):
+    import time
+    ids = [_insert(_mp3(lib / "Shared" / f"{n}.mp3", title="Old"), title="Old") for n in "abc"]
+    for tid in ids:
+        client.patch(f"/api/tags/{tid}", json={"title": "New"})
+    wid = client.post("/api/staged/apply/start", json={}).json()["id"]
+    for _ in range(100):
+        w = client.get(f"/api/staged/apply/{wid}").json()
+        if w["result"] or w["error"]:
+            break
+        time.sleep(0.05)
+    assert w["error"] is None and w["result"]["applied"] == 3
+    assert w["done"] == w["total"] == 3
+    assert read_tags(str(lib / "Shared" / "b.mp3"))["title"] == "New"
+    assert client.get("/api/staged/apply/nope").status_code == 404

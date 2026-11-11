@@ -229,8 +229,24 @@ export async function openReview(onChanged: () => Promise<void>) {
     write.addEventListener('click', async () => {
       write.disabled = discardAll.disabled = true
       write.textContent = 'Writing…'
+      const bar = document.createElement('div')
+      bar.className = 'rv-progress'
+      bar.innerHTML = '<div class="bg-progress"><div style="width:0%"></div></div><div class="ma-dim"></div>'
+      m.footer.prepend(bar)
       try {
-        const res = await api.staged.apply()
+        const { id } = await api.staged.applyStart()
+        let res
+        for (;;) {
+          const w = await api.staged.applyStatus(id)
+          if (w.error) throw new Error(w.error)
+          const pct = w.total ? (w.done / w.total) * 100 : 0
+          bar.querySelector<HTMLElement>('.bg-progress > div')!.style.width = `${pct}%`
+          bar.querySelector<HTMLElement>('.ma-dim')!.textContent = w.total
+            ? `${w.done.toLocaleString()} of ${w.total.toLocaleString()}${w.current ? ' · ' + w.current : ''}` : 'Starting…'
+          if (w.result) { res = w.result; break }
+          await new Promise(r => setTimeout(r, 400))
+        }
+        bar.remove()
         await onChanged()
         failures.clear()
         for (const e of res.errors as WriteError[]) failures.set(e.dir ? `dir:${e.dir}` : `id:${e.id}`, e.error)
@@ -247,7 +263,9 @@ export async function openReview(onChanged: () => Promise<void>) {
           m.close()
         }
       } catch (e) {
-        toast(`Write failed: ${e}`, 'error')
+        bar.remove()
+        toast(`Write failed: ${errText(e)}`, 'error')
+        await onChanged()   // whatever was written before the failure is on file now
         write.disabled = discardAll.disabled = false
         write.textContent = 'Write all'
       }

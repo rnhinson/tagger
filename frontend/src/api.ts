@@ -507,6 +507,11 @@ export const api = {
     apply: (trackIds?: number[]) =>
       request<{ applied: number; folders?: number; errors: WriteError[]; missing?: number; change_id: number | null }>(
         'POST', '/api/staged/apply', { track_ids: trackIds ?? null }),
+    applyStart: () => request<{ id: string }>('POST', '/api/staged/apply/start', {}),
+    applyStatus: (id: string) => request<{
+      done: number; total: number; current: string; error: string | null
+      result: { applied: number; folders?: number; errors: WriteError[]; missing?: number; change_id: number | null } | null
+    }>('GET', `/api/staged/apply/${id}`),
     discard: (trackIds?: number[], dirs?: string[]) =>
       request<{ discarded: number }>('POST', '/api/staged/discard',
         { track_ids: trackIds ?? null, dirs: dirs ?? null }),

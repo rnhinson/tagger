@@ -1,6 +1,8 @@
 """Review, write or discard staged changes (core/staging.py)."""
 from __future__ import annotations
 
+import threading
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -86,6 +88,43 @@ def undo_staged_step():
 def apply_staged(sel: Selection):
     with db() as conn:
         return staging.apply(conn, sel.track_ids, dirs=sel.dirs)
+
+
+# Background writes, polled for progress: a big write outlasts the proxy's
+# request timeout (Pomerium, 30 s). In memory: one pod, one write at a time.
+_writes: dict[str, dict] = {}
+_writes_lock = threading.Lock()
+
+
+@router.post("/apply/start")
+def start_apply(sel: Selection):
+    """Start writing; poll GET /apply/{id} for {done, total, current, result, error}."""
+    with _writes_lock:
+        if any(w["result"] is None and w["error"] is None for w in _writes.values()):
+            raise HTTPException(409, "A write is already running")
+        _writes.clear()
+        wid = uuid.uuid4().hex[:12]
+        w = _writes[wid] = {"done": 0, "total": 0, "current": "", "result": None, "error": None}
+
+    def run():
+        def progress(done, total, name):
+            w.update(done=done, total=total, current=name)
+        try:
+            with db() as conn:
+                w["result"] = staging.apply(conn, sel.track_ids, dirs=sel.dirs, progress=progress)
+        except Exception as exc:
+            w["error"] = str(exc) or type(exc).__name__
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"id": wid}
+
+
+@router.get("/apply/{wid}")
+def apply_status(wid: str):
+    w = _writes.get(wid)
+    if w is None:
+        raise HTTPException(404, "No such write (the server restarted?)")
+    return w
 
 
 @router.post("/discard")
