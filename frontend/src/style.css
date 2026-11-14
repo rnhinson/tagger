@@ -1538,6 +1538,10 @@ button.scan-status[hidden] { display: none; }
   white-space: nowrap;
 }
 .status-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status-view .btn-link { font-size: 13px; padding: 0 4px; }
+.status-view .btn-link:disabled { opacity: .35; cursor: default; }
+.status-top { width: 7ch; font-size: 12px; padding: 0 2px; }
+.status-size { font-size: 12px; padding: 0 2px; }
 .status-sel { color: var(--accent); }
 .status-sel:empty { display: none; }
 .status-sel .btn-link { font-size: 12px; margin-left: 6px; }

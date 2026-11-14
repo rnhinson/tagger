@@ -1,6 +1,19 @@
 import { Track, Artist, Album, ScanJob, LookupResult, IssueCount, TagValue } from './api'
 
-export const PAGE_SIZE = 100
+export const PAGE_SIZES = [50, 100, 250, 500, 1000]
+const PAGE_SIZE_KEY = 'tagger.pageSize'
+
+function loadPageSize(): number {
+  try {
+    const n = Number(localStorage.getItem(PAGE_SIZE_KEY))
+    if (PAGE_SIZES.includes(n)) return n
+  } catch { /* ignore */ }
+  return 100
+}
+
+export function savePageSize(n: number) {
+  try { localStorage.setItem(PAGE_SIZE_KEY, String(n)) } catch { /* ignore */ }
+}
 export const DEFAULT_COLS = ['quality', 'title', 'artist', 'album', 'year', 'track_number', 'format', 'duration']
 const COLS_KEY = 'tagger_visible_cols'
 
@@ -117,8 +130,9 @@ export interface State {
   // configured music dirs (for source column) and library roots (folder moves)
   musicDirs:         string[]
   libraryRoots:      string[]
-  // pagination
-  page:              number
+  // pagination: the top row shown (0-based) and rows per page
+  offset:            number
+  pageSize:          number
 }
 
 export const state: State = {
@@ -154,5 +168,6 @@ export const state: State = {
   filterQuality:     '',
   musicDirs:         [],
   libraryRoots:      [],
-  page:              0,
+  offset:            0,
+  pageSize:          loadPageSize(),
 }

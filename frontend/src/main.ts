@@ -2,7 +2,7 @@ import './style.css'
 import { api, Track, Artist, Album, AlbumRow, LookupResult, AppSettings, setUnauthorizedHandler, onSessionExpired } from './api'
 import { toast } from './toast'
 import { esc, fmtDuration, debounce } from './util'
-import { state, PAGE_SIZE, TAG_FIELDS, DirNode, State, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
+import { state, PAGE_SIZES, savePageSize, TAG_FIELDS, DirNode, State, saveColPrefs, BROWSE_TAGS, loadColWidths, saveColWidths, saveColOrder } from './state'
 import { COL_DEFS, orderedCols, viewCols, sourcePath } from './columns'
 import {
   trackQuality, qualityTitle, QUALITY_ISSUES,
@@ -505,7 +505,7 @@ async function renderAlbumList() {
     state.sidebarMode = 'files'
     state.selectedArtist = null; state.selectedAlbum = null; state.selectedTag = null; state.query = ''; searchEl.value = ''
     state.selectedDirectory = r.directory
-    state.selectedIds.clear(); state.page = 0
+    state.selectedIds.clear(); state.offset = 0
     if (!state.rootNode) await loadTree()
     renderSidebarTabs()
     renderFilesPanel()
@@ -632,7 +632,7 @@ function renderColHeaders() {
         state.sortDir = 'asc'
       }
       renderColHeaders()
-      state.page = 0
+      state.offset = 0
       loadTracks()
     })
     trackTheadRow.appendChild(th)
@@ -880,23 +880,29 @@ function updateBulkBar() {
 
 const paginationEl = document.getElementById('pagination')!
 
+const paged = () => state.total > state.pageSize || state.offset > 0
+
+async function movePage(dir: -1 | 1) {
+  state.offset = Math.max(0, state.offset + dir * state.pageSize)
+  await loadTracks()
+}
+
 function renderPagination() {
-  const totalPages = Math.ceil(state.total / PAGE_SIZE)
-  if (totalPages <= 1) { paginationEl.hidden = true; return }
+  if (!paged()) { paginationEl.hidden = true; return }
   paginationEl.hidden = false
-  const start = state.page * PAGE_SIZE + 1
-  const end   = Math.min((state.page + 1) * PAGE_SIZE, state.total)
+  const start = state.offset + 1
+  const end   = Math.min(state.offset + state.pageSize, state.total)
   paginationEl.innerHTML = `
-    <button class="btn btn-ghost btn-sm" id="page-prev" ${state.page === 0 ? 'disabled' : ''}>← Prev</button>
+    <button class="btn btn-ghost btn-sm" id="page-prev" ${state.offset === 0 ? 'disabled' : ''}>← Prev</button>
     <span class="page-info">${start.toLocaleString()}–${end.toLocaleString()} of ${state.total.toLocaleString()}</span>
-    <button class="btn btn-ghost btn-sm" id="page-next" ${state.page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
+    <button class="btn btn-ghost btn-sm" id="page-next" ${end >= state.total ? 'disabled' : ''}>Next →</button>
   `
   document.getElementById('page-prev')!.addEventListener('click', async () => {
-    state.page--; await loadTracks()
+    await movePage(-1)
     paginationEl.scrollIntoView({ block: 'nearest' })
   })
   document.getElementById('page-next')!.addEventListener('click', async () => {
-    state.page++; await loadTracks()
+    await movePage(1)
     paginationEl.scrollIntoView({ block: 'nearest' })
   })
 }
@@ -1762,8 +1768,6 @@ async function loadTracks() {
   trackTbody.innerHTML = ''
   trackEmpty.hidden = true
 
-  const offset = state.page * PAGE_SIZE
-
   try {
     let result
     if (state.sidebarMode === 'quality' && !state.query && !state.selectedIssue) {
@@ -1772,7 +1776,12 @@ async function loadTracks() {
     if (state.sidebarMode === 'quality' && !state.query && state.selectedIssue === 'missing_files') {
       result = await api.library.dead()
     } else {
-      result = await api.library.tracks({ ...viewParams(), limit: PAGE_SIZE, offset })
+      result = await api.library.tracks({ ...viewParams(), limit: state.pageSize, offset: state.offset })
+      // Past the end (the view shrank): back to its last page.
+      if (!result.tracks.length && state.offset > 0 && result.total > 0) {
+        state.offset = Math.floor((result.total - 1) / state.pageSize) * state.pageSize
+        result = await api.library.tracks({ ...viewParams(), limit: state.pageSize, offset: state.offset })
+      }
     }
     state.tracks = result.tracks.map(overlayStaged)
     state.total  = result.total
@@ -2395,7 +2404,7 @@ async function refreshAfterStage() {
     await loadTracks()
   } else {
     try {
-      const res = await api.library.tracks({ ...viewParams(), limit: PAGE_SIZE, offset: state.page * PAGE_SIZE })
+      const res = await api.library.tracks({ ...viewParams(), limit: state.pageSize, offset: state.offset })
       const fresh = new Map(res.tracks.map(t => [t.id, overlayStaged(t)]))
       state.tracks = state.tracks.map(t => fresh.get(t.id) ?? t)
     } catch (e) {
@@ -2600,7 +2609,7 @@ document.querySelector('.sidebar-tabs')!.addEventListener('click', async (e) => 
     return
   }
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   renderSidebarTabs()
   await loadTracks()
   renderEditor()
@@ -2613,7 +2622,7 @@ async function selectInTags(apply: () => void) {
   state.selectedTag    = null
   apply()
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   renderTagsPanel()
   await loadTracks()
   renderEditor()
@@ -2690,7 +2699,7 @@ dirTreeEl.addEventListener('click', async (e) => {
 
   state.selectedDirectory = path === '' ? null : path
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   renderFilesPanel()
   await loadTracks()
   renderEditor()
@@ -2715,7 +2724,7 @@ async function navigateTo(artist: string, album?: string) {
   state.expandedTags.add('artist')
   if (!state.tagValues.has('artist')) await loadTagValues('artist')
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   if (artist) state.expandedArtists.add(artist)
   renderSidebarTabs()
   renderTagsPanel()
@@ -2749,6 +2758,11 @@ trackTbody.addEventListener('click', async (e) => {
     const only = state.selectedIds.size === 1 && state.selectedIds.has(id)
     state.selectedIds.clear()
     if (!only) state.selectedIds.add(id)
+  } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+    // ⌘/Ctrl-click: add or remove this one track, keeping the rest.
+    for (const i of readOnly) state.selectedIds.delete(i)
+    state.selectedIds.has(id) ? state.selectedIds.delete(id) : state.selectedIds.add(id)
+    rangeAnchor = id
   } else if (e.shiftKey && rangeAnchor !== null && state.selectedIds.size > 0) {
     // From the last clicked track to this one -- on another page too: then
     // the range comes from the whole view, in its order.
@@ -2762,6 +2776,7 @@ trackTbody.addEventListener('click', async (e) => {
       ids.slice(lo, hi + 1).forEach(i => { if (!readOnly.has(i)) state.selectedIds.add(i) })
     }
     for (const i of readOnly) state.selectedIds.delete(i)
+    rangeAnchor = id
   } else if (isCheckbox && cb) {
     for (const i of readOnly) state.selectedIds.delete(i)
     cb.checked ? state.selectedIds.add(id) : state.selectedIds.delete(id)
@@ -2872,8 +2887,8 @@ reviewBtn.addEventListener('click', () => openReview(refreshAfterWrite))
 document.getElementById('history-btn')!.addEventListener('click', () => openHistory(refreshAfterWrite))
 
 // Filter selects
-filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; state.page = 0; loadTracks() })
-filterFormatEl.addEventListener('change',  () => { state.filterFormat  = filterFormatEl.value;  state.page = 0; loadTracks() })
+filterQualityEl.addEventListener('change', () => { state.filterQuality = filterQualityEl.value; state.offset = 0; loadTracks() })
+filterFormatEl.addEventListener('change',  () => { state.filterFormat  = filterFormatEl.value;  state.offset = 0; loadTracks() })
 
 
 // Keyboard shortcuts
@@ -2947,7 +2962,7 @@ qualityListEl.addEventListener('click', async (e) => {
   // The same album in several folders: the album list shows them side by side.
   if (state.selectedIssue === 'duplicate_albums') { state.viewMode = 'albums'; albumStyle = 'list'; renderViewMode() }
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   await renderQualityPanel()
   await loadTracks()
   renderEditor()
@@ -2984,7 +2999,7 @@ document.getElementById('revert-btn')!.addEventListener('click', () => { fillEdi
 
 const debouncedSearch = debounce(async () => {
   state.selectedIds.clear()
-  state.page = 0
+  state.offset = 0
   await loadTracks()
   renderEditor()
 }, 300)
@@ -3489,7 +3504,18 @@ function showLogin() {
 // ─── Status bar ───────────────────────────────────────────────────────────────
 
 const statusWhere = document.getElementById('status-where')!
-const statusView  = document.getElementById('status-view')!
+const statusCount   = document.getElementById('status-count')!
+const statusPaging  = document.getElementById('status-paging')!
+const statusTop     = document.getElementById('status-top') as HTMLInputElement
+const statusEnd     = document.getElementById('status-end')!
+const statusTotal   = document.getElementById('status-total')!
+const statusPage    = document.getElementById('status-page')!
+const statusPages   = document.getElementById('status-pages')!
+const statusPrev    = document.getElementById('status-prev') as HTMLButtonElement
+const statusNext    = document.getElementById('status-next') as HTMLButtonElement
+const statusSizeWrap = document.getElementById('status-size-wrap')!
+const statusSize    = document.getElementById('status-size') as HTMLSelectElement
+statusSize.innerHTML = PAGE_SIZES.map(n => `<option value="${n}">${n}</option>`).join('')
 const statusSel   = document.getElementById('status-sel')!
 const plural = (n: number, w: string) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`
 
@@ -3512,10 +3538,21 @@ function updateStatusBar() {
   statusWhere.textContent = where.join(' › ')
   statusWhere.title = statusWhere.textContent
 
-  const from = state.page * PAGE_SIZE
-  statusView.textContent = state.total > state.tracks.length
-    ? `${(from + 1).toLocaleString()}–${(from + state.tracks.length).toLocaleString()} of ${plural(state.total, 'track')}`
-    : plural(state.total, 'track')
+  const p = paged()
+  statusCount.textContent = p ? '' : plural(state.total, 'track')
+  statusPaging.hidden = !p
+  statusSizeWrap.hidden = state.total <= PAGE_SIZES[0]
+  statusSize.value = String(state.pageSize)
+  if (p) {
+    if (document.activeElement !== statusTop) statusTop.value = String(state.offset + 1)
+    statusTop.max = String(state.total)
+    statusEnd.textContent = (state.offset + state.tracks.length).toLocaleString()
+    statusTotal.textContent = plural(state.total, 'track')
+    statusPage.textContent = (Math.floor(state.offset / state.pageSize) + 1).toLocaleString()
+    statusPages.textContent = Math.ceil(state.total / state.pageSize).toLocaleString()
+    statusPrev.disabled = state.offset === 0
+    statusNext.disabled = state.offset + state.pageSize >= state.total
+  }
 
   // Albums: the picked ones, else the folders of the selected tracks when they're all loaded.
   const n = state.selectedIds.size
@@ -3526,6 +3563,20 @@ function updateStatusBar() {
     : ''
 }
 
+statusPrev.addEventListener('click', () => movePage(-1))
+statusNext.addEventListener('click', () => movePage(1))
+statusTop.addEventListener('change', () => {
+  const row = parseInt(statusTop.value, 10)
+  if (!(row >= 1)) { statusTop.value = String(state.offset + 1); return }
+  state.offset = Math.min(row, Math.max(1, state.total)) - 1
+  loadTracks()
+})
+statusSize.addEventListener('change', () => {
+  state.pageSize = Number(statusSize.value)
+  savePageSize(state.pageSize)
+  loadTracks()
+})
+
 statusSel.addEventListener('click', (e) => {
   if (!(e.target as HTMLElement).closest('#status-clear')) return
   state.selectedIds.clear(); albumPicks.clear()
@@ -3535,7 +3586,7 @@ statusSel.addEventListener('click', (e) => {
 // The logo: home (all tracks, nothing selected, no search).
 document.getElementById('logo')!.addEventListener('click', async (e) => {
   e.preventDefault()
-  await restoreView({ mode: 'tags', view: 'list', page: 0, q: '', qm: '', artist: null, album: null, tag: null, dir: null, issue: null })
+  await restoreView({ mode: 'tags', view: 'list', offset: 0, q: '', qm: '', artist: null, album: null, tag: null, dir: null, issue: null })
   recordView()
 })
 
@@ -3544,7 +3595,7 @@ document.getElementById('logo')!.addEventListener('click', async (e) => {
 // in the URL hash: Back returns to the previous view, a reload keeps it.
 
 interface View {
-  mode: State['sidebarMode']; view: State['viewMode']; page: number; q: string; qm: State['queryMode']
+  mode: State['sidebarMode']; view: State['viewMode']; offset: number; q: string; qm: State['queryMode']
   artist: string | null; album: string | null; tag: { field: string; value: string } | null
   dir: string | null; issue: string | null
 }
@@ -3555,7 +3606,7 @@ let restoring = false
 function currentView(): View {
   const m = state.sidebarMode
   return {
-    mode: m, view: state.viewMode, page: state.page, q: state.query, qm: state.query ? state.queryMode : '',
+    mode: m, view: state.viewMode, offset: state.offset, q: state.query, qm: state.query ? state.queryMode : '',
     artist: m === 'tags' ? state.selectedArtist : null, album: m === 'tags' ? state.selectedAlbum : null,
     tag: m === 'tags' ? state.selectedTag : null,
     dir: m === 'files' ? state.selectedDirectory : null, issue: m === 'quality' ? state.selectedIssue : null,
@@ -3565,7 +3616,7 @@ function currentView(): View {
 function viewHash(v: View): string {
   const p = new URLSearchParams({ mode: v.mode })
   if (v.view !== 'list') p.set('view', v.view)
-  if (v.page) p.set('page', String(v.page + 1))
+  if (v.offset) p.set('row', String(v.offset + 1))
   if (v.q) p.set('q', v.q)
   if (v.q && v.qm) p.set('qm', v.qm)
   if (v.artist !== null) p.set('artist', v.artist)
@@ -3576,13 +3627,19 @@ function viewHash(v: View): string {
   return '#' + p.toString()
 }
 
+/** The top row from the hash; old links carry a page number instead. */
+function hashOffset(p: URLSearchParams): number {
+  if (p.has('row')) return Math.max(0, (parseInt(p.get('row')!, 10) || 1) - 1)
+  return Math.max(0, (parseInt(p.get('page') ?? '1', 10) || 1) - 1) * state.pageSize
+}
+
 function parseHash(): View | null {
   const p = new URLSearchParams(location.hash.slice(1))
   const mode = p.get('mode')
   if (mode !== 'tags' && mode !== 'files' && mode !== 'quality') return null
   return {
     mode, view: p.get('view') === 'albums' ? 'albums' : 'list',
-    page: Math.max(0, (parseInt(p.get('page') ?? '1', 10) || 1) - 1), q: p.get('q') ?? '',
+    offset: hashOffset(p), q: p.get('q') ?? '',
     qm: p.get('qm') === 'glob' || p.get('qm') === 'regex' ? p.get('qm') as State['queryMode'] : '',
     artist: p.get('artist'), album: p.get('album'),
     tag: p.has('tag') ? { field: p.get('tag')!, value: p.get('value') ?? '' } : null,
@@ -3615,7 +3672,7 @@ async function revealDir(dir: string) {
 async function restoreView(v: View) {
   restoring = true
   try {
-    state.sidebarMode = v.mode; state.viewMode = v.view; state.page = v.page
+    state.sidebarMode = v.mode; state.viewMode = v.view; state.offset = v.offset
     state.query = v.q; searchEl.value = v.q
     if (v.q) { state.queryMode = v.qm; renderSearchMode() }
     state.selectedArtist = v.artist; state.selectedAlbum = v.album; state.selectedTag = v.tag

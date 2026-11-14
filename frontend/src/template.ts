@@ -403,7 +403,17 @@ export const APP_HTML = `
 
   <footer id="statusbar" class="statusbar">
     <span id="status-where" class="status-where"></span>
-    <span id="status-view" class="status-view"></span>
+    <span id="status-view" class="status-view">
+      <span id="status-count"></span>
+      <span id="status-paging" hidden>
+        <button type="button" id="status-prev" class="btn btn-link" title="Previous page">‹</button>
+        rows <input id="status-top" class="status-top" type="number" min="1" title="The top row: type a row number to start the page there">–<span id="status-end"></span>
+        of <span id="status-total"></span>
+        <button type="button" id="status-next" class="btn btn-link" title="Next page">›</button>
+        · page <span id="status-page"></span> of <span id="status-pages"></span>
+      </span>
+      <span id="status-size-wrap" hidden>· <select id="status-size" class="status-size" title="Rows per page"></select> per page</span>
+    </span>
     <span id="status-sel" class="status-sel"></span>
   </footer>
 `

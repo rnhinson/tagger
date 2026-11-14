@@ -391,7 +391,7 @@ def undo(change_id: int):
 @router.get("/tracks")
 def list_tracks(
     view: View = Depends(),
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, le=1000),
     offset: int = 0,
 ):
     where, params, order = _track_filters(view)
